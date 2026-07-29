@@ -1,0 +1,112 @@
+services:
+  # ── PostgreSQL — replaces Cloudflare D1 ──────────────────────────────────────
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: deskapi
+      POSTGRES_USER: deskapi
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?required}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "127.0.0.1:5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U deskapi"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ── MinIO — replaces Cloudflare R2 ───────────────────────────────────────────
+  minio:
+    image: minio/minio:latest
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:?required}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?required}
+    volumes:
+      - minio_data:/data
+    ports:
+      - "127.0.0.1:9000:9000"
+      - "127.0.0.1:9001:9001"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+
+  # ── desk-api — Hono Worker running as a Node.js server ───────────────────────
+  # Requires: src/server.ts implemented (see docs/FUTURE-MIGRATION.md)
+  #           PostgreSQL adapter implemented (see docs/POSTGRES-ADAPTER-PLAN.md)
+  desk-api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    environment:
+      PORT: "8787"
+      ENVIRONMENT: production
+      DATABASE_URL: postgres://deskapi:${POSTGRES_PASSWORD}@postgres:5432/deskapi
+      MINIO_ENDPOINT: http://minio:9000
+      MINIO_ACCESS_KEY_ID: ${MINIO_ROOT_USER}
+      MINIO_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD}
+      MINIO_BUCKET: desk-api-storage
+      SESSION_DURATION_HOURS: "720"
+      RESET_TOKEN_DURATION_MINUTES: "60"
+      OPENAI_API_KEY: ${OPENAI_API_KEY:?required}
+      OPENAI_MODEL: ${OPENAI_MODEL:-gpt-4.1-mini}
+      GOOGLE_PLACES_API_KEY: ${GOOGLE_PLACES_API_KEY:?required}
+      COMPLIANCE_OS_URL: ${COMPLIANCE_OS_URL:?required}
+      REGISTRY_API_URL: ${REGISTRY_API_URL:?required}
+      COMPLIANCE_OS_API_KEY: ${COMPLIANCE_OS_API_KEY:?required}
+      REGISTRY_API_SECRET: ${REGISTRY_API_SECRET:?required}
+      CORS_ORIGINS: ${CORS_ORIGINS:-https://deskbusiness.co,https://www.deskbusiness.co,https://app.deskbusiness.co}
+    ports:
+      - "127.0.0.1:8787:8787"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8787/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  # ── compliance-os ─────────────────────────────────────────────────────────────
+  compliance-os:
+    build:
+      context: ../compliance-os
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: postgres://deskapi:${POSTGRES_PASSWORD}@postgres:5432/deskapi
+      PORT: "3001"
+    ports:
+      - "127.0.0.1:3001:3001"
+
+  # ── registry-api ──────────────────────────────────────────────────────────────
+  registry-api:
+    build:
+      context: ../registry-api
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: postgres://deskapi:${POSTGRES_PASSWORD}@postgres:5432/deskapi
+      PORT: "3002"
+    ports:
+      - "127.0.0.1:3002:3002"
+
+volumes:
+  postgres_data:
+  minio_data:

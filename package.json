@@ -1,0 +1,26 @@
+{
+  "name": "desk-api",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "build": "tsc --noEmit",
+    "typecheck": "tsc --noEmit",
+    "migrate:local": "wrangler d1 execute desk-api-db --local --file=migrations/001_initial_schema.sql",
+    "migrate:prod": "wrangler d1 execute desk-api-db --remote --file=migrations/001_initial_schema.sql",
+    "db:studio:local": "wrangler d1 studio desk-api-db --local",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "dependencies": {
+    "hono": "^4.7.0"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^5.20260722.0",
+    "typescript": "^5.7.3",
+    "vitest": "^4.0.0",
+    "wrangler": "^4.14.0"
+  }
+}
