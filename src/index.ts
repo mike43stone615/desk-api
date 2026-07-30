@@ -102,7 +102,7 @@ app.onError((err, c) => {
   return handleError(err, c);
 });
 
-app.notFound((c) => c.json({ error: 'Not found.' }, 404));
+app.notFound((c) => c.env.ASSETS.fetch(c.req.raw));
 
 export default {
   fetch: app.fetch.bind(app),
@@ -115,4 +115,5 @@ export default {
     console.log(JSON.stringify({ level: 'info', event: 'cron_session_cleanup', ts: new Date().toISOString() }));
   },
 };
+
 

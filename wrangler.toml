@@ -68,4 +68,6 @@ crons = ["0 2 * * *"]
 directory = "../desk_business/build/web"
 binding = "ASSETS"
 not_found_handling = "single-page-application"
-run_worker_first = ["/auth/*", "/functions/v1/*", "/integrations/*", "/health", "/readiness"]
+run_worker_first = true
+
+
