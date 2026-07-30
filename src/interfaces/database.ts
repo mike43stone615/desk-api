@@ -2,6 +2,8 @@ export interface User {
   id: string;
   email: string;
   passwordHash: string;
+  firstName: string;
+  lastName: string;
   emailConfirmedAt: string | null;
   createdAt: string;
   updatedAt: string;
@@ -37,7 +39,7 @@ export interface DatabaseRepository {
   // Users
   findUserById(id: string): Promise<User | null>;
   findUserByEmail(email: string): Promise<User | null>;
-  createUser(id: string, email: string, passwordHash: string): Promise<User>;
+  createUser(id: string, email: string, passwordHash: string, firstName: string, lastName: string): Promise<User>;
   updateUserPassword(userId: string, passwordHash: string): Promise<void>;
   markUserEmailConfirmed(userId: string, confirmedAt: string): Promise<void>;
 

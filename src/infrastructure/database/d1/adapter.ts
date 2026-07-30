@@ -7,7 +7,7 @@ export class D1DatabaseAdapter implements DatabaseRepository {
 
   async findUserById(id: string): Promise<User | null> {
     const row = await this.db
-      .prepare('SELECT id, email, password_hash, email_confirmed_at, created_at, updated_at FROM users WHERE id = ?')
+      .prepare('SELECT id, email, password_hash, first_name, last_name, email_confirmed_at, created_at, updated_at FROM users WHERE id = ?')
       .bind(id)
       .first<UserRow>();
     return row ? mapUser(row) : null;
@@ -15,16 +15,16 @@ export class D1DatabaseAdapter implements DatabaseRepository {
 
   async findUserByEmail(email: string): Promise<User | null> {
     const row = await this.db
-      .prepare('SELECT id, email, password_hash, email_confirmed_at, created_at, updated_at FROM users WHERE email = ?')
+      .prepare('SELECT id, email, password_hash, first_name, last_name, email_confirmed_at, created_at, updated_at FROM users WHERE email = ?')
       .bind(normalizeEmail(email))
       .first<UserRow>();
     return row ? mapUser(row) : null;
   }
 
-  async createUser(id: string, email: string, passwordHash: string): Promise<User> {
+  async createUser(id: string, email: string, passwordHash: string, firstName: string, lastName: string): Promise<User> {
     await this.db
-      .prepare('INSERT INTO users (id, email, password_hash) VALUES (?, ?, ?)')
-      .bind(id, normalizeEmail(email), passwordHash)
+      .prepare('INSERT INTO users (id, email, password_hash, first_name, last_name) VALUES (?, ?, ?, ?, ?)')
+      .bind(id, normalizeEmail(email), passwordHash, firstName.trim(), lastName.trim())
       .run();
     const user = await this.findUserById(id);
     if (!user) throw new Error('User not found after insert.');
@@ -130,6 +130,8 @@ interface UserRow {
   id: string;
   email: string;
   password_hash: string;
+  first_name: string;
+  last_name: string;
   email_confirmed_at: string | null;
   created_at: string;
   updated_at: string;
@@ -166,6 +168,8 @@ function mapUser(r: UserRow): User {
     id: r.id,
     email: r.email,
     passwordHash: r.password_hash,
+    firstName: r.first_name,
+    lastName: r.last_name,
     emailConfirmedAt: r.email_confirmed_at,
     createdAt: r.created_at,
     updatedAt: r.updated_at,

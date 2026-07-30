@@ -10,7 +10,13 @@ export async function sendPasswordResetEmail(
   await sendEmail(config, {
     to,
     subject: 'Reset your Desk Business password',
-    html: passwordResetHtml(resetUrl, config.resetTokenDurationMinutes),
+    html: themedEmailHtml({
+      title: 'Reset your password',
+      body: 'We received a request to reset the password for your Desk Business account. Choose a new password with the secure link below.',
+      actionLabel: 'Reset password',
+      actionUrl: resetUrl,
+      note: `This link expires in ${config.resetTokenDurationMinutes} minutes. If you did not request a password reset, you can safely ignore this email.`,
+    }),
     requestId,
     skippedEvent: 'password_reset_email_skipped',
     failedEvent: 'password_reset_email_failed',
@@ -28,7 +34,13 @@ export async function sendEmailConfirmationEmail(
   await sendEmail(config, {
     to,
     subject: 'Confirm your Desk Business email',
-    html: emailConfirmationHtml(confirmationUrl),
+    html: themedEmailHtml({
+      title: 'Confirm your email',
+      body: 'Welcome to Desk Business. Confirm this email address before opening your business workspace.',
+      actionLabel: 'Confirm email',
+      actionUrl: confirmationUrl,
+      note: 'If you did not create a Desk Business account, you can safely ignore this email.',
+    }),
     requestId,
     skippedEvent: 'email_confirmation_skipped',
     failedEvent: 'email_confirmation_failed',
@@ -44,6 +56,14 @@ interface EmailRequest {
   skippedEvent: string;
   failedEvent: string;
   sentEvent: string;
+}
+
+interface ThemedEmailContent {
+  title: string;
+  body: string;
+  actionLabel: string;
+  actionUrl: string;
+  note: string;
 }
 
 async function sendEmail(config: AppConfig, request: EmailRequest): Promise<void> {
@@ -90,54 +110,42 @@ async function sendEmail(config: AppConfig, request: EmailRequest): Promise<void
   }));
 }
 
-function passwordResetHtml(resetUrl: string, expiresMinutes: number): string {
+function themedEmailHtml(content: ThemedEmailContent): string {
   return `<!DOCTYPE html>
 <html lang="en">
 <head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head>
-<body style="font-family:sans-serif;background:#f5f5f5;margin:0;padding:32px 16px">
-  <table width="100%" cellpadding="0" cellspacing="0" style="max-width:480px;margin:0 auto">
-    <tr><td style="background:#ffffff;border-radius:8px;padding:40px;border:1px solid #e0e0e0">
-      <p style="font-size:22px;font-weight:600;margin:0 0 8px">Reset your password</p>
-      <p style="color:#555;margin:0 0 24px">
-        We received a request to reset the password for your Desk Business account.
-        Click the button below to choose a new password.
-      </p>
-      <a href="${resetUrl}"
-         style="display:inline-block;background:#1a56db;color:#ffffff;text-decoration:none;
-                padding:12px 28px;border-radius:6px;font-weight:600;font-size:15px">
-        Reset password
-      </a>
-      <p style="color:#888;font-size:13px;margin:24px 0 0">
-        This link expires in ${expiresMinutes} minutes.
-        If you did not request a password reset, you can safely ignore this email.
-      </p>
-    </td></tr>
+<body style="margin:0;padding:0;background:#070D1A;font-family:Inter,Segoe UI,Arial,sans-serif;color:#FFFFFF">
+  <table width="100%" cellpadding="0" cellspacing="0" role="presentation" style="background:#070D1A;padding:32px 16px">
+    <tr>
+      <td align="center">
+        <table width="100%" cellpadding="0" cellspacing="0" role="presentation" style="max-width:520px">
+          <tr>
+            <td style="padding:0 0 16px;color:#CBD5E1;font-size:14px;font-weight:700;letter-spacing:0">
+              <span style="display:inline-block;width:28px;height:28px;line-height:28px;text-align:center;border-radius:8px;background:#263B82F6;color:#60A5FA;margin-right:10px;font-weight:800">D</span>
+              Desk Business
+            </td>
+          </tr>
+          <tr>
+            <td style="background:#0E1626;border:1px solid #22304A;border-radius:18px;padding:32px">
+              <h1 style="margin:0 0 12px;color:#FFFFFF;font-size:24px;line-height:1.2;font-weight:800">${escapeHtml(content.title)}</h1>
+              <p style="margin:0 0 24px;color:#CBD5E1;font-size:15px;line-height:1.55;font-weight:500">${escapeHtml(content.body)}</p>
+              <a href="${content.actionUrl}" style="display:inline-block;background:#3B82F6;color:#FFFFFF;text-decoration:none;font-weight:800;font-size:15px;padding:13px 20px;border-radius:12px">${escapeHtml(content.actionLabel)}</a>
+              <p style="margin:24px 0 0;color:#94A3B8;font-size:13px;line-height:1.5;font-weight:500">${escapeHtml(content.note)}</p>
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>
   </table>
 </body>
 </html>`;
 }
 
-function emailConfirmationHtml(confirmationUrl: string): string {
-  return `<!DOCTYPE html>
-<html lang="en">
-<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head>
-<body style="font-family:sans-serif;background:#f5f5f5;margin:0;padding:32px 16px">
-  <table width="100%" cellpadding="0" cellspacing="0" style="max-width:480px;margin:0 auto">
-    <tr><td style="background:#ffffff;border-radius:8px;padding:40px;border:1px solid #e0e0e0">
-      <p style="font-size:22px;font-weight:600;margin:0 0 8px">Confirm your email</p>
-      <p style="color:#555;margin:0 0 24px">
-        Welcome to Desk Business. Confirm this email address before opening your business workspace.
-      </p>
-      <a href="${confirmationUrl}"
-         style="display:inline-block;background:#1a56db;color:#ffffff;text-decoration:none;
-                padding:12px 28px;border-radius:6px;font-weight:600;font-size:15px">
-        Confirm email
-      </a>
-      <p style="color:#888;font-size:13px;margin:24px 0 0">
-        If you did not create a Desk Business account, you can safely ignore this email.
-      </p>
-    </td></tr>
-  </table>
-</body>
-</html>`;
+function escapeHtml(value: string): string {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
 }

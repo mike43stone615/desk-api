@@ -19,14 +19,16 @@ export class DeskAuthService implements AuthService {
     return verifyPassword(password, hash);
   }
 
-  async signUp(email: string, password: string): Promise<SignupResult> {
+  async signUp(email: string, password: string, firstName: string, lastName: string): Promise<SignupResult> {
     const existing = await this.db.findUserByEmail(email);
     if (existing) throw new AuthError('email_in_use');
 
+    validateName(firstName, 'first_name_required');
+    validateName(lastName, 'last_name_required');
     validatePassword(password);
 
     const passwordHash = await hashPassword(password);
-    const user = await this.db.createUser(generateId(), email, passwordHash);
+    const user = await this.db.createUser(generateId(), email, passwordHash, firstName.trim(), lastName.trim());
     const confirmationToken = await this.createEmailConfirmationToken(user.id);
     return { confirmationToken, user: toPublicUser(user) };
   }
@@ -133,11 +135,26 @@ export class AuthError extends Error {
 }
 
 function toPublicUser(user: User): PublicUser {
-  return { id: user.id, email: user.email, emailConfirmedAt: user.emailConfirmedAt };
+  return {
+    id: user.id,
+    email: user.email,
+    firstName: user.firstName,
+    lastName: user.lastName,
+    emailConfirmedAt: user.emailConfirmedAt,
+  };
+}
+
+function validateName(value: string, code: string): void {
+  if (!value || value.trim().length === 0) throw new AuthError(code);
 }
 
 function validatePassword(password: string): void {
-  if (!password || password.length < 6) throw new AuthError('password_too_short');
+  if (!password || password.length < 8) throw new AuthError('password_too_short');
+  if (!/[A-Z]/.test(password)) throw new AuthError('password_missing_uppercase');
+  if (!/[a-z]/.test(password)) throw new AuthError('password_missing_lowercase');
+  if (!/[0-9]/.test(password)) throw new AuthError('password_missing_number');
+  if (!/[^A-Za-z0-9]/.test(password)) throw new AuthError('password_missing_symbol');
 }
 
 const DUMMY_HASH = 'pbkdf2:sha256:100000:AAAAAAAAAAAAAAAAAAAAAA==:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=';
+

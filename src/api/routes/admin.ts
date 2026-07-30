@@ -15,8 +15,8 @@ const router = new Hono<Env>();
 const TABLES = {
   users: {
     primaryKey: 'id',
-    columns: ['id', 'email', 'password_hash', 'email_confirmed_at', 'created_at', 'updated_at'],
-    editable: ['email', 'email_confirmed_at'],
+    columns: ['id', 'email', 'first_name', 'last_name', 'password_hash', 'email_confirmed_at', 'created_at', 'updated_at'],
+    editable: ['email', 'first_name', 'last_name', 'email_confirmed_at'],
     secret: ['password_hash'],
   },
   sessions: {

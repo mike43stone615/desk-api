@@ -9,6 +9,8 @@ function makeUser(overrides: Partial<User> = {}): User {
     id: 'user-1',
     email: 'test@example.com',
     passwordHash: '',
+    firstName: 'Test',
+    lastName: 'User',
     emailConfirmedAt: new Date().toISOString(),
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
@@ -56,8 +58,8 @@ function makeDb(overrides: Partial<DatabaseRepository> = {}): DatabaseRepository
   return {
     findUserById: vi.fn<DatabaseRepository['findUserById']>().mockResolvedValue(null),
     findUserByEmail: vi.fn<DatabaseRepository['findUserByEmail']>().mockResolvedValue(null),
-    createUser: vi.fn<DatabaseRepository['createUser']>().mockImplementation(async (id, email, passwordHash) =>
-      makeUser({ id, email, passwordHash }),
+    createUser: vi.fn<DatabaseRepository['createUser']>().mockImplementation(async (id, email, passwordHash, firstName, lastName) =>
+      makeUser({ id, email, passwordHash, firstName, lastName }),
     ),
     updateUserPassword: vi.fn<DatabaseRepository['updateUserPassword']>().mockResolvedValue(undefined),
     markUserEmailConfirmed: vi.fn<DatabaseRepository['markUserEmailConfirmed']>().mockResolvedValue(undefined),
@@ -81,7 +83,7 @@ describe('DeskAuthService.signUp', () => {
   it('creates a user and returns an email confirmation token', async () => {
     const db = makeDb();
     const svc = new DeskAuthService(db, 720, 60);
-    const result = await svc.signUp('new@example.com', 'password123');
+    const result = await svc.signUp('new@example.com', 'Password1!', 'New', 'User');
     expect(result.user.email).toBe('new@example.com');
     expect(typeof result.confirmationToken).toBe('string');
     expect(result.confirmationToken.length).toBeGreaterThan(10);
@@ -95,20 +97,37 @@ describe('DeskAuthService.signUp', () => {
       findUserByEmail: vi.fn().mockResolvedValue(makeUser()),
     });
     const svc = new DeskAuthService(db, 720, 60);
-    await expect(svc.signUp('test@example.com', 'password123')).rejects.toThrow(AuthError);
-    await expect(svc.signUp('test@example.com', 'password123')).rejects.toMatchObject({ code: 'email_in_use' });
+    await expect(svc.signUp('test@example.com', 'Password1!', 'Test', 'User')).rejects.toThrow(AuthError);
+    await expect(svc.signUp('test@example.com', 'Password1!', 'Test', 'User')).rejects.toMatchObject({ code: 'email_in_use' });
   });
 
-  it('throws password_too_short for passwords under 6 characters', async () => {
+  it('throws password_too_short for passwords under 8 characters', async () => {
     const db = makeDb();
     const svc = new DeskAuthService(db, 720, 60);
-    await expect(svc.signUp('new@example.com', 'abc')).rejects.toMatchObject({ code: 'password_too_short' });
+    await expect(svc.signUp('new@example.com', 'abc', 'New', 'User')).rejects.toMatchObject({ code: 'password_too_short' });
+  });
+
+
+  it('throws for missing password complexity requirements', async () => {
+    const db = makeDb();
+    const svc = new DeskAuthService(db, 720, 60);
+    await expect(svc.signUp('new@example.com', 'password1!', 'New', 'User')).rejects.toMatchObject({ code: 'password_missing_uppercase' });
+    await expect(svc.signUp('new@example.com', 'PASSWORD1!', 'New', 'User')).rejects.toMatchObject({ code: 'password_missing_lowercase' });
+    await expect(svc.signUp('new@example.com', 'Password!', 'New', 'User')).rejects.toMatchObject({ code: 'password_missing_number' });
+    await expect(svc.signUp('new@example.com', 'Password1', 'New', 'User')).rejects.toMatchObject({ code: 'password_missing_symbol' });
+  });
+
+  it('throws when names are missing', async () => {
+    const db = makeDb();
+    const svc = new DeskAuthService(db, 720, 60);
+    await expect(svc.signUp('new@example.com', 'Password1!', '', 'User')).rejects.toMatchObject({ code: 'first_name_required' });
+    await expect(svc.signUp('new@example.com', 'Password1!', 'New', '')).rejects.toMatchObject({ code: 'last_name_required' });
   });
 
   it('rejects empty password', async () => {
     const db = makeDb();
     const svc = new DeskAuthService(db, 720, 60);
-    await expect(svc.signUp('new@example.com', '')).rejects.toMatchObject({ code: 'password_too_short' });
+    await expect(svc.signUp('new@example.com', '', 'New', 'User')).rejects.toMatchObject({ code: 'password_too_short' });
   });
 });
 
@@ -125,29 +144,29 @@ describe('DeskAuthService.signIn — NEEDS_RESET sentinel', () => {
 
 describe('DeskAuthService.signIn', () => {
   it('throws email_not_confirmed for valid credentials before confirmation', async () => {
-    const passwordHash = await hashPassword('mypassword');
+    const passwordHash = await hashPassword('Mypassword1!');
     const db = makeDb({
       findUserByEmail: vi.fn().mockResolvedValue(makeUser({ passwordHash, emailConfirmedAt: null })),
     });
     const svc = new DeskAuthService(db, 720, 60);
-    await expect(svc.signIn('test@example.com', 'mypassword')).rejects.toMatchObject({ code: 'email_not_confirmed' });
+    await expect(svc.signIn('test@example.com', 'Mypassword1!')).rejects.toMatchObject({ code: 'email_not_confirmed' });
     expect(db.createSession).not.toHaveBeenCalled();
   });
 
   it('returns token and user for valid credentials', async () => {
-    const passwordHash = await hashPassword('mypassword');
+    const passwordHash = await hashPassword('Mypassword1!');
     const db = makeDb({
       findUserByEmail: vi.fn().mockResolvedValue(makeUser({ passwordHash })),
     });
     const svc = new DeskAuthService(db, 720, 60);
-    const result = await svc.signIn('test@example.com', 'mypassword');
+    const result = await svc.signIn('test@example.com', 'Mypassword1!');
     expect(result).not.toBeNull();
     expect(result!.user.email).toBe('test@example.com');
     expect(db.createSession).toHaveBeenCalledTimes(1);
   });
 
   it('returns null for wrong password', async () => {
-    const passwordHash = await hashPassword('correct');
+    const passwordHash = await hashPassword('Correct1!');
     const db = makeDb({
       findUserByEmail: vi.fn().mockResolvedValue(makeUser({ passwordHash })),
     });
@@ -232,7 +251,7 @@ describe('DeskAuthService.confirmPasswordReset', () => {
       findResetToken: vi.fn().mockResolvedValue(record),
     });
     const svc = new DeskAuthService(db, 720, 60);
-    const ok = await svc.confirmPasswordReset('reset-tok', 'newpassword123');
+    const ok = await svc.confirmPasswordReset('reset-tok', 'Newpassword1!');
     expect(ok).toBe(true);
     expect(db.updateUserPassword).toHaveBeenCalledWith('user-1', expect.stringContaining('pbkdf2'));
     expect(db.markResetTokenUsed).toHaveBeenCalledWith('reset-tok', expect.any(String));
@@ -241,21 +260,21 @@ describe('DeskAuthService.confirmPasswordReset', () => {
   it('returns false for unknown token', async () => {
     const db = makeDb();
     const svc = new DeskAuthService(db, 720, 60);
-    expect(await svc.confirmPasswordReset('bad-token', 'newpassword123')).toBe(false);
+    expect(await svc.confirmPasswordReset('bad-token', 'Newpassword1!')).toBe(false);
   });
 
   it('returns false for already-used token', async () => {
     const record = makeResetToken({ usedAt: new Date().toISOString() });
     const db = makeDb({ findResetToken: vi.fn().mockResolvedValue(record) });
     const svc = new DeskAuthService(db, 720, 60);
-    expect(await svc.confirmPasswordReset('reset-tok', 'newpassword123')).toBe(false);
+    expect(await svc.confirmPasswordReset('reset-tok', 'Newpassword1!')).toBe(false);
   });
 
   it('returns false for expired token', async () => {
     const record = makeResetToken({ expiresAt: new Date(Date.now() - 1000).toISOString() });
     const db = makeDb({ findResetToken: vi.fn().mockResolvedValue(record) });
     const svc = new DeskAuthService(db, 720, 60);
-    expect(await svc.confirmPasswordReset('reset-tok', 'newpassword123')).toBe(false);
+    expect(await svc.confirmPasswordReset('reset-tok', 'Newpassword1!')).toBe(false);
   });
 
   it('throws password_too_short for weak password', async () => {
@@ -270,7 +289,7 @@ describe('DeskAuthService.updatePassword', () => {
   it('hashes and persists new password', async () => {
     const db = makeDb();
     const svc = new DeskAuthService(db, 720, 60);
-    await svc.updatePassword('user-1', 'brandnewpass');
+    await svc.updatePassword('user-1', 'Brandnew1!');
     expect(db.updateUserPassword).toHaveBeenCalledWith('user-1', expect.stringContaining('pbkdf2'));
   });
 

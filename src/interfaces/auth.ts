@@ -13,13 +13,15 @@ export interface SignupResult {
 export interface PublicUser {
   id: string;
   email: string;
+  firstName: string;
+  lastName: string;
   emailConfirmedAt: string | null;
 }
 
 export interface AuthService {
   hashPassword(password: string): Promise<string>;
   verifyPassword(password: string, hash: string): Promise<boolean>;
-  signUp(email: string, password: string): Promise<SignupResult>;
+  signUp(email: string, password: string, firstName: string, lastName: string): Promise<SignupResult>;
   signIn(email: string, password: string): Promise<AuthResult | null>;
   verifySession(token: string): Promise<User | null>;
   revokeSession(token: string): Promise<void>;

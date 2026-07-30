@@ -28,12 +28,14 @@ router.post('/signin', async (c) => {
 
 // POST /auth/signup
 router.post('/signup', async (c) => {
-  const body = await c.req.json<{ email?: string; password?: string }>();
-  if (!body.email || !body.password) throw new ApiError(400, 'Email and password are required.');
+  const body = await c.req.json<{ email?: string; password?: string; firstName?: string; lastName?: string }>();
+  if (!body.email || !body.password || !body.firstName || !body.lastName) {
+    throw new ApiError(400, 'Email, first name, last name, and password are required.');
+  }
 
   const authService = c.get('authService');
   const config = c.get('config');
-  const result = await authService.signUp(body.email.trim(), body.password);
+  const result = await authService.signUp(body.email.trim(), body.password, body.firstName.trim(), body.lastName.trim());
 
   await sendEmailConfirmationEmail(config, result.user.email, result.confirmationToken, c.get('requestId'));
   audit(c, 'signup_success', { userId: result.user.id });
@@ -84,7 +86,7 @@ router.post('/signout', async (c) => {
 // GET /auth/session
 router.get('/session', requireAuth(), async (c) => {
   const user = c.get('currentUser');
-  return c.json({ user: { id: user.id, email: user.email, emailConfirmedAt: user.emailConfirmedAt } });
+  return c.json({ user: { id: user.id, email: user.email, firstName: user.firstName, lastName: user.lastName, emailConfirmedAt: user.emailConfirmedAt } });
 });
 
 // POST /auth/password-reset/request
@@ -101,7 +103,9 @@ router.post('/password-reset/request', async (c) => {
     await sendPasswordResetEmail(config, body.email.trim(), token, c.get('requestId'));
   }
 
-  return c.json({ ok: true, message: 'If that email has an account, a reset link will be sent.' });
+  return token
+    ? c.json({ ok: true, emailSent: true, message: 'Password reset sent. Check your email for a secure link to choose a new password.' })
+    : c.json({ ok: true, emailSent: false, message: 'No Desk Business account is associated with that email.' });
 });
 
 // POST /auth/password-reset/confirm
