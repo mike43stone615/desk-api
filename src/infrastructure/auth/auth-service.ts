@@ -1,4 +1,4 @@
-import type { AuthResult, AuthService, PublicUser, SignupResult } from '../../interfaces/auth.js';
+﻿import type { AuthResult, AuthService, PublicUser, SignupResult } from '../../interfaces/auth.js';
 import type { DatabaseRepository, User } from '../../interfaces/database.js';
 import { hashPassword, verifyPassword } from '../../domain/auth/password.js';
 import { addHours, addMinutes, generateId, generateToken, isExpired, nowUtc } from '../../domain/auth/tokens.js';
@@ -28,7 +28,13 @@ export class DeskAuthService implements AuthService {
     validatePassword(password);
 
     const passwordHash = await hashPassword(password);
-    const user = await this.db.createUser(generateId(), email, passwordHash, firstName.trim(), lastName.trim());
+    let user: User;
+    try {
+      user = await this.db.createUser(generateId(), email, passwordHash, firstName.trim(), lastName.trim());
+    } catch (error) {
+      if (isDuplicateEmailError(error)) throw new AuthError('email_in_use');
+      throw error;
+    }
     const confirmationToken = await this.createEmailConfirmationToken(user.id);
     return { confirmationToken, user: toPublicUser(user) };
   }
@@ -157,4 +163,11 @@ function validatePassword(password: string): void {
 }
 
 const DUMMY_HASH = 'pbkdf2:sha256:100000:AAAAAAAAAAAAAAAAAAAAAA==:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=';
+
+function isDuplicateEmailError(error: unknown): boolean {
+  if (!(error instanceof Error)) return false;
+  const message = error.message.toLowerCase();
+  return message.includes('unique') && message.includes('users') && message.includes('email');
+}
+
 

@@ -1,4 +1,4 @@
-import { Hono } from 'hono';
+﻿import { Hono } from 'hono';
 import type { MiddlewareHandler } from 'hono';
 import type { AppConfig, AppEnv } from '../../config.js';
 import { requireAuth } from '../middleware/auth.js';
@@ -16,25 +16,25 @@ const TABLES = {
   users: {
     primaryKey: 'id',
     columns: ['id', 'email', 'first_name', 'last_name', 'password_hash', 'email_confirmed_at', 'created_at', 'updated_at'],
-    editable: ['email', 'first_name', 'last_name', 'email_confirmed_at'],
+    editable: ['email', 'first_name', 'last_name'],
     secret: ['password_hash'],
   },
   sessions: {
     primaryKey: 'id',
     columns: ['id', 'user_id', 'token', 'expires_at', 'created_at'],
-    editable: ['expires_at'],
+    editable: [],
     secret: ['token'],
   },
   password_reset_tokens: {
     primaryKey: 'id',
     columns: ['id', 'user_id', 'token', 'expires_at', 'used_at', 'created_at'],
-    editable: ['expires_at', 'used_at'],
+    editable: [],
     secret: ['token'],
   },
   email_confirmation_tokens: {
     primaryKey: 'id',
     columns: ['id', 'user_id', 'token', 'expires_at', 'used_at', 'created_at'],
-    editable: ['expires_at', 'used_at'],
+    editable: [],
     secret: ['token'],
   },
 } as const;
@@ -158,5 +158,6 @@ function maskSecrets(row: Record<string, unknown>, table: AdminTableConfig): Rec
   }
   return copy;
 }
+
 
 
