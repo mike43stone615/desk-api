@@ -6,6 +6,7 @@ export function handleError(err: unknown, c: Context): Response {
     const status =
       err.code === 'email_in_use' ? 409 :
       err.code === 'password_reset_required' ? 401 :
+      err.code === 'email_not_confirmed' ? 403 :
       400;
     return c.json({ error: safeMessage(err.code) }, status);
   }
@@ -38,6 +39,8 @@ function safeMessage(code: string): string {
     case 'password_too_short': return 'Password must be at least 6 characters.';
     // Returned as the code string so Flutter can detect and route to reset flow.
     case 'password_reset_required': return 'password_reset_required';
+    case 'email_not_confirmed': return 'email_not_confirmed';
     default: return 'Request could not be completed.';
   }
 }
+

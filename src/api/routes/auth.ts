@@ -3,7 +3,7 @@ import type { DeskAuthService } from '../../infrastructure/auth/auth-service.js'
 import type { AppConfig } from '../../config.js';
 import { requireAuth } from '../middleware/auth.js';
 import { ApiError } from '../middleware/errors.js';
-import { sendPasswordResetEmail } from '../../infrastructure/email/resend.js';
+import { sendEmailConfirmationEmail, sendPasswordResetEmail } from '../../infrastructure/email/resend.js';
 
 type Env = { Variables: { authService: DeskAuthService; config: AppConfig; requestId: string } };
 
@@ -19,7 +19,6 @@ router.post('/signin', async (c) => {
 
   if (!result) {
     audit(c, 'signin_failed', { email: body.email.trim() });
-    // Generic error — does not reveal whether account exists
     return c.json({ error: 'Invalid email or password.' }, 401);
   }
 
@@ -33,10 +32,41 @@ router.post('/signup', async (c) => {
   if (!body.email || !body.password) throw new ApiError(400, 'Email and password are required.');
 
   const authService = c.get('authService');
+  const config = c.get('config');
   const result = await authService.signUp(body.email.trim(), body.password);
 
+  await sendEmailConfirmationEmail(config, result.user.email, result.confirmationToken, c.get('requestId'));
   audit(c, 'signup_success', { userId: result.user.id });
-  return c.json({ token: result.token, user: result.user }, 201);
+  return c.json({ user: result.user, emailConfirmationRequired: true }, 201);
+});
+
+// POST /auth/email-confirmation/request
+router.post('/email-confirmation/request', async (c) => {
+  const body = await c.req.json<{ email?: string }>();
+  if (!body.email) throw new ApiError(400, 'Email is required.');
+
+  const authService = c.get('authService');
+  const token = await authService.requestEmailConfirmation(body.email.trim());
+  if (token) {
+    const config = c.get('config');
+    await sendEmailConfirmationEmail(config, body.email.trim(), token, c.get('requestId'));
+    audit(c, 'email_confirmation_requested', { email: body.email.trim() });
+  }
+
+  return c.json({ ok: true, message: 'If that email needs confirmation, a new link will be sent.' });
+});
+
+// POST /auth/email-confirmation/confirm
+router.post('/email-confirmation/confirm', async (c) => {
+  const body = await c.req.json<{ token?: string }>();
+  if (!body.token) throw new ApiError(400, 'Token is required.');
+
+  const authService = c.get('authService');
+  const ok = await authService.confirmEmail(body.token);
+  if (!ok) throw new ApiError(400, 'Confirmation link is invalid or has expired.');
+
+  audit(c, 'email_confirmed');
+  return c.json({ ok: true });
 });
 
 // POST /auth/signout
@@ -54,7 +84,7 @@ router.post('/signout', async (c) => {
 // GET /auth/session
 router.get('/session', requireAuth(), async (c) => {
   const user = c.get('currentUser');
-  return c.json({ user: { id: user.id, email: user.email } });
+  return c.json({ user: { id: user.id, email: user.email, emailConfirmedAt: user.emailConfirmedAt } });
 });
 
 // POST /auth/password-reset/request
@@ -71,7 +101,6 @@ router.post('/password-reset/request', async (c) => {
     await sendPasswordResetEmail(config, body.email.trim(), token, c.get('requestId'));
   }
 
-  // Always return success to prevent account enumeration
   return c.json({ ok: true, message: 'If that email has an account, a reset link will be sent.' });
 });
 
@@ -103,8 +132,6 @@ router.post('/password', requireAuth(), async (c) => {
 
 export { router as authRouter };
 
-// ── Structured audit log helper ───────────────────────────────────────────────
-// Never logs tokens, passwords, or complete secrets.
 function audit(c: { get(key: 'requestId'): string }, event: string, meta?: Record<string, string>): void {
   console.log(JSON.stringify({ level: 'audit', event, requestId: c.get('requestId'), ts: new Date().toISOString(), ...meta }));
 }

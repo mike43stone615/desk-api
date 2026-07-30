@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
 import { DeskAuthService, AuthError } from '../infrastructure/auth/auth-service.js';
-import type { DatabaseRepository, User, Session, PasswordResetToken } from '../interfaces/database.js';
+import type { DatabaseRepository, EmailConfirmationToken, PasswordResetToken, Session, User } from '../interfaces/database.js';
 import { hashPassword } from '../domain/auth/password.js';
 import { addHours, addMinutes } from '../domain/auth/tokens.js';
 
@@ -9,6 +9,7 @@ function makeUser(overrides: Partial<User> = {}): User {
     id: 'user-1',
     email: 'test@example.com',
     passwordHash: '',
+    emailConfirmedAt: new Date().toISOString(),
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
     ...overrides,
@@ -38,6 +39,19 @@ function makeResetToken(overrides: Partial<PasswordResetToken> = {}): PasswordRe
   };
 }
 
+
+function makeEmailConfirmationToken(overrides: Partial<EmailConfirmationToken> = {}): EmailConfirmationToken {
+  return {
+    id: 'confirm-1',
+    userId: 'user-1',
+    token: 'confirm-tok',
+    expiresAt: addMinutes(1440),
+    usedAt: null,
+    createdAt: new Date().toISOString(),
+    ...overrides,
+  };
+}
+
 function makeDb(overrides: Partial<DatabaseRepository> = {}): DatabaseRepository {
   return {
     findUserById: vi.fn<DatabaseRepository['findUserById']>().mockResolvedValue(null),
@@ -46,6 +60,7 @@ function makeDb(overrides: Partial<DatabaseRepository> = {}): DatabaseRepository
       makeUser({ id, email, passwordHash }),
     ),
     updateUserPassword: vi.fn<DatabaseRepository['updateUserPassword']>().mockResolvedValue(undefined),
+    markUserEmailConfirmed: vi.fn<DatabaseRepository['markUserEmailConfirmed']>().mockResolvedValue(undefined),
     createSession: vi.fn<DatabaseRepository['createSession']>().mockImplementation(async (id, userId, token, expiresAt) =>
       makeSession({ id, userId, token, expiresAt }),
     ),
@@ -55,20 +70,24 @@ function makeDb(overrides: Partial<DatabaseRepository> = {}): DatabaseRepository
     createResetToken: vi.fn<DatabaseRepository['createResetToken']>().mockResolvedValue(undefined),
     findResetToken: vi.fn<DatabaseRepository['findResetToken']>().mockResolvedValue(null),
     markResetTokenUsed: vi.fn<DatabaseRepository['markResetTokenUsed']>().mockResolvedValue(undefined),
+    createEmailConfirmationToken: vi.fn<DatabaseRepository['createEmailConfirmationToken']>().mockResolvedValue(undefined),
+    findEmailConfirmationToken: vi.fn<DatabaseRepository['findEmailConfirmationToken']>().mockResolvedValue(null),
+    markEmailConfirmationTokenUsed: vi.fn<DatabaseRepository['markEmailConfirmationTokenUsed']>().mockResolvedValue(undefined),
     ...overrides,
   };
 }
 
 describe('DeskAuthService.signUp', () => {
-  it('creates a user and returns a token', async () => {
+  it('creates a user and returns an email confirmation token', async () => {
     const db = makeDb();
     const svc = new DeskAuthService(db, 720, 60);
     const result = await svc.signUp('new@example.com', 'password123');
     expect(result.user.email).toBe('new@example.com');
-    expect(typeof result.token).toBe('string');
-    expect(result.token.length).toBeGreaterThan(10);
+    expect(typeof result.confirmationToken).toBe('string');
+    expect(result.confirmationToken.length).toBeGreaterThan(10);
     expect(db.createUser).toHaveBeenCalledTimes(1);
-    expect(db.createSession).toHaveBeenCalledTimes(1);
+    expect(db.createSession).not.toHaveBeenCalled();
+    expect(db.createEmailConfirmationToken).toHaveBeenCalledTimes(1);
   });
 
   it('throws email_in_use when email already exists', async () => {
@@ -105,6 +124,16 @@ describe('DeskAuthService.signIn — NEEDS_RESET sentinel', () => {
 });
 
 describe('DeskAuthService.signIn', () => {
+  it('throws email_not_confirmed for valid credentials before confirmation', async () => {
+    const passwordHash = await hashPassword('mypassword');
+    const db = makeDb({
+      findUserByEmail: vi.fn().mockResolvedValue(makeUser({ passwordHash, emailConfirmedAt: null })),
+    });
+    const svc = new DeskAuthService(db, 720, 60);
+    await expect(svc.signIn('test@example.com', 'mypassword')).rejects.toMatchObject({ code: 'email_not_confirmed' });
+    expect(db.createSession).not.toHaveBeenCalled();
+  });
+
   it('returns token and user for valid credentials', async () => {
     const passwordHash = await hashPassword('mypassword');
     const db = makeDb({
@@ -249,5 +278,26 @@ describe('DeskAuthService.updatePassword', () => {
     const db = makeDb();
     const svc = new DeskAuthService(db, 720, 60);
     await expect(svc.updatePassword('user-1', 'hi')).rejects.toMatchObject({ code: 'password_too_short' });
+  });
+});
+
+describe('DeskAuthService.confirmEmail', () => {
+  it('marks the user and token confirmed for a valid token', async () => {
+    const record = makeEmailConfirmationToken();
+    const db = makeDb({
+      findEmailConfirmationToken: vi.fn().mockResolvedValue(record),
+    });
+    const svc = new DeskAuthService(db, 720, 60);
+    const ok = await svc.confirmEmail('confirm-tok');
+    expect(ok).toBe(true);
+    expect(db.markUserEmailConfirmed).toHaveBeenCalledWith('user-1', expect.any(String));
+    expect(db.markEmailConfirmationTokenUsed).toHaveBeenCalledWith('confirm-tok', expect.any(String));
+  });
+
+  it('returns false for expired tokens', async () => {
+    const record = makeEmailConfirmationToken({ expiresAt: new Date(Date.now() - 1000).toISOString() });
+    const db = makeDb({ findEmailConfirmationToken: vi.fn().mockResolvedValue(record) });
+    const svc = new DeskAuthService(db, 720, 60);
+    expect(await svc.confirmEmail('confirm-tok')).toBe(false);
   });
 });

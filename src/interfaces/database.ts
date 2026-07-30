@@ -2,6 +2,7 @@ export interface User {
   id: string;
   email: string;
   passwordHash: string;
+  emailConfirmedAt: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -23,12 +24,22 @@ export interface PasswordResetToken {
   createdAt: string;
 }
 
+export interface EmailConfirmationToken {
+  id: string;
+  userId: string;
+  token: string;
+  expiresAt: string;
+  usedAt: string | null;
+  createdAt: string;
+}
+
 export interface DatabaseRepository {
   // Users
   findUserById(id: string): Promise<User | null>;
   findUserByEmail(email: string): Promise<User | null>;
   createUser(id: string, email: string, passwordHash: string): Promise<User>;
   updateUserPassword(userId: string, passwordHash: string): Promise<void>;
+  markUserEmailConfirmed(userId: string, confirmedAt: string): Promise<void>;
 
   // Sessions
   createSession(id: string, userId: string, token: string, expiresAt: string): Promise<Session>;
@@ -40,4 +51,9 @@ export interface DatabaseRepository {
   createResetToken(id: string, userId: string, token: string, expiresAt: string): Promise<void>;
   findResetToken(token: string): Promise<PasswordResetToken | null>;
   markResetTokenUsed(token: string, usedAt: string): Promise<void>;
+
+  // Email confirmation
+  createEmailConfirmationToken(id: string, userId: string, token: string, expiresAt: string): Promise<void>;
+  findEmailConfirmationToken(token: string): Promise<EmailConfirmationToken | null>;
+  markEmailConfirmationTokenUsed(token: string, usedAt: string): Promise<void>;
 }

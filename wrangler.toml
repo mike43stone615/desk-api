@@ -27,6 +27,8 @@ RESET_TOKEN_DURATION_MINUTES = "60"
 OPENAI_MODEL = "gpt-4.1-mini"
 EMAIL_FROM = "noreply@deskbusiness.co"
 APP_BASE_URL = "https://app.deskbusiness.co"
+CONFIRMATION_TOKEN_DURATION_MINUTES = "1440"
+ADMIN_EMAILS = "mike43stone615@gmail.com"
 
 # URLs for backend services — set to Railway deployment URLs after deploying.
 # Leave empty until deployed; integration routes return 503 when unset.

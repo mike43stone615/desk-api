@@ -1,13 +1,14 @@
-import type { AuthResult, AuthService, PublicUser } from '../../interfaces/auth.js';
+import type { AuthResult, AuthService, PublicUser, SignupResult } from '../../interfaces/auth.js';
 import type { DatabaseRepository, User } from '../../interfaces/database.js';
 import { hashPassword, verifyPassword } from '../../domain/auth/password.js';
-import { generateId, generateToken, addHours, addMinutes, nowUtc, isExpired } from '../../domain/auth/tokens.js';
+import { addHours, addMinutes, generateId, generateToken, isExpired, nowUtc } from '../../domain/auth/tokens.js';
 
 export class DeskAuthService implements AuthService {
   constructor(
     private readonly db: DatabaseRepository,
     private readonly sessionDurationHours: number,
     private readonly resetTokenDurationMinutes: number,
+    private readonly confirmationTokenDurationMinutes = 60 * 24,
   ) {}
 
   async hashPassword(password: string): Promise<string> {
@@ -18,7 +19,7 @@ export class DeskAuthService implements AuthService {
     return verifyPassword(password, hash);
   }
 
-  async signUp(email: string, password: string): Promise<AuthResult> {
+  async signUp(email: string, password: string): Promise<SignupResult> {
     const existing = await this.db.findUserByEmail(email);
     if (existing) throw new AuthError('email_in_use');
 
@@ -26,22 +27,21 @@ export class DeskAuthService implements AuthService {
 
     const passwordHash = await hashPassword(password);
     const user = await this.db.createUser(generateId(), email, passwordHash);
-    const token = await this.createSessionToken(user.id);
-    return { token, user: toPublicUser(user) };
+    const confirmationToken = await this.createEmailConfirmationToken(user.id);
+    return { confirmationToken, user: toPublicUser(user) };
   }
 
   async signIn(email: string, password: string): Promise<AuthResult | null> {
     const user = await this.db.findUserByEmail(email);
-    // Always run hash verification to prevent timing attacks even when user not found
     const hash = user?.passwordHash ?? DUMMY_HASH;
 
-    // Sentinel used for Supabase-migrated users who have not yet set a password.
     if (user && hash === 'NEEDS_RESET') {
       throw new AuthError('password_reset_required');
     }
 
     const valid = await verifyPassword(password, hash);
     if (!user || !valid) return null;
+    if (!user.emailConfirmedAt) throw new AuthError('email_not_confirmed');
 
     const token = await this.createSessionToken(user.id);
     return { token, user: toPublicUser(user) };
@@ -63,7 +63,7 @@ export class DeskAuthService implements AuthService {
 
   async requestPasswordReset(email: string): Promise<string | null> {
     const user = await this.db.findUserByEmail(email);
-    if (!user) return null; // Do not reveal whether account exists
+    if (!user) return null;
     const token = generateToken(32);
     await this.db.createResetToken(generateId(), user.id, token, addMinutes(this.resetTokenDurationMinutes));
     return token;
@@ -80,8 +80,25 @@ export class DeskAuthService implements AuthService {
     const passwordHash = await hashPassword(newPassword);
     await this.db.updateUserPassword(record.userId, passwordHash);
     await this.db.markResetTokenUsed(token, nowUtc());
-    // Revoke all existing sessions for security
     await this.db.deleteSession(token);
+    return true;
+  }
+
+  async requestEmailConfirmation(email: string): Promise<string | null> {
+    const user = await this.db.findUserByEmail(email);
+    if (!user || user.emailConfirmedAt) return null;
+    return this.createEmailConfirmationToken(user.id);
+  }
+
+  async confirmEmail(token: string): Promise<boolean> {
+    const record = await this.db.findEmailConfirmationToken(token);
+    if (!record) return false;
+    if (record.usedAt) return false;
+    if (isExpired(record.expiresAt)) return false;
+
+    const confirmedAt = nowUtc();
+    await this.db.markUserEmailConfirmed(record.userId, confirmedAt);
+    await this.db.markEmailConfirmationTokenUsed(token, confirmedAt);
     return true;
   }
 
@@ -96,6 +113,17 @@ export class DeskAuthService implements AuthService {
     await this.db.createSession(generateId(), userId, token, addHours(this.sessionDurationHours));
     return token;
   }
+
+  private async createEmailConfirmationToken(userId: string): Promise<string> {
+    const token = generateToken(32);
+    await this.db.createEmailConfirmationToken(
+      generateId(),
+      userId,
+      token,
+      addMinutes(this.confirmationTokenDurationMinutes),
+    );
+    return token;
+  }
 }
 
 export class AuthError extends Error {
@@ -105,12 +133,11 @@ export class AuthError extends Error {
 }
 
 function toPublicUser(user: User): PublicUser {
-  return { id: user.id, email: user.email };
+  return { id: user.id, email: user.email, emailConfirmedAt: user.emailConfirmedAt };
 }
 
 function validatePassword(password: string): void {
   if (!password || password.length < 6) throw new AuthError('password_too_short');
 }
 
-// Used to prevent timing attacks when user is not found
 const DUMMY_HASH = 'pbkdf2:sha256:100000:AAAAAAAAAAAAAAAAAAAAAA==:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=';

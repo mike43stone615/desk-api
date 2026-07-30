@@ -5,6 +5,7 @@ import { parseConfig } from './config.js';
 import { D1DatabaseAdapter } from './infrastructure/database/d1/adapter.js';
 import { DeskAuthService } from './infrastructure/auth/auth-service.js';
 import { authRouter } from './api/routes/auth.js';
+import { adminRouter } from './api/routes/admin.js';
 import { analyzeBusinessSetupRouter } from './api/routes/functions/analyze-business-setup.js';
 import { searchPlaceAreasRouter } from './api/routes/functions/search-place-areas.js';
 import { complianceIntegrationRouter } from './api/routes/integrations/compliance.js';
@@ -52,7 +53,7 @@ app.use('*', async (c, next) => {
 app.use('*', async (c, next) => {
   const config = parseConfig(c.env);
   const db = new D1DatabaseAdapter(c.env.DB);
-  const authService = new DeskAuthService(db, config.sessionDurationHours, config.resetTokenDurationMinutes);
+  const authService = new DeskAuthService(db, config.sessionDurationHours, config.resetTokenDurationMinutes, config.confirmationTokenDurationMinutes);
   c.set('config', config);
   c.set('authService', authService);
   await next();
@@ -75,6 +76,7 @@ app.get('/readiness', async (c) => {
 
 // ── Auth routes ───────────────────────────────────────────────────────────────
 app.route('/auth', authRouter);
+app.route('/admin', adminRouter);
 
 // ── Edge Function replacements ────────────────────────────────────────────────
 app.route('/functions/v1/analyze-business-setup', analyzeBusinessSetupRouter);
@@ -113,3 +115,4 @@ export default {
     console.log(JSON.stringify({ level: 'info', event: 'cron_session_cleanup', ts: new Date().toISOString() }));
   },
 };
+
