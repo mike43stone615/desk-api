@@ -1,4 +1,4 @@
-import type { AppConfig } from '../../config.js';
+﻿import type { AppConfig } from '../../config.js';
 
 export async function sendPasswordResetEmail(
   config: AppConfig,
@@ -111,26 +111,53 @@ async function sendEmail(config: AppConfig, request: EmailRequest): Promise<void
 }
 
 function themedEmailHtml(content: ThemedEmailContent): string {
+  const logoUrl = `${content.actionUrl.startsWith('http') ? new URL(content.actionUrl).origin : ''}/assets/assets/desk_logo.png`;
   return `<!DOCTYPE html>
 <html lang="en">
-<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head>
-<body style="margin:0;padding:0;background:#070D1A;font-family:Inter,Segoe UI,Arial,sans-serif;color:#FFFFFF">
-  <table width="100%" cellpadding="0" cellspacing="0" role="presentation" style="background:#070D1A;padding:32px 16px">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <meta name="supported-color-schemes" content="dark">
+</head>
+<body style="margin:0;padding:0;background:#070D1A;font-family:Inter,'Segoe UI',Arial,sans-serif;color:#FFFFFF">
+  <table width="100%" cellpadding="0" cellspacing="0" role="presentation" style="width:100%;background:#070D1A;border-collapse:collapse">
     <tr>
-      <td align="center">
-        <table width="100%" cellpadding="0" cellspacing="0" role="presentation" style="max-width:520px">
+      <td style="padding:0">
+        <table width="100%" cellpadding="0" cellspacing="0" role="presentation" style="width:100%;background:#0E1626;border-bottom:1px solid #22304A;border-collapse:collapse">
           <tr>
-            <td style="padding:0 0 16px;color:#CBD5E1;font-size:14px;font-weight:700;letter-spacing:0">
-              <span style="display:inline-block;width:28px;height:28px;line-height:28px;text-align:center;border-radius:8px;background:#263B82F6;color:#60A5FA;margin-right:10px;font-weight:800">D</span>
-              Desk Business
+            <td style="padding:8px 24px">
+              <a href="https://www.deskbusiness.co" style="display:inline-block;text-decoration:none;color:#FFFFFF">
+                <img src="${logoUrl}" width="32" height="32" alt="Desk Business" style="width:32px;height:32px;vertical-align:middle;border:0;display:inline-block;margin-right:12px">
+                <span style="font-size:20px;line-height:32px;font-weight:700;color:#FFFFFF;vertical-align:middle">Desk Business</span>
+              </a>
             </td>
           </tr>
+        </table>
+        <table width="100%" cellpadding="0" cellspacing="0" role="presentation" style="width:100%;border-collapse:collapse">
           <tr>
-            <td style="background:#0E1626;border:1px solid #22304A;border-radius:18px;padding:32px">
-              <h1 style="margin:0 0 12px;color:#FFFFFF;font-size:24px;line-height:1.2;font-weight:800">${escapeHtml(content.title)}</h1>
-              <p style="margin:0 0 24px;color:#CBD5E1;font-size:15px;line-height:1.55;font-weight:500">${escapeHtml(content.body)}</p>
-              <a href="${content.actionUrl}" style="display:inline-block;background:#3B82F6;color:#FFFFFF;text-decoration:none;font-weight:800;font-size:15px;padding:13px 20px;border-radius:12px">${escapeHtml(content.actionLabel)}</a>
-              <p style="margin:24px 0 0;color:#94A3B8;font-size:13px;line-height:1.5;font-weight:500">${escapeHtml(content.note)}</p>
+            <td align="center" style="padding:48px 24px">
+              <table width="100%" cellpadding="0" cellspacing="0" role="presentation" style="max-width:440px;background:#0E1626;border:1px solid #22304A;border-radius:16px;border-collapse:separate;overflow:hidden">
+                <tr>
+                  <td style="padding:24px 24px 0">
+                    <img src="${logoUrl}" width="44" height="44" alt="Desk Business" style="width:44px;height:44px;border:0;display:block">
+                  </td>
+                </tr>
+                <tr>
+                  <td style="padding:20px 24px 24px">
+                    <h1 style="margin:0 0 8px;color:#FFFFFF;font-size:24px;line-height:1.2;font-weight:700;letter-spacing:0">${escapeHtml(content.title)}</h1>
+                    <p style="margin:0 0 24px;color:#CBD5E1;font-size:14px;line-height:1.45;font-weight:500;letter-spacing:0">${escapeHtml(content.body)}</p>
+                    <table cellpadding="0" cellspacing="0" role="presentation" style="width:100%;border-collapse:separate">
+                      <tr>
+                        <td align="center" bgcolor="#3B82F6" style="border-radius:12px;background:#3B82F6">
+                          <a href="${content.actionUrl}" style="display:block;padding:14px 18px;color:#FFFFFF;text-decoration:none;font-size:15px;line-height:20px;font-weight:700;border-radius:12px">${escapeHtml(content.actionLabel)}</a>
+                        </td>
+                      </tr>
+                    </table>
+                    <p style="margin:24px 0 0;color:#94A3B8;font-size:14px;line-height:1.45;font-weight:500;letter-spacing:0">${escapeHtml(content.note)}</p>
+                  </td>
+                </tr>
+              </table>
             </td>
           </tr>
         </table>
@@ -149,3 +176,4 @@ function escapeHtml(value: string): string {
     .replace(/"/g, '&quot;')
     .replace(/'/g, '&#39;');
 }
+
