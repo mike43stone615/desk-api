@@ -12,7 +12,8 @@
     "migrate:prod": "wrangler d1 execute desk-api-db --remote --file=migrations/001_initial_schema.sql",
     "db:studio:local": "wrangler d1 studio desk-api-db --local",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "oews:validate": "node scripts/validate-oews-compact.mjs"
   },
   "dependencies": {
     "hono": "^4.7.0"

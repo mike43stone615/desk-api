@@ -6,18 +6,18 @@ routes = [
   { pattern = "app.deskbusiness.co/*", zone_name = "deskbusiness.co" },
   { pattern = "api.deskbusiness.co/*", zone_name = "deskbusiness.co" }
 ]
-# ── D1 database ──────────────────────────────────────────────────────────────
+# -- D1 database --------------------------------------------------------------
 [[d1_databases]]
 binding = "DB"
 database_name = "desk-api-db"
 database_id = "ef1398b2-bc97-4171-ae0f-07f9553dd704"
 
-# ── R2 object storage ─────────────────────────────────────────────────────────
+# -- R2 object storage ---------------------------------------------------------
 [[r2_buckets]]
 binding = "STORAGE"
 bucket_name = "desk-api-storage"
 
-# ── Non-sensitive variables ───────────────────────────────────────────────────
+# -- Non-sensitive variables ---------------------------------------------------
 [vars]
 ENVIRONMENT = "production"
 # Session token lifetime in hours (default 30 days)
@@ -30,35 +30,38 @@ APP_BASE_URL = "https://app.deskbusiness.co"
 CONFIRMATION_TOKEN_DURATION_MINUTES = "1440"
 ADMIN_EMAILS = "mike43stone615@gmail.com"
 
-# URLs for backend services — set to Railway deployment URLs after deploying.
+# URLs for backend services � set to Railway deployment URLs after deploying.
 # Leave empty until deployed; integration routes return 503 when unset.
 # IMPORTANT: must NOT point to api.deskbusiness.co (would create a loop).
-COMPLIANCE_OS_URL = ""
-REGISTRY_API_URL = ""
+COMPLIANCE_OS_URL = "https://compliance-api.deskbusiness.co"
+REGISTRY_API_URL = "https://registry-api.deskbusiness.co"
 
-# ── Secrets (set via `wrangler secret put <NAME>`) ───────────────────────────
+# -- Secrets (set via `wrangler secret put <NAME>`) ---------------------------
 # Required secrets:
-#   OPENAI_API_KEY         — for business classification AI
-#   GOOGLE_PLACES_API_KEY  — for city/place search
-#   REGISTRY_API_SECRET    — shared secret for registry upsert endpoint
-#   COMPLIANCE_OS_API_KEY  — API key for compliance-os admin routes
+#   OPENAI_API_KEY         � for business classification AI
+#   GOOGLE_PLACES_API_KEY  � for city/place search and market competition scoring
+#   CENSUS_API_KEY         � for ACS, CBP, and Nonemployer market data
+#   FOURSQUARE_API_KEY     � for secondary places/competition scoring
+#   BEA_API_KEY            � for BEA Regional income/GDP data (optional until issued)
+#   REGISTRY_API_SECRET    � shared secret for registry upsert endpoint
+#   COMPLIANCE_OS_API_KEY  � API key for compliance-os admin routes
 #
 # Optional secrets:
-#   SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS — for transactional email
-#   OPENAI_MODEL           — OpenAI model override (default: gpt-4.1-mini)
+#   SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS � for transactional email
+#   OPENAI_MODEL           � OpenAI model override (default: gpt-4.1-mini)
 
-# ── Local development ─────────────────────────────────────────────────────────
+# -- Local development ---------------------------------------------------------
 [env.local]
 # Local vars can override production vars during `wrangler dev`
 [env.local.vars]
 ENVIRONMENT = "local"
 
-# ── Scheduled triggers ────────────────────────────────────────────────────────
+# -- Scheduled triggers --------------------------------------------------------
 # Runs deleteExpiredSessions() daily at 02:00 UTC.
 [triggers]
 crons = ["0 2 * * *"]
 
-# ── Cloudflare Pages integration ──────────────────────────────────────────────
+# -- Cloudflare Pages integration ----------------------------------------------
 # To serve the Flutter web app from Cloudflare Pages with this Worker as the
 # API backend, deploy the Flutter build to Pages and add this Worker as a
 # "Pages Functions" binding or use the Pages _worker.js approach.
@@ -69,5 +72,10 @@ directory = "../desk_business/build/web"
 binding = "ASSETS"
 not_found_handling = "single-page-application"
 run_worker_first = true
+
+
+
+
+
 
 
