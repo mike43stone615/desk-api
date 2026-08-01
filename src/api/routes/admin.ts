@@ -130,12 +130,14 @@ router.get("/tables/:table/rows", async (c) => {
   if (parsed.source !== "desk") {
     const limit = c.req.query("limit") ?? "200";
     const offset = c.req.query("offset") ?? "0";
+    const filters = c.req.query("filters");
     const rows = await proxyUpstreamRows(
       c.get("config"),
       parsed.source,
       parsed.rawName,
       limit,
       offset,
+      filters,
     );
     return c.json({
       ...rows,
@@ -149,15 +151,19 @@ router.get("/tables/:table/rows", async (c) => {
   const limit = parseBoundedInt(c.req.query("limit"), 100, 1, 500);
   const offset = parseBoundedInt(c.req.query("offset"), 0, 0, 100000);
   const columns = table.columns.join(", ");
+  const filters = parseFilters(c.req.query("filters"), table.columns);
+  const { sql: whereSql, params: filterParams } = buildFilterClause(filters);
 
   const result = await c.env.DB.prepare(
-    `SELECT ${columns} FROM ${tableName} ORDER BY ${table.primaryKey} LIMIT ? OFFSET ?`,
+    `SELECT ${columns} FROM ${tableName} ${whereSql} ORDER BY ${table.primaryKey} LIMIT ? OFFSET ?`,
   )
-    .bind(limit, offset)
+    .bind(...filterParams, limit, offset)
     .all<Record<string, unknown>>();
   const count = await c.env.DB.prepare(
-    `SELECT COUNT(*) AS count FROM ${tableName}`,
-  ).first<{ count: number }>();
+    `SELECT COUNT(*) AS count FROM ${tableName} ${whereSql}`,
+  )
+    .bind(...filterParams)
+    .first<{ count: number }>();
 
   return c.json({
     source: "desk",
@@ -296,11 +302,14 @@ async function proxyUpstreamRows(
   table: string,
   limit: string,
   offset: string,
+  filters?: string,
 ): Promise<UpstreamRows> {
+  const query = new URLSearchParams({ limit, offset });
+  if (filters) query.set("filters", filters);
   return proxyUpstreamJson<UpstreamRows>(
     config,
     source,
-    `/admin/tables/${encodeURIComponent(table)}/rows?limit=${encodeURIComponent(limit)}&offset=${encodeURIComponent(offset)}`,
+    `/admin/tables/${encodeURIComponent(table)}/rows?${query.toString()}`,
   );
 }
 
@@ -392,6 +401,48 @@ function parseBoundedInt(
   const parsed = raw ? parseInt(raw, 10) : fallback;
   if (Number.isNaN(parsed)) return fallback;
   return Math.min(max, Math.max(min, parsed));
+}
+
+export function parseFilters(
+  raw: string | undefined,
+  allowedColumns: readonly string[],
+): Record<string, string> {
+  if (!raw) return {};
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return {};
+  }
+  if (!parsed || typeof parsed !== "object") return {};
+  const result: Record<string, string> = {};
+  for (const [column, value] of Object.entries(
+    parsed as Record<string, unknown>,
+  )) {
+    if (!allowedColumns.includes(column)) continue;
+    const text = String(value ?? "").trim();
+    if (text) result[column] = text;
+  }
+  return result;
+}
+
+export function escapeLikeValue(value: string): string {
+  return value.replace(/[\\%_]/g, (ch) => `\\${ch}`);
+}
+
+export function buildFilterClause(filters: Record<string, string>): {
+  sql: string;
+  params: string[];
+} {
+  const entries = Object.entries(filters);
+  if (entries.length === 0) return { sql: "", params: [] };
+  const sql =
+    "WHERE " +
+    entries
+      .map(([column]) => `CAST(${column} AS TEXT) LIKE ? ESCAPE '\\'`)
+      .join(" AND ");
+  const params = entries.map(([, value]) => `%${escapeLikeValue(value)}%`);
+  return { sql, params };
 }
 
 function normalizeValue(value: unknown): string | null {
