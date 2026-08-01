@@ -17,7 +17,10 @@ export function handleError(err: unknown, c: Context): Response {
   }
 
   if (err instanceof ApiError) {
-    return c.json({ error: err.message }, err.status as 400 | 401 | 403 | 404 | 429 | 500 | 502 | 503);
+    return c.json(
+      { error: err.message },
+      err.status as 400 | 401 | 403 | 404 | 409 | 413 | 429 | 500 | 502 | 503,
+    );
   }
 
   console.error('[desk-api] unhandled error:', err);

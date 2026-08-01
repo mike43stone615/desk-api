@@ -17,3 +17,4 @@ dist/
 *.sql
 *.dump
 *.pgdump
+!migrations/*.sql
