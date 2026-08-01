@@ -71,9 +71,11 @@ function makeDb(overrides: Partial<DatabaseRepository> = {}): DatabaseRepository
     deleteExpiredSessions: vi.fn<DatabaseRepository['deleteExpiredSessions']>().mockResolvedValue(undefined),
     createResetToken: vi.fn<DatabaseRepository['createResetToken']>().mockResolvedValue(undefined),
     findResetToken: vi.fn<DatabaseRepository['findResetToken']>().mockResolvedValue(null),
+    findLatestResetTokenForUser: vi.fn<DatabaseRepository['findLatestResetTokenForUser']>().mockResolvedValue(null),
     markResetTokenUsed: vi.fn<DatabaseRepository['markResetTokenUsed']>().mockResolvedValue(undefined),
     createEmailConfirmationToken: vi.fn<DatabaseRepository['createEmailConfirmationToken']>().mockResolvedValue(undefined),
     findEmailConfirmationToken: vi.fn<DatabaseRepository['findEmailConfirmationToken']>().mockResolvedValue(null),
+    findLatestEmailConfirmationTokenForUser: vi.fn<DatabaseRepository['findLatestEmailConfirmationTokenForUser']>().mockResolvedValue(null),
     markEmailConfirmationTokenUsed: vi.fn<DatabaseRepository['markEmailConfirmationTokenUsed']>().mockResolvedValue(undefined),
     ...overrides,
   };
@@ -241,6 +243,78 @@ describe('DeskAuthService.requestPasswordReset', () => {
     const svc = new DeskAuthService(db, 720, 60);
     expect(await svc.requestPasswordReset('nobody@example.com')).toBeNull();
     expect(db.createResetToken).not.toHaveBeenCalled();
+  });
+
+  it('returns null and skips creating a token when the last one was issued within the cooldown', async () => {
+    const db = makeDb({
+      findUserByEmail: vi.fn().mockResolvedValue(makeUser()),
+      findLatestResetTokenForUser: vi.fn().mockResolvedValue(makeResetToken({ createdAt: new Date().toISOString() })),
+    });
+    const svc = new DeskAuthService(db, 720, 60, 60 * 24, 60);
+    expect(await svc.requestPasswordReset('test@example.com')).toBeNull();
+    expect(db.createResetToken).not.toHaveBeenCalled();
+  });
+
+  it('issues a new token once the cooldown window has passed', async () => {
+    const staleCreatedAt = new Date(Date.now() - 120_000).toISOString();
+    const db = makeDb({
+      findUserByEmail: vi.fn().mockResolvedValue(makeUser()),
+      findLatestResetTokenForUser: vi.fn().mockResolvedValue(makeResetToken({ createdAt: staleCreatedAt })),
+    });
+    const svc = new DeskAuthService(db, 720, 60, 60 * 24, 60);
+    const token = await svc.requestPasswordReset('test@example.com');
+    expect(token).not.toBeNull();
+    expect(db.createResetToken).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('DeskAuthService.requestEmailConfirmation', () => {
+  it('returns a token string for an unconfirmed user', async () => {
+    const db = makeDb({
+      findUserByEmail: vi.fn().mockResolvedValue(makeUser({ emailConfirmedAt: null })),
+    });
+    const svc = new DeskAuthService(db, 720, 60);
+    const token = await svc.requestEmailConfirmation('test@example.com');
+    expect(token).not.toBeNull();
+    expect(db.createEmailConfirmationToken).toHaveBeenCalledTimes(1);
+  });
+
+  it('returns null for an already-confirmed user', async () => {
+    const db = makeDb({
+      findUserByEmail: vi.fn().mockResolvedValue(makeUser({ emailConfirmedAt: new Date().toISOString() })),
+    });
+    const svc = new DeskAuthService(db, 720, 60);
+    expect(await svc.requestEmailConfirmation('test@example.com')).toBeNull();
+    expect(db.createEmailConfirmationToken).not.toHaveBeenCalled();
+  });
+
+  it('returns null for unknown email (no account enumeration)', async () => {
+    const db = makeDb({ findUserByEmail: vi.fn().mockResolvedValue(null) });
+    const svc = new DeskAuthService(db, 720, 60);
+    expect(await svc.requestEmailConfirmation('nobody@example.com')).toBeNull();
+    expect(db.createEmailConfirmationToken).not.toHaveBeenCalled();
+  });
+
+  it('returns null and skips creating a token when the last one was issued within the cooldown', async () => {
+    const db = makeDb({
+      findUserByEmail: vi.fn().mockResolvedValue(makeUser({ emailConfirmedAt: null })),
+      findLatestEmailConfirmationTokenForUser: vi.fn().mockResolvedValue(makeEmailConfirmationToken({ createdAt: new Date().toISOString() })),
+    });
+    const svc = new DeskAuthService(db, 720, 60, 60 * 24, 60);
+    expect(await svc.requestEmailConfirmation('test@example.com')).toBeNull();
+    expect(db.createEmailConfirmationToken).not.toHaveBeenCalled();
+  });
+
+  it('issues a new token once the cooldown window has passed', async () => {
+    const staleCreatedAt = new Date(Date.now() - 120_000).toISOString();
+    const db = makeDb({
+      findUserByEmail: vi.fn().mockResolvedValue(makeUser({ emailConfirmedAt: null })),
+      findLatestEmailConfirmationTokenForUser: vi.fn().mockResolvedValue(makeEmailConfirmationToken({ createdAt: staleCreatedAt })),
+    });
+    const svc = new DeskAuthService(db, 720, 60, 60 * 24, 60);
+    const token = await svc.requestEmailConfirmation('test@example.com');
+    expect(token).not.toBeNull();
+    expect(db.createEmailConfirmationToken).toHaveBeenCalledTimes(1);
   });
 });
 

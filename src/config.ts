@@ -3,6 +3,7 @@
   sessionDurationHours: number;
   resetTokenDurationMinutes: number;
   confirmationTokenDurationMinutes: number;
+  resendCooldownSeconds: number;
   complianceOsUrl: string | undefined;
   registryApiUrl: string | undefined;
   complianceOsApiKey: string | undefined;
@@ -29,6 +30,7 @@ export interface AppEnv {
   SESSION_DURATION_HOURS?: string;
   RESET_TOKEN_DURATION_MINUTES?: string;
   CONFIRMATION_TOKEN_DURATION_MINUTES?: string;
+  RESEND_COOLDOWN_SECONDS?: string;
   COMPLIANCE_OS_URL?: string;
   REGISTRY_API_URL?: string;
   COMPLIANCE_OS_API_KEY?: string;
@@ -65,6 +67,7 @@ export function parseConfig(env: AppEnv): AppConfig {
       env.CONFIRMATION_TOKEN_DURATION_MINUTES,
       1440,
     ),
+    resendCooldownSeconds: parsePositiveInt(env.RESEND_COOLDOWN_SECONDS, 60),
     complianceOsUrl: env.COMPLIANCE_OS_URL,
     registryApiUrl: env.REGISTRY_API_URL,
     complianceOsApiKey: env.COMPLIANCE_OS_API_KEY,

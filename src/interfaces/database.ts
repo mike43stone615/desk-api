@@ -52,10 +52,12 @@ export interface DatabaseRepository {
   // Password reset
   createResetToken(id: string, userId: string, token: string, expiresAt: string): Promise<void>;
   findResetToken(token: string): Promise<PasswordResetToken | null>;
+  findLatestResetTokenForUser(userId: string): Promise<PasswordResetToken | null>;
   markResetTokenUsed(token: string, usedAt: string): Promise<void>;
 
   // Email confirmation
   createEmailConfirmationToken(id: string, userId: string, token: string, expiresAt: string): Promise<void>;
   findEmailConfirmationToken(token: string): Promise<EmailConfirmationToken | null>;
+  findLatestEmailConfirmationTokenForUser(userId: string): Promise<EmailConfirmationToken | null>;
   markEmailConfirmationTokenUsed(token: string, usedAt: string): Promise<void>;
 }

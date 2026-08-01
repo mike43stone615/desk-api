@@ -24,3 +24,7 @@ export function addMinutes(minutes: number): string {
 export function isExpired(expiresAt: string): boolean {
   return new Date(expiresAt) <= new Date();
 }
+
+export function secondsSince(isoTimestamp: string): number {
+  return (Date.now() - new Date(isoTimestamp).getTime()) / 1000;
+}

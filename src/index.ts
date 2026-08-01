@@ -64,6 +64,7 @@ app.use("*", async (c, next) => {
     config.sessionDurationHours,
     config.resetTokenDurationMinutes,
     config.confirmationTokenDurationMinutes,
+    config.resendCooldownSeconds,
   );
   c.set("config", config);
   c.set("authService", authService);

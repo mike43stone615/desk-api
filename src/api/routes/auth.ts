@@ -55,7 +55,9 @@ router.post('/email-confirmation/request', async (c) => {
     audit(c, 'email_confirmation_requested', { email: body.email.trim() });
   }
 
-  return c.json({ ok: true, message: 'If that email needs confirmation, a new link will be sent.' });
+  // Response is identical whether or not the email is registered/unconfirmed/on
+  // cooldown, so this endpoint can't be used to probe account existence or state.
+  return c.json({ ok: true, message: 'If that email needs confirmation, a new link has been sent.' });
 });
 
 // POST /auth/email-confirmation/confirm
@@ -103,9 +105,9 @@ router.post('/password-reset/request', async (c) => {
     await sendPasswordResetEmail(config, body.email.trim(), token, c.get('requestId'));
   }
 
-  return token
-    ? c.json({ ok: true, emailSent: true, message: 'Password reset sent. Check your email for a secure link to choose a new password.' })
-    : c.json({ ok: true, emailSent: false, message: 'No Desk Business account is associated with that email.' });
+  // Response is identical whether or not the email is registered or on cooldown,
+  // so this endpoint can't be used to probe account existence.
+  return c.json({ ok: true, message: 'If that email has a Desk Business account, a reset link has been sent.' });
 });
 
 // POST /auth/password-reset/confirm

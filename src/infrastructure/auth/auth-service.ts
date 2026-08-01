@@ -1,7 +1,7 @@
 ﻿import type { AuthResult, AuthService, PublicUser, SignupResult } from '../../interfaces/auth.js';
 import type { DatabaseRepository, User } from '../../interfaces/database.js';
 import { hashPassword, verifyPassword } from '../../domain/auth/password.js';
-import { addHours, addMinutes, generateId, generateToken, isExpired, nowUtc } from '../../domain/auth/tokens.js';
+import { addHours, addMinutes, generateId, generateToken, isExpired, nowUtc, secondsSince } from '../../domain/auth/tokens.js';
 
 export class DeskAuthService implements AuthService {
   constructor(
@@ -9,6 +9,7 @@ export class DeskAuthService implements AuthService {
     private readonly sessionDurationHours: number,
     private readonly resetTokenDurationMinutes: number,
     private readonly confirmationTokenDurationMinutes = 60 * 24,
+    private readonly resendCooldownSeconds = 60,
   ) {}
 
   async hashPassword(password: string): Promise<string> {
@@ -72,6 +73,10 @@ export class DeskAuthService implements AuthService {
   async requestPasswordReset(email: string): Promise<string | null> {
     const user = await this.db.findUserByEmail(email);
     if (!user) return null;
+
+    const latest = await this.db.findLatestResetTokenForUser(user.id);
+    if (latest && secondsSince(latest.createdAt) < this.resendCooldownSeconds) return null;
+
     const token = generateToken(32);
     await this.db.createResetToken(generateId(), user.id, token, addMinutes(this.resetTokenDurationMinutes));
     return token;
@@ -95,6 +100,10 @@ export class DeskAuthService implements AuthService {
   async requestEmailConfirmation(email: string): Promise<string | null> {
     const user = await this.db.findUserByEmail(email);
     if (!user || user.emailConfirmedAt) return null;
+
+    const latest = await this.db.findLatestEmailConfirmationTokenForUser(user.id);
+    if (latest && secondsSince(latest.createdAt) < this.resendCooldownSeconds) return null;
+
     return this.createEmailConfirmationToken(user.id);
   }
 

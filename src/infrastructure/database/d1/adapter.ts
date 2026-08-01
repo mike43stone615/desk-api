@@ -92,6 +92,14 @@ export class D1DatabaseAdapter implements DatabaseRepository {
     return row ? mapResetToken(row) : null;
   }
 
+  async findLatestResetTokenForUser(userId: string): Promise<PasswordResetToken | null> {
+    const row = await this.db
+      .prepare('SELECT id, user_id, token, expires_at, used_at, created_at FROM password_reset_tokens WHERE user_id = ? ORDER BY created_at DESC LIMIT 1')
+      .bind(userId)
+      .first<ResetTokenRow>();
+    return row ? mapResetToken(row) : null;
+  }
+
   async markResetTokenUsed(token: string, usedAt: string): Promise<void> {
     await this.db
       .prepare('UPDATE password_reset_tokens SET used_at = ? WHERE token = ?')
@@ -114,6 +122,14 @@ export class D1DatabaseAdapter implements DatabaseRepository {
     const row = await this.db
       .prepare('SELECT id, user_id, token, expires_at, used_at, created_at FROM email_confirmation_tokens WHERE token = ?')
       .bind(token)
+      .first<EmailConfirmationTokenRow>();
+    return row ? mapEmailConfirmationToken(row) : null;
+  }
+
+  async findLatestEmailConfirmationTokenForUser(userId: string): Promise<EmailConfirmationToken | null> {
+    const row = await this.db
+      .prepare('SELECT id, user_id, token, expires_at, used_at, created_at FROM email_confirmation_tokens WHERE user_id = ? ORDER BY created_at DESC LIMIT 1')
+      .bind(userId)
       .first<EmailConfirmationTokenRow>();
     return row ? mapEmailConfirmationToken(row) : null;
   }
