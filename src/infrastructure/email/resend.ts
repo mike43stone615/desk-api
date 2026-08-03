@@ -9,10 +9,10 @@ export async function sendPasswordResetEmail(
   const resetUrl = `${config.appBaseUrl}/reset-password?token=${encodeURIComponent(token)}`;
   await sendEmail(config, {
     to,
-    subject: 'Reset your Desk Business password',
+    subject: 'Reset your Desk password',
     html: themedEmailHtml({
       title: 'Reset your password',
-      body: 'We received a request to reset the password for your Desk Business account. Choose a new password with the secure link below.',
+      body: 'We received a request to reset the password for your Desk account. Choose a new password with the secure link below.',
       actionLabel: 'Reset password',
       actionUrl: resetUrl,
       note: `This link expires in ${config.resetTokenDurationMinutes} minutes. If you did not request a password reset, you can safely ignore this email.`,
@@ -33,13 +33,13 @@ export async function sendEmailConfirmationEmail(
   const confirmationUrl = `${config.appBaseUrl}/confirm-email?token=${encodeURIComponent(token)}`;
   await sendEmail(config, {
     to,
-    subject: 'Confirm your Desk Business email',
+    subject: 'Confirm your Desk email',
     html: themedEmailHtml({
       title: 'Confirm your email',
-      body: 'Welcome to Desk Business. Confirm this email address before opening your business workspace.',
+      body: 'Welcome to Desk. Confirm this email address before opening your business workspace.',
       actionLabel: 'Confirm email',
       actionUrl: confirmationUrl,
-      note: 'If you did not create a Desk Business account, you can safely ignore this email.',
+      note: 'If you did not create a Desk account, you can safely ignore this email.',
     }),
     requestId,
     skippedEvent: 'email_confirmation_skipped',
@@ -84,7 +84,7 @@ async function sendEmail(config: AppConfig, request: EmailRequest): Promise<void
       'Content-Type': 'application/json',
     },
     body: JSON.stringify({
-      from: `Desk Business <${config.emailFrom}>`,
+      from: `Desk <${config.emailFrom}>`,
       to: [request.to],
       subject: request.subject,
       html: request.html,
@@ -128,8 +128,8 @@ function themedEmailHtml(content: ThemedEmailContent): string {
           <tr>
             <td style="padding:8px 24px">
               <a href="https://www.deskbusiness.co" style="display:inline-block;text-decoration:none;color:#FFFFFF">
-                <img src="${logoUrl}" width="32" height="32" alt="Desk Business" style="width:32px;height:32px;vertical-align:middle;border:0;display:inline-block;margin-right:12px">
-                <span style="font-size:20px;line-height:32px;font-weight:700;color:#FFFFFF;vertical-align:middle">Desk Business</span>
+                <img src="${logoUrl}" width="32" height="32" alt="Desk" style="width:32px;height:32px;vertical-align:middle;border:0;display:inline-block;margin-right:12px">
+                <span style="font-size:20px;line-height:32px;font-weight:700;color:#FFFFFF;vertical-align:middle">Desk</span>
               </a>
             </td>
           </tr>
@@ -140,7 +140,7 @@ function themedEmailHtml(content: ThemedEmailContent): string {
               <table width="100%" cellpadding="0" cellspacing="0" role="presentation" style="max-width:440px;background:#0E1626;border:1px solid #22304A;border-radius:16px;border-collapse:separate;overflow:hidden">
                 <tr>
                   <td style="padding:24px 24px 0">
-                    <img src="${logoUrl}" width="44" height="44" alt="Desk Business" style="width:44px;height:44px;border:0;display:block">
+                    <img src="${logoUrl}" width="44" height="44" alt="Desk" style="width:44px;height:44px;border:0;display:block">
                   </td>
                 </tr>
                 <tr>

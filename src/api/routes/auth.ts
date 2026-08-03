@@ -107,7 +107,7 @@ router.post('/password-reset/request', async (c) => {
 
   // Response is identical whether or not the email is registered or on cooldown,
   // so this endpoint can't be used to probe account existence.
-  return c.json({ ok: true, message: 'If that email has a Desk Business account, a reset link has been sent.' });
+  return c.json({ ok: true, message: 'If that email has a Desk account, a reset link has been sent.' });
 });
 
 // POST /auth/password-reset/confirm
