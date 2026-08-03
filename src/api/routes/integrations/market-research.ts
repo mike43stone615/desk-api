@@ -24,6 +24,23 @@ type ResearchRequest = {
   regulatoryStatuses?: string[];
 };
 
+type CategoryKey =
+  | "demand"
+  | "competition"
+  | "revenue"
+  | "startupDifficulty"
+  | "regulatoryFriction"
+  | "dataQuality";
+
+const CATEGORY_LABELS: Record<CategoryKey, string> = {
+  demand: "Demand",
+  competition: "Competition",
+  revenue: "Revenue",
+  startupDifficulty: "Startup Difficulty",
+  regulatoryFriction: "Regulatory Friction",
+  dataQuality: "Data Quality",
+};
+
 type EvidenceItem = {
   title: string;
   value: string;
@@ -31,15 +48,18 @@ type EvidenceItem = {
   source: string;
   sourceUrl: string;
   quality: "strong" | "medium" | "limited";
+  category: CategoryKey;
 };
 
-type ScoreBreakdown = {
-  demand: number;
-  competition: number;
-  revenue: number;
-  startupDifficulty: number;
-  regulatoryFriction: number;
-  dataQuality: number;
+type CategorySource = { name: string; url: string };
+
+type CategoryResult = {
+  key: CategoryKey;
+  label: string;
+  score: number;
+  rationale: string;
+  primarySource: CategorySource;
+  evidence: EvidenceItem[];
 };
 
 const STATE_FIPS: Record<string, string> = {
@@ -170,7 +190,8 @@ router.post("/analyze", async (c) => {
 
   const config = c.get("config");
   const stateFips = STATE_FIPS[state];
-  const naics = inferNaics(industry, businessIdea);
+  const naicsCodes = inferNaicsCodes(industry, businessIdea);
+  const stateName = STATE_NAMES[state] ?? state;
 
   const [
     acs,
@@ -187,10 +208,10 @@ router.post("/analyze", async (c) => {
     planFields,
   ] = await Promise.all([
     fetchAcsState(stateFips, config.censusApiKey),
-    fetchCbpState(stateFips, naics, config.censusApiKey),
-    fetchNonemployerState(stateFips, naics, config.censusApiKey),
+    fetchCbpState(stateFips, naicsCodes, config.censusApiKey),
+    fetchNonemployerState(stateFips, naicsCodes, config.censusApiKey),
     fetchBeaRegionalState(state, stateFips, config.beaApiKey),
-    fetchQcewState(stateFips, naics),
+    fetchQcewState(stateFips, naicsCodes),
     fetchCachedOrLiveOewsState(c.env.DB, state),
     fetchGooglePlacesCompetition(
       config,
@@ -227,6 +248,7 @@ router.post("/analyze", async (c) => {
         "U.S. Census Bureau",
         "https://api.census.gov/data/key_signup.html",
         "limited",
+        "dataQuality",
       ),
     );
   }
@@ -242,35 +264,53 @@ router.post("/analyze", async (c) => {
   evidence.push(...guidance.evidence);
   evidence.push(...planFields.evidence);
 
-  const breakdown = score({
-    acs,
-    cbp,
-    nonemployer,
-    bea,
-    qcew,
-    oews,
-    googlePlaces,
-    foursquare,
-    compliance,
-    registry,
-    guidance,
-    planFields,
-  });
-  const total = Object.values(breakdown).reduce((sum, value) => sum + value, 0);
+  if (naicsCodes.length > 1) {
+    evidence.push(
+      item(
+        "Compound classification detected",
+        `${naicsCodes.length} NAICS codes blended`,
+        `"${businessIdea}" reads as spanning more than one industry code (manufacturing plus installation/contracting). Demand, competition, and revenue data below are blended across NAICS ${naicsCodes.join(" and ")} instead of a single code, so the score reflects the full scope of the business rather than just one slice of it.`,
+        "Desk classification",
+        "https://www.census.gov/naics/",
+        "medium",
+        "dataQuality",
+      ),
+    );
+  }
+
   const confidence =
-    evidence.filter((item) => item.quality !== "limited").length >= 4
+    evidence.filter((entry) => entry.quality !== "limited").length >= 4
       ? "medium"
       : "limited";
 
-  return c.json({
-    score: total,
-    verdict: verdict(total),
-    summary: summary(total, industry, STATE_NAMES[state] ?? state, confidence),
-    confidence,
-    breakdown,
+  const categories = buildCategories(
+    {
+      acs,
+      cbp,
+      nonemployer,
+      bea,
+      qcew,
+      oews,
+      googlePlaces,
+      foursquare,
+      compliance,
+      registry,
+      guidance,
+      planFields,
+    },
+    state,
     evidence,
+  );
+  const overallAverage = Math.round(
+    categories.reduce((sum, cat) => sum + cat.score, 0) / categories.length,
+  );
+
+  return c.json({
+    summary: summary(industry, stateName, confidence, naicsCodes.length > 1),
+    confidence,
+    categories,
     riskFlags: riskFlags({
-      total,
+      overallAverage,
       acs,
       cbp,
       nonemployer,
@@ -284,31 +324,52 @@ router.post("/analyze", async (c) => {
       guidance,
       planFields,
     }),
-    recommendedNextActions: nextActions(total, compliance.requirementCount),
-    sourcesUsed: evidence.map((item) => item.source),
+    recommendedNextActions: nextActions(
+      overallAverage,
+      compliance.requirementCount,
+    ),
+    sourcesUsed: evidence.map((entry) => entry.source),
     paidSourcesExcluded: ["Yelp Fusion", "Data Axle"],
   });
 });
 
 export { router as marketResearchRouter };
 
-function score(input: {
-  acs: MetricSet | null;
-  cbp: MetricSet | null;
-  nonemployer: MetricSet | null;
-  bea: MetricSet | null;
-  qcew: MetricSet | null;
-  oews: MetricSet | null;
-  googlePlaces: MetricSet | null;
-  foursquare: MetricSet | null;
-  compliance: ComplianceSignal;
-  registry: MetricSet;
-  guidance: MetricSet;
-  planFields: MetricSet;
-}): ScoreBreakdown {
+// Every category below is scored independently on its own 0-100 scale — no
+// shared point pool across categories, so a business does not need to be
+// weak in one category to score well in another. Within a category,
+// sub-signal point allocations are chosen so a business
+// that maxes out every available signal lands at exactly 100, and are
+// deliberately weighted toward the strongest, most broadly-available public
+// signal for that category (e.g. population dominates demand; competitor
+// density dominates competition) rather than splitting evenly.
+function buildCategories(
+  input: {
+    acs: MetricSet | null;
+    cbp: MetricSet | null;
+    nonemployer: MetricSet | null;
+    bea: MetricSet | null;
+    qcew: MetricSet | null;
+    oews: MetricSet | null;
+    googlePlaces: MetricSet | null;
+    foursquare: MetricSet | null;
+    compliance: ComplianceSignal;
+    registry: MetricSet;
+    guidance: MetricSet;
+    planFields: MetricSet;
+  },
+  state: string,
+  allEvidence: EvidenceItem[],
+): CategoryResult[] {
+  const stateName = STATE_NAMES[state] ?? state;
+  const evidenceFor = (key: CategoryKey) =>
+    allEvidence.filter((entry) => entry.category === key);
+
   const population = input.acs?.values.population ?? 0;
   const income = input.acs?.values.medianIncome ?? 0;
   const establishments = input.cbp?.values.establishments ?? 0;
+  const hasLocalCompetitorData =
+    Boolean(input.foursquare) || Boolean(input.googlePlaces);
   const localCompetitors = Math.max(
     input.foursquare?.values.localCompetitors ?? 0,
     input.googlePlaces?.values.googleCompetitors ?? 0,
@@ -321,72 +382,92 @@ function score(input: {
   const beaGrowth = input.bea?.values.personalIncomeGrowth ?? 0;
   const planCompleteness = input.planFields.values.planCompleteness ?? 0;
   const requirements = input.compliance.requirementCount;
+  const trademarkConflict = (input.registry.values.trademarkConflict ?? 0) > 0;
+  const registryChecked = input.registry.evidence.length > 0;
 
-  const demand = clamp(
-    Math.round(
-      (population > 500000
-        ? 12
-        : population > 100000
-          ? 9
-          : population > 25000
-            ? 6
-            : 3) +
-        (income > 90000 ? 8 : income > 65000 ? 6 : income > 45000 ? 4 : 2) +
-        ((establishments > 1000
-          ? 5
-          : establishments > 250
-            ? 4
-            : establishments > 50
-              ? 3
-              : 1) +
-          (beaGrowth > 4 ? 2 : beaGrowth > 1 ? 1 : 0)),
-    ),
+  // ── Demand: how big and how well-funded is the potential customer base ──
+  const populationTier =
+    population > 500000 ? 40 : population > 100000 ? 30 : population > 25000 ? 20 : 10;
+  const incomeTier =
+    income > 90000 ? 25 : income > 65000 ? 19 : income > 45000 ? 13 : 7;
+  const establishmentTier =
+    establishments > 1000 ? 20 : establishments > 250 ? 15 : establishments > 50 ? 10 : 5;
+  const growthTier = beaGrowth > 4 ? 15 : beaGrowth > 1 ? 8 : 0;
+  const demandScore = clamp(
+    populationTier + incomeTier + establishmentTier + growthTier,
     0,
-    25,
+    100,
   );
-  const competition = clamp(
-    localCompetitors > 15
-      ? 7
-      : localCompetitors > 8
-        ? 10
-        : localCompetitors > 3
-          ? 14
-          : establishments > 2000
-            ? 9
-            : establishments > 500
-              ? 13
-              : establishments > 100
-                ? 16
-                : 12,
+  const demandRationale =
+    `${verdictWord(demandScore)} demand (${demandScore}/100): ${stateName} has a population of ` +
+    `${population.toLocaleString() || "an unreported"} and median household income of ${money(income)}, ` +
+    `with ${establishments.toLocaleString()} existing establishments in this category and ` +
+    `${beaGrowth.toFixed(1)}% recent regional income growth.`;
+
+  // ── Competition: how crowded is the category near the formation city ──
+  const competitionScore = clamp(
+    hasLocalCompetitorData
+      ? localCompetitors > 15
+        ? 35
+        : localCompetitors > 8
+          ? 55
+          : localCompetitors > 3
+            ? 75
+            : 90
+      : establishments > 2000
+        ? 45
+        : establishments > 500
+          ? 60
+          : establishments > 100
+            ? 75
+            : 65,
     0,
-    20,
+    100,
   );
-  const revenue = clamp(
-    Math.round(
-      (receipts > 1000000
-        ? 8
-        : receipts > 250000
-          ? 6
-          : receipts > 50000
-            ? 4
-            : 2) +
-        (income > 75000 ? 6 : income > 50000 ? 4 : 2) +
-        ((wages > 0 && wages < 1200 ? 5 : wages < 1800 ? 4 : 2) +
-          (planCompleteness >= 3 ? 2 : planCompleteness >= 1 ? 1 : 0)),
-    ),
+  const competitionRationale = hasLocalCompetitorData
+    ? `${verdictWord(competitionScore)} competitive landscape (${competitionScore}/100): ${localCompetitors} nearby matching places were found within Google/Foursquare search results for this category and location.`
+    : `${verdictWord(competitionScore)} competitive landscape (${competitionScore}/100): local place-search data was unavailable, so this falls back to ${establishments.toLocaleString()} statewide employer establishments in this category as a rougher competition proxy.`;
+
+  // ── Revenue: how much cash is likely moving through this category ──
+  const receiptsTier =
+    receipts > 1000000 ? 40 : receipts > 250000 ? 30 : receipts > 50000 ? 20 : 10;
+  const revenueIncomeTier = income > 75000 ? 25 : income > 50000 ? 17 : 9;
+  const wageTier = wages > 0 && wages < 1200 ? 20 : wages > 0 && wages < 1800 ? 14 : 8;
+  const planTier = planCompleteness >= 3 ? 15 : planCompleteness >= 1 ? 8 : 0;
+  const revenueScore = clamp(
+    receiptsTier + revenueIncomeTier + wageTier + planTier,
     0,
-    20,
+    100,
   );
-  const startupDifficulty = clamp(
-    requirements > 12 ? 5 : requirements > 6 ? 9 : requirements > 2 ? 12 : 14,
+  const revenueRationale =
+    `${verdictWord(revenueScore)} revenue potential (${revenueScore}/100): businesses without paid employees in this category average ` +
+    `${money(receipts)} in receipts in ${stateName}, against a labor-cost benchmark of ${wages > 0 ? `${money(wages)}/week` : "an unreported wage"}. ` +
+    `${planCompleteness}/3 of your own pricing/validation plan fields are filled in, which sharpens this score without another AI call.`;
+
+  // ── Startup difficulty: how much paperwork stands between here and open ──
+  const startupDifficultyScore = clamp(
+    requirements > 12 ? 20 : requirements > 6 ? 45 : requirements > 2 ? 70 : 95,
     0,
-    15,
+    100,
   );
-  const regulatoryFriction = clamp(
-    requirements > 12 ? 3 : requirements > 6 ? 5 : requirements > 2 ? 7 : 9,
+  const startupDifficultyRationale =
+    `${verdictWord(startupDifficultyScore)} to start (${startupDifficultyScore}/100): Desk found ${requirements} likely license/permit/registration requirement(s) for this category and state — more requirements means more time and cost before you can legally open.`;
+
+  // ── Regulatory friction: how much ongoing legal/compliance drag exists ──
+  const regulatoryBaseTier =
+    requirements > 12 ? 25 : requirements > 6 ? 50 : requirements > 2 ? 70 : 90;
+  const registryAdjustment = !registryChecked ? 0 : trademarkConflict ? -15 : 10;
+  const regulatoryFrictionScore = clamp(
+    regulatoryBaseTier + registryAdjustment,
     0,
-    10,
+    100,
   );
+  const regulatoryFrictionRationale =
+    `${verdictWord(regulatoryFrictionScore)} regulatory friction (${regulatoryFrictionScore}/100): based on the same ${requirements} requirement(s) plus ` +
+    `${registryChecked ? (trademarkConflict ? "a potential name/trademark conflict, which adds legal risk on top of the base licensing burden" : "a clean name/trademark check, which removes one common source of formation delay") : "a name/trademark check that has not run yet (enter a business name to sharpen this)"}.`;
+
+  // ── Data quality: how much of this report rests on live public data ──
+  const totalPossibleSources = 12;
   const sourceCount =
     [
       input.acs,
@@ -402,15 +483,73 @@ function score(input: {
     (input.registry.evidence.length ? 1 : 0) +
     (input.guidance.evidence.length ? 1 : 0) +
     (input.planFields.evidence.length ? 1 : 0);
-  const dataQuality = clamp(sourceCount * 2, 0, 10);
-  return {
-    demand,
-    competition,
-    revenue,
-    startupDifficulty,
-    regulatoryFriction,
-    dataQuality,
-  };
+  const dataQualityScore = clamp(
+    Math.round((sourceCount / totalPossibleSources) * 100),
+    0,
+    100,
+  );
+  const dataQualityRationale =
+    `${verdictWord(dataQualityScore)} data coverage (${dataQualityScore}/100): ${sourceCount} of ${totalPossibleSources} possible free public data sources returned usable data for this run. Add the missing API keys shown below to raise this score.`;
+
+  return [
+    {
+      key: "demand",
+      label: CATEGORY_LABELS.demand,
+      score: demandScore,
+      rationale: demandRationale,
+      primarySource: { name: "U.S. Census ACS", url: "https://www.census.gov/programs-surveys/acs" },
+      evidence: evidenceFor("demand"),
+    },
+    {
+      key: "competition",
+      label: CATEGORY_LABELS.competition,
+      score: competitionScore,
+      rationale: competitionRationale,
+      primarySource: hasLocalCompetitorData
+        ? { name: "Google Places", url: "https://developers.google.com/maps/documentation/places/web-service/text-search" }
+        : { name: "Census County Business Patterns", url: "https://www.census.gov/programs-surveys/cbp.html" },
+      evidence: evidenceFor("competition"),
+    },
+    {
+      key: "revenue",
+      label: CATEGORY_LABELS.revenue,
+      score: revenueScore,
+      rationale: revenueRationale,
+      primarySource: { name: "Census Nonemployer Statistics", url: "https://www.census.gov/programs-surveys/nonemployer-statistics.html" },
+      evidence: evidenceFor("revenue"),
+    },
+    {
+      key: "startupDifficulty",
+      label: CATEGORY_LABELS.startupDifficulty,
+      score: startupDifficultyScore,
+      rationale: startupDifficultyRationale,
+      primarySource: { name: "Compliance-OS", url: "https://www.sba.gov/business-guide/launch-your-business/apply-licenses-permits" },
+      evidence: evidenceFor("startupDifficulty"),
+    },
+    {
+      key: "regulatoryFriction",
+      label: CATEGORY_LABELS.regulatoryFriction,
+      score: regulatoryFrictionScore,
+      rationale: regulatoryFrictionRationale,
+      primarySource: { name: "SBA Business Guide", url: "https://www.sba.gov/business-guide/launch-your-business/apply-licenses-permits" },
+      evidence: evidenceFor("regulatoryFriction"),
+    },
+    {
+      key: "dataQuality",
+      label: CATEGORY_LABELS.dataQuality,
+      score: dataQualityScore,
+      rationale: dataQualityRationale,
+      primarySource: { name: "U.S. Census Bureau", url: "https://www.census.gov/data/developers/data-sets.html" },
+      evidence: evidenceFor("dataQuality"),
+    },
+  ];
+}
+
+function verdictWord(score: number): string {
+  if (score >= 80) return "Strong";
+  if (score >= 65) return "Promising";
+  if (score >= 50) return "Fair";
+  return "Weak";
 }
 
 type MetricSet = { values: Record<string, number>; evidence: EvidenceItem[] };
@@ -446,6 +585,7 @@ async function fetchAcsState(
         "U.S. Census ACS",
         url,
         "strong",
+        "demand",
       ),
       item(
         "Median household income",
@@ -454,12 +594,13 @@ async function fetchAcsState(
         "U.S. Census ACS",
         url,
         "strong",
+        "demand",
       ),
     ],
   };
 }
 
-async function fetchCbpState(
+async function fetchCbpForCode(
   stateFips: string | undefined,
   naics: string,
   key: string | undefined,
@@ -486,12 +627,33 @@ async function fetchCbpState(
         "Census County Business Patterns",
         url,
         "strong",
+        "demand",
       ),
     ],
   };
 }
 
-async function fetchNonemployerState(
+// A business idea can span more than one NAICS code (see inferNaicsCodes,
+// e.g. a company that both manufactures its own materials and installs
+// them) — fetch each matched code and sum the establishment/employment/
+// payroll counts, since together they represent the full set of businesses
+// this idea should be benchmarked against, not just one slice of it.
+async function fetchCbpState(
+  stateFips: string | undefined,
+  naicsCodes: string[],
+  key: string | undefined,
+): Promise<MetricSet | null> {
+  const results = await Promise.all(
+    naicsCodes.map((naics) => fetchCbpForCode(stateFips, naics, key)),
+  );
+  return mergeMetricSets(results, (sets) => ({
+    establishments: sum(sets, (s) => s.values.establishments),
+    employment: sum(sets, (s) => s.values.employment),
+    annualPayroll: sum(sets, (s) => s.values.annualPayroll),
+  }));
+}
+
+async function fetchNonemployerForCode(
   stateFips: string | undefined,
   naics: string,
   key: string | undefined,
@@ -517,9 +679,24 @@ async function fetchNonemployerState(
         "Census Nonemployer Statistics",
         url,
         "medium",
+        "revenue",
       ),
     ],
   };
+}
+
+async function fetchNonemployerState(
+  stateFips: string | undefined,
+  naicsCodes: string[],
+  key: string | undefined,
+): Promise<MetricSet | null> {
+  const results = await Promise.all(
+    naicsCodes.map((naics) => fetchNonemployerForCode(stateFips, naics, key)),
+  );
+  return mergeMetricSets(results, (sets) => ({
+    nonemployerEstablishments: sum(sets, (s) => s.values.nonemployerEstablishments),
+    receipts: sum(sets, (s) => s.values.receipts),
+  }));
 }
 
 async function fetchBeaRegionalState(
@@ -563,6 +740,7 @@ async function fetchBeaRegionalState(
           "BEA Regional",
           url.toString(),
           "medium",
+          "demand",
         ),
       ],
     };
@@ -579,6 +757,7 @@ function beaNotConfiguredItem(): EvidenceItem {
     "BEA Regional",
     "https://apps.bea.gov/API/signup/",
     "limited",
+    "dataQuality",
   );
 }
 
@@ -586,7 +765,14 @@ async function fetchCachedOrLiveOewsState(
   db: D1Database,
   state: string,
 ): Promise<MetricSet | null> {
-  return (await lookupCachedOewsState(db, state)) ?? fetchOewsState(state);
+  const cached = await lookupCachedOewsState(db, state);
+  if (!cached) return fetchOewsState(state);
+  // oews-cache.ts is a shared domain module with no notion of the
+  // market-research category tag, so stamp it on here at the boundary.
+  return {
+    values: cached.values,
+    evidence: cached.evidence.map((entry) => ({ ...entry, category: "revenue" })),
+  };
 }
 
 async function fetchOewsState(state: string): Promise<MetricSet | null> {
@@ -613,6 +799,7 @@ async function fetchOewsState(state: string): Promise<MetricSet | null> {
           "BLS OEWS",
           url,
           "medium",
+          "revenue",
         ),
       ],
     };
@@ -629,6 +816,7 @@ function oewsUnavailableItem(state: string): EvidenceItem {
     "BLS OEWS",
     "https://www.bls.gov/oes/tables.htm",
     "limited",
+    "dataQuality",
   );
 }
 
@@ -642,6 +830,7 @@ function googlePlacesUnavailableItem(hasKey: string | undefined): EvidenceItem {
     "Google Places",
     "https://developers.google.com/maps/documentation/places/web-service/text-search",
     "limited",
+    "dataQuality",
   );
 }
 
@@ -709,6 +898,7 @@ async function fetchGooglePlacesCompetition(
           "Google Places",
           "https://developers.google.com/maps/documentation/places/web-service/text-search",
           "medium",
+          "competition",
         ),
         item(
           "Google review/price signals",
@@ -717,6 +907,7 @@ async function fetchGooglePlacesCompetition(
           "Google Places",
           "https://developers.google.com/maps/documentation/places/web-service/place-data-fields",
           "medium",
+          "competition",
         ),
       ],
     };
@@ -742,6 +933,7 @@ async function fetchRegistrySignals(
           "Registry API",
           "https://www.uspto.gov/trademarks/search",
           "limited",
+          "regulatoryFriction",
         ),
       ],
     };
@@ -793,6 +985,7 @@ async function fetchRegistrySignals(
           "Registry API",
           `${config.registryApiUrl.replace(/\/$/, "")}/docs`,
           conflict ? "medium" : "strong",
+          "regulatoryFriction",
         ),
       ],
     };
@@ -837,6 +1030,7 @@ function fetchGovernmentGuidance(
         "SBA Business Guide",
         "https://www.sba.gov/business-guide/launch-your-business/apply-licenses-permits",
         "medium",
+        "regulatoryFriction",
       ),
       item(
         "State registry/licensing guidance",
@@ -845,6 +1039,7 @@ function fetchGovernmentGuidance(
         "State registry/licensing boards",
         statePortalUrl(state),
         "medium",
+        "regulatoryFriction",
       ),
       item(
         "SBA structure guidance",
@@ -853,6 +1048,7 @@ function fetchGovernmentGuidance(
         "SBA structure guidance",
         "https://www.sba.gov/business-guide/launch-your-business/choose-business-structure",
         "medium",
+        "regulatoryFriction",
       ),
       item(
         "IRS business tax guidance",
@@ -863,6 +1059,7 @@ function fetchGovernmentGuidance(
         "IRS business guidance",
         "https://www.irs.gov/businesses/small-businesses-self-employed/business-structures",
         "medium",
+        "regulatoryFriction",
       ),
     ],
   };
@@ -889,6 +1086,7 @@ function analyzePlanFields(body: ResearchRequest): MetricSet {
         "Desk setup draft",
         "local setup draft",
         completeness >= 2 ? "medium" : "limited",
+        "revenue",
       ),
     ],
   };
@@ -958,7 +1156,7 @@ function statePortalUrl(state: string): string {
     "https://www.sba.gov/business-guide/launch-your-business/register-your-business"
   );
 }
-async function fetchQcewState(
+async function fetchQcewForCode(
   stateFips: string | undefined,
   naics: string,
 ): Promise<MetricSet | null> {
@@ -991,6 +1189,7 @@ async function fetchQcewState(
           "BLS QCEW",
           url,
           "medium",
+          "revenue",
         ),
         item(
           "QCEW establishments",
@@ -999,12 +1198,30 @@ async function fetchQcewState(
           "BLS QCEW",
           url,
           "medium",
+          "competition",
         ),
       ],
     };
   } catch {
     return null;
   }
+}
+
+async function fetchQcewState(
+  stateFips: string | undefined,
+  naicsCodes: string[],
+): Promise<MetricSet | null> {
+  const results = await Promise.all(
+    naicsCodes.map((naics) => fetchQcewForCode(stateFips, naics)),
+  );
+  return mergeMetricSets(results, (sets) => ({
+    // Wages don't sum across codes the way establishment counts do —
+    // average them so a compound business idea gets a representative
+    // blended wage benchmark instead of a doubled one.
+    averageWeeklyWage:
+      sum(sets, (s) => s.values.averageWeeklyWage) / sets.length,
+    establishments: sum(sets, (s) => s.values.establishments),
+  }));
 }
 
 async function fetchFoursquareCompetition(
@@ -1050,6 +1267,7 @@ async function fetchFoursquareCompetition(
           "Foursquare Places",
           url.toString(),
           "medium",
+          "competition",
         ),
       ],
     };
@@ -1066,6 +1284,7 @@ function foursquareNotConfiguredItem(): EvidenceItem {
     "Foursquare Places",
     "https://foursquare.com/developer/",
     "limited",
+    "dataQuality",
   );
 }
 async function fetchComplianceSignals(
@@ -1096,6 +1315,7 @@ async function fetchComplianceSignals(
               "Compliance-OS",
               url,
               count > 0 ? "strong" : "limited",
+              "startupDifficulty",
             ),
           ],
         };
@@ -1118,6 +1338,7 @@ async function fetchComplianceSignals(
         "Desk compliance fallback",
         url,
         "limited",
+        "startupDifficulty",
       ),
     ],
   };
@@ -1190,6 +1411,7 @@ function item(
   source: string,
   sourceUrl: string,
   quality: EvidenceItem["quality"],
+  category: CategoryKey,
 ): EvidenceItem {
   return {
     title,
@@ -1198,6 +1420,7 @@ function item(
     source,
     sourceUrl: redactUrlSecrets(sourceUrl),
     quality,
+    category,
   };
 }
 
@@ -1227,7 +1450,7 @@ function redactUrlSecrets(sourceUrl: string): string {
 }
 
 function riskFlags(input: {
-  total: number;
+  overallAverage: number;
   acs: MetricSet | null;
   cbp: MetricSet | null;
   nonemployer: MetricSet | null;
@@ -1275,9 +1498,9 @@ function riskFlags(input: {
     flags.push(
       "Industry-level economic data was limited, so the score confidence is lower.",
     );
-  if (input.total < 55)
+  if (input.overallAverage < 55)
     flags.push(
-      "The early score is weak; validate demand before formation or major spending.",
+      "The early scores are weak overall; validate demand before formation or major spending.",
     );
   return flags.length
     ? flags
@@ -1286,13 +1509,16 @@ function riskFlags(input: {
       ];
 }
 
-function nextActions(total: number, requirementCount: number): string[] {
+function nextActions(
+  overallAverage: number,
+  requirementCount: number,
+): string[] {
   const actions =
-    total >= 75
+    overallAverage >= 75
       ? [
           "Continue setup, but keep the market assumptions attached to the business plan.",
         ]
-      : total >= 55
+      : overallAverage >= 55
         ? [
             "Proceed carefully and validate pricing or customer demand before formation.",
           ]
@@ -1309,35 +1535,47 @@ function nextActions(total: number, requirementCount: number): string[] {
   return actions;
 }
 
-function verdict(score: number): string {
-  if (score >= 80) return "Strong";
-  if (score >= 65) return "Promising";
-  if (score >= 50) return "Risky";
-  return "Weak";
-}
-
 function summary(
-  score: number,
   industry: string,
   state: string,
   confidence: string,
+  isCompound: boolean,
 ): string {
-  return `${industry || "This idea"} in ${state} currently scores ${score}/100 from free official data. Confidence is ${confidence} because paid competitor sources are excluded.`;
+  const scope = isCompound
+    ? `${industry || "This idea"} was benchmarked across more than one industry code in ${state}`
+    : `${industry || "This idea"} was benchmarked in ${state}`;
+  return `${scope} against demand, competition, revenue, startup difficulty, regulatory friction, and data quality using free official data sources. Confidence is ${confidence} because paid competitor sources are excluded.`;
 }
 
-function inferNaics(industry: string, idea: string): string {
+// A business idea can span more than one NAICS sector (e.g. a company that
+// both manufactures its own materials and installs them spans Manufacturing
+// and Construction) — detect that and return up to two codes so callers can
+// blend data across both instead of forcing the idea into a single slice.
+export function inferNaicsCodes(industry: string, idea: string): string[] {
   const text = `${industry} ${idea}`.toLowerCase();
-  if (/food|restaurant|cafe|catering/.test(text)) return "72";
-  if (/retail|shop|store|ecommerce|commerce/.test(text)) return "44";
+  const codes = new Set<string>();
+  if (/food|restaurant|cafe|catering/.test(text)) codes.add("72");
+  if (/retail|shop|store|ecommerce|commerce/.test(text)) codes.add("44");
   if (/construction|contractor|plumb|electric|roof|build/.test(text))
-    return "23";
-  if (/health|medical|dental|therapy|wellness|fitness/.test(text)) return "62";
-  if (/software|technology|app|ai|data|cyber/.test(text)) return "54";
-  if (/transport|delivery|logistics|moving/.test(text)) return "48";
-  if (/real estate|rental|property/.test(text)) return "53";
-  if (/education|school|tutor|training/.test(text)) return "61";
-  if (/finance|insurance|accounting|bookkeeping/.test(text)) return "52";
-  return "54";
+    codes.add("23");
+  if (/health|medical|dental|therapy|wellness|fitness/.test(text))
+    codes.add("62");
+  if (/software|technology|\bapp\b|\bai\b|data|cyber/.test(text))
+    codes.add("54");
+  if (/transport|delivery|logistics|moving/.test(text)) codes.add("48");
+  if (/real estate|rental|property/.test(text)) codes.add("53");
+  if (/education|school|tutor|training/.test(text)) codes.add("61");
+  if (/finance|insurance|accounting|bookkeeping/.test(text)) codes.add("52");
+  if (
+    /manufactur|fabricat|produces? (its own|the)|makes? (its own|the)|batch plant|precast|foundry|assembly line|processing plant/.test(
+      text,
+    )
+  )
+    codes.add("31-33");
+  if (codes.size === 0) codes.add("54");
+  // Cap at two codes so downstream fetches stay bounded — the first match
+  // plus the strongest secondary (compound) signal, not an unbounded blend.
+  return Array.from(codes).slice(0, 2);
 }
 
 function inferIndustry(idea: string): string {
@@ -1374,6 +1612,25 @@ function money(value: unknown): string {
 
 function clamp(value: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, value));
+}
+
+// Combines the per-NAICS-code results of a multi-code fetch (see
+// inferNaicsCodes) into one MetricSet, dropping codes that returned nothing
+// rather than letting one missing code null out the whole metric.
+function mergeMetricSets(
+  results: Array<MetricSet | null>,
+  combineValues: (sets: MetricSet[]) => Record<string, number>,
+): MetricSet | null {
+  const valid = results.filter((set): set is MetricSet => set !== null);
+  if (valid.length === 0) return null;
+  return {
+    values: combineValues(valid),
+    evidence: valid.flatMap((set) => set.evidence),
+  };
+}
+
+function sum(sets: MetricSet[], pick: (set: MetricSet) => number): number {
+  return sets.reduce((total, set) => total + pick(set), 0);
 }
 
 function slugify(value: string): string {
