@@ -60,7 +60,9 @@ export { router as registryIntegrationRouter };
 async function proxyGet(c: Context<Env>, path: string): Promise<Response> {
   const config = c.get('config');
   if (!config.registryApiUrl) throw new ApiError(503, 'Registry service is not configured.');
-  const resp = await fetch(`${config.registryApiUrl.replace(/\/$/, '')}${path}`);
+  const headers: Record<string, string> = {};
+  if (config.registryApiSecret) headers['x-api-key'] = config.registryApiSecret;
+  const resp = await fetch(`${config.registryApiUrl.replace(/\/$/, '')}${path}`, { headers });
   const data = await resp.json() as unknown;
   return c.json(data, resp.status as 200 | 400 | 401 | 403 | 404 | 429 | 500 | 502 | 503);
 }
@@ -89,9 +91,11 @@ async function proxyGetOrFallback(
 async function proxyPostWithBody(c: Context<Env>, path: string, body: unknown): Promise<Response> {
   const config = c.get('config');
   if (!config.registryApiUrl) throw new ApiError(503, 'Registry service is not configured.');
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+  if (config.registryApiSecret) headers['x-api-key'] = config.registryApiSecret;
   const resp = await fetch(`${config.registryApiUrl.replace(/\/$/, '')}${path}`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers,
     body: JSON.stringify(body),
   });
   const data = await resp.json() as unknown;

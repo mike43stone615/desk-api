@@ -30,7 +30,7 @@ APP_BASE_URL = "https://app.deskbusiness.co"
 CONFIRMATION_TOKEN_DURATION_MINUTES = "1440"
 ADMIN_EMAILS = "mike43stone615@gmail.com"
 
-# URLs for backend services — set to Railway deployment URLs after deploying.
+# URLs for backend services ï¿½ set to Railway deployment URLs after deploying.
 # Leave empty until deployed; integration routes return 503 when unset.
 # IMPORTANT: must NOT point to api.deskbusiness.co (would create a loop).
 COMPLIANCE_OS_URL = "https://compliance-api.deskbusiness.co"
@@ -38,17 +38,20 @@ REGISTRY_API_URL = "https://registry-api.deskbusiness.co"
 
 # -- Secrets (set via `wrangler secret put <NAME>`) ---------------------------
 # Required secrets:
-#   OPENAI_API_KEY         — for business classification AI
-#   GOOGLE_PLACES_API_KEY  — for city/place search and market competition scoring
-#   CENSUS_API_KEY         — for ACS, CBP, and Nonemployer market data
-#   FOURSQUARE_API_KEY     — for secondary places/competition scoring
-#   BEA_API_KEY            — for BEA Regional income/GDP data (optional until issued)
-#   REGISTRY_API_SECRET    — shared secret for registry upsert endpoint
-#   COMPLIANCE_OS_API_KEY  — API key for compliance-os admin routes
+#   OPENAI_API_KEY         ï¿½ for business classification AI
+#   GOOGLE_PLACES_API_KEY  ï¿½ for city/place search and market competition scoring
+#   CENSUS_API_KEY         ï¿½ for ACS, CBP, and Nonemployer market data
+#   FOURSQUARE_API_KEY     ï¿½ for secondary places/competition scoring
+#   BEA_API_KEY            ï¿½ for BEA Regional income/GDP data (optional until issued)
+#   REGISTRY_API_SECRET    - shared secret sent as x-api-key on every call to registry-api's
+#                            check/business-structures endpoints (registry-api rejects unauthenticated
+#                            requests to those routes as of the auth hardening pass; set this to the
+#                            same value as registry-api's own REGISTRY_API_KEY env var)
+#   COMPLIANCE_OS_API_KEY  ï¿½ API key for compliance-os admin routes
 #
 # Optional secrets:
-#   SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS — for transactional email
-#   OPENAI_MODEL           — OpenAI model override (default: gpt-4.1-mini)
+#   SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS ï¿½ for transactional email
+#   OPENAI_MODEL           ï¿½ OpenAI model override (default: gpt-4.1-mini)
 
 # -- Local development ---------------------------------------------------------
 [env.local]

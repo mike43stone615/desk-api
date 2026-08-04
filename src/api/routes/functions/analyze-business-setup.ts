@@ -23,6 +23,11 @@ interface BusinessPlanSection {
   content: string;
 }
 
+interface IdeaPlausibility {
+  isPlausible: boolean;
+  feedback: string | null;
+}
+
 // POST /functions/v1/analyze-business-setup
 // Mirrors the Supabase Edge Function contract so no Flutter client changes are needed.
 router.post("/", async (c) => {
@@ -70,7 +75,7 @@ router.post("/", async (c) => {
           {
             role: "system",
             content:
-              "Analyze an unregistered business setup. Return JSON only with classification, marketValidation, businessPlanSections. classification must contain targetMarket, industry, geographicScope, customerType. industry must exactly match one allowedIndustries value. geographicScope must be Local or National. customerType must be B2B, B2C, or Both. marketValidation must contain customerProblem, competitors, validationPlan, pricingHypothesis. businessPlanSections must be an array of comprehensive editable sections with title and content, using placeholders for unknown future setup details.",
+              "Analyze an unregistered business setup. Return JSON only with classification, marketValidation, businessPlanSections, ideaIsPlausible, ideaFeedback. classification must contain targetMarket, industry, geographicScope, customerType. industry must exactly match one allowedIndustries value. geographicScope must be Local or National. customerType must be B2B, B2C, or Both. marketValidation must contain customerProblem, competitors, validationPlan, pricingHypothesis. businessPlanSections must be an array of comprehensive editable sections with title and content, using placeholders for unknown future setup details. ideaIsPlausible is a boolean: true when businessIdea is a coherent, at-least-vaguely-describable business concept, false when it is empty, keyboard-mash gibberish, or otherwise not describable as a business idea. ideaFeedback is a short one-sentence explanation for the user when ideaIsPlausible is false, and null when ideaIsPlausible is true.",
           },
           { role: "user", content: JSON.stringify(prompt) },
         ],
@@ -89,6 +94,7 @@ router.post("/", async (c) => {
       typeof content === "string"
         ? (JSON.parse(content) as Record<string, unknown>)
         : {};
+    const plausibility = normalizeIdeaPlausibility(parsed, businessIdea);
     return c.json({
       classification: normalizeClassification(
         parsed.classification && typeof parsed.classification === "object"
@@ -108,6 +114,8 @@ router.post("/", async (c) => {
         industries,
         body,
       ),
+      ideaIsPlausible: plausibility.isPlausible,
+      ideaFeedback: plausibility.feedback,
       source: "openai",
     });
   } catch {
@@ -209,6 +217,7 @@ function fallbackEnrichment(
 ) {
   const classification = fallback(idea, industries);
   const marketValidation = fallbackMarketValidation(idea, classification);
+  const plausibility = assessIdeaPlausibilityHeuristic(idea);
   return {
     classification,
     marketValidation,
@@ -218,8 +227,62 @@ function fallbackEnrichment(
       marketValidation,
       body,
     ),
+    ideaIsPlausible: plausibility.isPlausible,
+    ideaFeedback: plausibility.feedback,
     source: "fallback",
   };
+}
+
+const GIBBERISH_MIN_LETTERS = 6;
+const GIBBERISH_VOWEL_RATIO = 0.2;
+
+// Heuristic used whenever an AI judgment isn't available (no OpenAI key
+// configured, the request failed, or the model response didn't include a
+// usable ideaIsPlausible field): distinguishes an empty/too-short idea, or
+// an unbroken run of consonant-heavy characters (e.g. "akdhdiskdnw"), from
+// a plausible, at-least-vaguely-describable business idea. Intentionally
+// coarse — it only needs to catch the obvious gibberish/empty case, not
+// judge idea quality.
+function assessIdeaPlausibilityHeuristic(idea: string): IdeaPlausibility {
+  const trimmed = idea.trim();
+  if (trimmed.length < 3) {
+    return {
+      isPlausible: false,
+      feedback: "Enter a short description of the business idea.",
+    };
+  }
+  const letters = trimmed.toLowerCase().replace(/[^a-z]/g, "");
+  const vowels = (letters.match(/[aeiou]/g) ?? []).length;
+  const looksLikeGibberish =
+    !trimmed.includes(" ") &&
+    letters.length >= GIBBERISH_MIN_LETTERS &&
+    vowels / letters.length < GIBBERISH_VOWEL_RATIO;
+  if (looksLikeGibberish) {
+    return {
+      isPlausible: false,
+      feedback:
+        "This doesn't look like a business idea yet. Describe what the business would do in a few words.",
+    };
+  }
+  return { isPlausible: true, feedback: null };
+}
+
+// Trusts the model's own ideaIsPlausible/ideaFeedback when present and
+// well-typed, falling back to the heuristic above otherwise (missing
+// field, wrong type, or a false verdict with no feedback string).
+function normalizeIdeaPlausibility(
+  input: Record<string, unknown>,
+  idea: string,
+): IdeaPlausibility {
+  const heuristic = assessIdeaPlausibilityHeuristic(idea);
+  if (typeof input.ideaIsPlausible !== "boolean") return heuristic;
+  const isPlausible = input.ideaIsPlausible;
+  if (isPlausible) return { isPlausible: true, feedback: null };
+  const feedback =
+    typeof input.ideaFeedback === "string" && input.ideaFeedback.trim()
+      ? input.ideaFeedback.trim()
+      : heuristic.feedback;
+  return { isPlausible: false, feedback };
 }
 
 function normalizeMarketValidation(

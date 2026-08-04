@@ -13,7 +13,7 @@ GOOGLE_PLACES_API_KEY=AIza...
 CENSUS_API_KEY=your-free-census-api-key
 FOURSQUARE_API_KEY=your-free-foursquare-service-key
 BEA_API_KEY=your-free-bea-api-key
-REGISTRY_API_SECRET=your-sync-secret
+REGISTRY_API_SECRET=your-registry-api-key
 COMPLIANCE_OS_API_KEY=your-admin-key
 RESEND_API_KEY=re-...
 
