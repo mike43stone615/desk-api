@@ -52,6 +52,12 @@ describe('resolveGeography', () => {
 
     expect(result.place).toEqual({ fips: '20000', name: 'Denver city', stateFips: '08' });
     expect(result.county).toEqual({ fips: '031', name: 'Denver County', stateFips: '08' });
+    // SQUARE_RING's centroid is (50, 50) in Web Mercator meters, which
+    // converts to a tiny lat/lon near the origin — the point isn't a real
+    // place, but this exercises the Web-Mercator-to-WGS84 conversion the
+    // same math a real city polygon would go through.
+    expect(result.centroid?.lat).toBeCloseTo(0.00044916, 6);
+    expect(result.centroid?.lon).toBeCloseTo(0.00044916, 6);
     expect(fetchMock).toHaveBeenCalledTimes(2);
 
     const placeUrl = new URL(fetchMock.mock.calls[0][0] as string);
@@ -161,31 +167,31 @@ describe('resolveGeography', () => {
   it('returns null for both when TIGERweb returns no matching place (empty features)', async () => {
     fetchMock.mockResolvedValueOnce(placesResponse([]));
     const result = await resolveGeography('Zzzznotarealtown', '08');
-    expect(result).toEqual({ place: null, county: null });
+    expect(result).toEqual({ place: null, county: null, centroid: null });
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
   it('returns null for both when the place fetch itself throws', async () => {
     fetchMock.mockRejectedValueOnce(new Error('network down'));
     const result = await resolveGeography('Denver', '08');
-    expect(result).toEqual({ place: null, county: null });
+    expect(result).toEqual({ place: null, county: null, centroid: null });
   });
 
   it('returns null for both when the place lookup response is not ok', async () => {
     fetchMock.mockResolvedValueOnce(new Response('error', { status: 500 }));
     const result = await resolveGeography('Denver', '08');
-    expect(result).toEqual({ place: null, county: null });
+    expect(result).toEqual({ place: null, county: null, centroid: null });
   });
 
   it('returns null for both when formationCity is empty', async () => {
     const result = await resolveGeography('', '08');
-    expect(result).toEqual({ place: null, county: null });
+    expect(result).toEqual({ place: null, county: null, centroid: null });
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it('returns null for both when stateFips is undefined', async () => {
     const result = await resolveGeography('Denver', undefined);
-    expect(result).toEqual({ place: null, county: null });
+    expect(result).toEqual({ place: null, county: null, centroid: null });
     expect(fetchMock).not.toHaveBeenCalled();
   });
 

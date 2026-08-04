@@ -83,31 +83,62 @@ describe('scoreStartupDifficulty', () => {
     expect(result.reasons.join(' ')).toContain('unavailable');
   });
 
-  it('is not affected by requirement/permit counts (that belongs to regulatoryFriction instead)', () => {
-    // scoreStartupDifficulty's input type has no requirement-count field at
-    // all, so this is really a compile-time guarantee — this test just
-    // pins the observable behavior that two calls with identical
-    // capital/barrier/product/labor/knowledge inputs always score the same.
-    const a = scoreStartupDifficulty({
+  it('does not let a missing requirement count crash or dominate the score, and gives it a neutral contribution', () => {
+    const result = scoreStartupDifficulty({
       industry: 'Consulting',
       businessIdea: 'general business consulting',
       naicsCodes: ['54'],
       customerType: 'B2C',
       unemploymentRate: 5,
+      requirementCount: undefined,
     });
-    const b = scoreStartupDifficulty({
+    expect(result.score).toBeGreaterThanOrEqual(0);
+    expect(result.score).toBeLessThanOrEqual(100);
+    expect(result.reasons.join(' ')).toContain('unavailable');
+  });
+
+  it('blends in the real Compliance-OS requirement count as a licensing-complexity signal', () => {
+    // Same capital/barrier/product/labor inputs throughout — only
+    // requirementCount changes — so any score difference is attributable
+    // to the new licensing-complexity bucket.
+    const lightlyRegulated = scoreStartupDifficulty({
       industry: 'Consulting',
       businessIdea: 'general business consulting',
       naicsCodes: ['54'],
       customerType: 'B2C',
       unemploymentRate: 5,
+      requirementCount: 2,
     });
-    expect(a.score).toBe(b.score);
+    const heavilyRegulated = scoreStartupDifficulty({
+      industry: 'Consulting',
+      businessIdea: 'general business consulting',
+      naicsCodes: ['54'],
+      customerType: 'B2C',
+      unemploymentRate: 5,
+      requirementCount: 15,
+    });
+    expect(lightlyRegulated.score).toBeGreaterThan(heavilyRegulated.score);
+    expect(heavilyRegulated.reasons.join(' ')).toContain('15 known requirements');
+  });
+
+  it('reaches exactly 100 when every signal, including the new licensing-complexity bucket, is maxed', () => {
+    // capital(low-capital NAICS, 25) + barrier(unlicensed/B2C, 15) +
+    // product(non-physical, 20) + labor(unemployment > 6%, 20) +
+    // knowledge(unlicensed, 10) + licensing(requirementCount < 5, 10) = 100.
+    const result = scoreStartupDifficulty({
+      industry: 'Software Consulting',
+      businessIdea: 'general software consulting for small businesses',
+      naicsCodes: ['54'],
+      customerType: 'B2C',
+      unemploymentRate: 10,
+      requirementCount: 2,
+    });
+    expect(result.score).toBe(100);
   });
 
   it('ranks reasons with the largest point contributor first', () => {
-    // Capital-intensive (5 pts, lowest of the five signals) vs. barrier
-    // (25 pts, the max for a non-licensed B2C business) — barrier should
+    // Capital-intensive (5 pts, lowest of the six signals) vs. barrier
+    // (15 pts, the max for a non-licensed B2C business) — barrier should
     // lead the ranked reasons, capital should trail.
     const result = scoreStartupDifficulty({
       industry: 'Manufacturing',
@@ -115,6 +146,7 @@ describe('scoreStartupDifficulty', () => {
       naicsCodes: ['31-33'],
       customerType: 'B2C',
       unemploymentRate: 5,
+      requirementCount: 2,
     });
     const barrierIndex = result.reasons.findIndex((r) =>
       r.toLowerCase().includes('barrier'),
@@ -125,6 +157,6 @@ describe('scoreStartupDifficulty', () => {
     expect(barrierIndex).toBeGreaterThanOrEqual(0);
     expect(capitalIndex).toBeGreaterThanOrEqual(0);
     expect(barrierIndex).toBeLessThan(capitalIndex);
-    expect(result.reasons.length).toBe(5);
+    expect(result.reasons.length).toBe(6);
   });
 });

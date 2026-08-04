@@ -212,7 +212,7 @@ router.post("/analyze", async (c) => {
     businessIdea,
   );
   const stateName = STATE_NAMES[state] ?? state;
-  const { place, county } = await resolveGeography(
+  const { place, county, centroid } = await resolveGeography(
     body.formationCity,
     stateFips,
   );
@@ -226,6 +226,7 @@ router.post("/analyze", async (c) => {
     oews,
     googlePlaces,
     foursquare,
+    overpass,
     compliance,
     registry,
     guidance,
@@ -233,6 +234,7 @@ router.post("/analyze", async (c) => {
     bfsTrend,
     qcewTrend,
     populationTrend,
+    lausTrend,
   ] = await Promise.all([
     fetchAcsState(stateFips, config.censusApiKey, place, county),
     fetchCbpState(stateFips, naicsCodes, config.censusApiKey, county),
@@ -254,6 +256,7 @@ router.post("/analyze", async (c) => {
       industry,
       businessIdea,
     ),
+    fetchOverpassCompetition(industry, businessIdea, centroid),
     fetchComplianceSignals(config, state, industry),
     fetchRegistrySignals(config, body.businessName, state),
     fetchGovernmentGuidance(state, industry, body),
@@ -261,6 +264,7 @@ router.post("/analyze", async (c) => {
     fetchBfsTrend(stateFips),
     fetchQcewTrend(stateFips, naicsCodes, county),
     fetchPopulationTrend(stateFips, config.censusApiKey, place, county),
+    fetchLausTrend(stateFips),
   ]);
 
   const evidence: EvidenceItem[] = [];
@@ -289,6 +293,13 @@ router.post("/analyze", async (c) => {
   else evidence.push(googlePlacesUnavailableItem(config.googlePlacesApiKey));
   if (foursquare) evidence.push(...foursquare.evidence);
   else evidence.push(foursquareNotConfiguredItem());
+  // Unlike Google Places/Foursquare, Overpass has no "not configured" state
+  // (it's keyless) and legitimately doesn't apply to every industry (see
+  // inferOverpassTag) — so, unlike those two sources, this deliberately adds
+  // no evidence item at all when it didn't contribute, rather than noting an
+  // "unavailable"/"not configured" state that would misleadingly imply it
+  // should have applied here.
+  if (overpass) evidence.push(...overpass.evidence);
   evidence.push(...compliance.evidence);
   evidence.push(...registry.evidence);
   evidence.push(...guidance.evidence);
@@ -356,6 +367,21 @@ router.post("/analyze", async (c) => {
         "outlook",
       ),
     );
+  }
+  if (lausTrend) {
+    evidence.push(
+      item(
+        "Unemployment rate trend",
+        `${lausTrend.trendPercent >= 0 ? "+" : ""}${lausTrend.trendPercent.toFixed(1)}%`,
+        `Statewide unemployment rate ${lausTrend.trendPercent >= 0 ? "improved" : "worsened"} from ${lausTrend.oldestLabel} to ${lausTrend.newestLabel} (BLS LAUS) — shown here as the inverse of the raw rate change, so a positive number always means "better outlook" the same way the other outlook trends do.`,
+        "BLS LAUS",
+        "https://www.bls.gov/lau/",
+        "medium",
+        "outlook",
+      ),
+    );
+  } else {
+    evidence.push(lausUnavailableItem(state));
   }
 
   if (naicsCodes.length > 1) {
@@ -437,6 +463,11 @@ router.post("/analyze", async (c) => {
     naicsCodes,
     customerType: clean(body.customerType),
     unemploymentRate: acs?.values.unemploymentRate,
+    // compliance is already resolved by the time we get here (it's part of
+    // the same Promise.all above), so the real Compliance-OS requirement
+    // count can blend in directly rather than relying only on the
+    // regex-based licensed-trade heuristic.
+    requirementCount: compliance.requirementCount,
   });
 
   const outlook = scoreOutlook({
@@ -444,6 +475,7 @@ router.post("/analyze", async (c) => {
     qcewTrend,
     beaGrowthPercent: bea?.values.personalIncomeGrowth ?? null,
     populationTrend,
+    lausTrend,
   });
 
   const categories = buildCategories(
@@ -456,6 +488,7 @@ router.post("/analyze", async (c) => {
       oews,
       googlePlaces,
       foursquare,
+      overpass,
       compliance,
       registry,
       guidance,
@@ -545,6 +578,12 @@ export function scoreStartupDifficulty(input: {
   naicsCodes: string[];
   customerType: string;
   unemploymentRate: number | undefined;
+  // Real Compliance-OS requirement count for this state/business type (see
+  // fetchComplianceSignals/ComplianceSignal). Optional so existing callers
+  // that don't have it yet (or tests exercising the other four signals in
+  // isolation) still compile and get a neutral mid-point contribution rather
+  // than a crash or a silently-zeroed bucket.
+  requirementCount?: number;
 }): { score: number; rationale: string; reasons: string[] } {
   const text = `${input.industry} ${input.businessIdea}`;
   const isLicensedTrade = LICENSED_TRADE_PATTERN.test(text);
@@ -554,6 +593,8 @@ export function scoreStartupDifficulty(input: {
   );
   const hasLaborData = input.unemploymentRate !== undefined;
   const unemploymentRate = input.unemploymentRate ?? 0;
+  const hasRequirementData = input.requirementCount !== undefined;
+  const requirementCount = input.requirementCount ?? 0;
 
   const capitalPoints = input.naicsCodes.some((code) =>
     CAPITAL_INTENSIVE_NAICS.has(code),
@@ -563,10 +604,16 @@ export function scoreStartupDifficulty(input: {
       ? 25
       : 15;
 
-  let barrierPoints = 25;
-  if (isLicensedTrade) barrierPoints -= 10;
-  if (isB2B) barrierPoints -= 8;
-  barrierPoints = clamp(barrierPoints, 0, 25);
+  // Barrier's max dropped from 25 to 15 (scaled proportionally, same ratio
+  // applied to its two deductions) to make room for licensingComplexityPoints
+  // below without changing the max-achievable total. This bucket stays a
+  // regex-based proxy for "will buyers expect a track record before their
+  // first contract" — a different question from licensingComplexityPoints,
+  // which is about real matched licensing/permit/registration requirements.
+  let barrierPoints = 15;
+  if (isLicensedTrade) barrierPoints -= 6;
+  if (isB2B) barrierPoints -= 5;
+  barrierPoints = clamp(barrierPoints, 0, 15);
 
   const productPoints = isPhysicalProduct ? 8 : 20;
 
@@ -582,12 +629,30 @@ export function scoreStartupDifficulty(input: {
 
   const knowledgePoints = isLicensedTrade ? 3 : 10;
 
+  // New signal: real Compliance-OS requirement counts, independent of
+  // whether LICENSED_TRADE_PATTERN happened to match the idea text. More
+  // required licenses/permits/registrations is a real barrier to actually
+  // getting the business running, distinct from regulatoryFriction (which
+  // weighs each requirement's severity/renewal cadence for ongoing
+  // compliance drag rather than counting raw hoops-to-clear at launch).
+  // Missing data (compliance signal unavailable) gets a neutral ~50% of
+  // max, matching the same "don't penalize for a missing optional source"
+  // policy used for labor data above.
+  const licensingComplexityPoints = !hasRequirementData
+    ? 5
+    : requirementCount > 10
+      ? 2
+      : requirementCount >= 5
+        ? 6
+        : 10;
+
   const score = clamp(
     capitalPoints +
       barrierPoints +
       productPoints +
       laborPoints +
-      knowledgePoints,
+      knowledgePoints +
+      licensingComplexityPoints,
     0,
     100,
   );
@@ -611,11 +676,19 @@ export function scoreStartupDifficulty(input: {
   const knowledgeNote = isLicensedTrade
     ? "this category typically requires formal credentials or specialized training"
     : "this category does not typically require formal licensing to operate";
+  const licensingNote = !hasRequirementData
+    ? "a real compliance-requirement count was unavailable for this run"
+    : requirementCount > 10
+      ? `Compliance-OS found ${requirementCount} known requirements for this category and state, a high number of hoops to clear before operating legally`
+      : requirementCount >= 5
+        ? `Compliance-OS found ${requirementCount} known requirements for this category and state, a moderate licensing/permitting load`
+        : `Compliance-OS found ${requirementCount} known requirements for this category and state, a relatively light licensing/permitting load`;
 
   const rationale =
-    `${verdictWord(score)} to start (${score}/100). Capital, contract-barrier, and knowledge ` +
-    `signals come from Desk's classification of this business idea rather than a single ` +
-    `external dataset — treat this as a directional estimate.`;
+    `${verdictWord(score)} to start (${score}/100). Capital, contract-barrier, product, labor, ` +
+    `and knowledge signals come from Desk's classification of this business idea rather than a ` +
+    `single external dataset — treat those as directional; the licensing-complexity signal, by ` +
+    `contrast, reflects a real matched Compliance-OS requirement count.`;
 
   const reasons = rankedReasons([
     {
@@ -629,6 +702,7 @@ export function scoreStartupDifficulty(input: {
     { text: `${cap(productNote)}.`, weight: productPoints },
     { text: `${cap(laborNote)}.`, weight: laborPoints },
     { text: `${cap(knowledgeNote)}.`, weight: knowledgePoints },
+    { text: `${cap(licensingNote)}.`, weight: licensingComplexityPoints },
   ]);
 
   return { score, rationale, reasons };
@@ -760,6 +834,7 @@ function buildCategories(
     oews: MetricSet | null;
     googlePlaces: MetricSet | null;
     foursquare: MetricSet | null;
+    overpass: MetricSet | null;
     compliance: ComplianceSignal;
     registry: MetricSet;
     guidance: MetricSet;
@@ -790,12 +865,38 @@ function buildCategories(
   const income = input.acs?.values.medianIncome ?? 0;
   const establishments = input.cbp?.values.establishments ?? 0;
   const establishmentsLevel = input.cbp?.geographyLevel;
-  const hasLocalCompetitorData =
-    Boolean(input.foursquare) || Boolean(input.googlePlaces);
-  const localCompetitors = Math.max(
-    input.foursquare?.values.localCompetitors ?? 0,
-    input.googlePlaces?.values.googleCompetitors ?? 0,
-  );
+  // Google/Foursquare's text-search results are effectively capped at the
+  // ~10-20 results requested per call, but Overpass is an uncapped radius
+  // count that can run into the hundreds for a well-tagged category in a
+  // dense area (e.g. ~200 cafes found near downtown Denver in live
+  // testing) — so a raw Overpass count isn't on a comparable scale to the
+  // other two. It's clamped to the same ~20 ceiling the capped sources
+  // already implicitly have before blending, so it can contribute a real
+  // signal without one uncapped source drowning out the other two purely
+  // because its query shape isn't capped the same way.
+  const overpassNormalized =
+    input.overpass !== null
+      ? Math.min(input.overpass.values.overpassCompetitors ?? 0, 20)
+      : null;
+  const competitorSourceCounts = [
+    input.foursquare?.values.localCompetitors,
+    input.googlePlaces?.values.googleCompetitors,
+    overpassNormalized ?? undefined,
+  ].filter((n): n is number => typeof n === "number");
+  const hasLocalCompetitorData = competitorSourceCounts.length > 0;
+  // With only 2 sources, max() was the deliberate choice — favor whichever
+  // source actually found matches, since a text-search miss from one API
+  // isn't evidence of low competition. With 3 independent sources now
+  // available, averaging is more robust to any single source's noise or
+  // coverage gaps (e.g. Overpass has no listing for a category in an area
+  // OSM contributors haven't tagged, or Google Places returns 0 for an
+  // awkwardly-worded query) while still reflecting a genuine blend of every
+  // source that returned data, rather than letting whichever single source
+  // happens to report the highest number always win.
+  const localCompetitors = competitorSourceCounts.length
+    ? competitorSourceCounts.reduce((sum, n) => sum + n, 0) /
+      competitorSourceCounts.length
+    : 0;
   const receipts = input.nonemployer?.values.receipts ?? 0;
   const receiptsLevel = input.nonemployer?.geographyLevel;
   const wages = Math.max(
@@ -857,9 +958,22 @@ function buildCategories(
     100,
   );
   const competitionRationale = `${verdictWord(competitionScore)} competitive landscape (${competitionScore}/100).`;
+  const competitionSourceNotes: string[] = [];
+  if (input.googlePlaces)
+    competitionSourceNotes.push(
+      `${input.googlePlaces.values.googleCompetitors} from Google Places`,
+    );
+  if (input.foursquare)
+    competitionSourceNotes.push(
+      `${input.foursquare.values.localCompetitors} from Foursquare`,
+    );
+  if (input.overpass)
+    competitionSourceNotes.push(
+      `${input.overpass.values.overpassCompetitors} from OpenStreetMap within 5km`,
+    );
   const competitionReasons = hasLocalCompetitorData
     ? [
-        `${localCompetitors} nearby matching places were found within Google/Foursquare search results for this category and location.`,
+        `Nearby matching places found: ${competitionSourceNotes.join("; ")} — blended (averaged) into ${localCompetitors.toFixed(1)} for scoring since these are independent sources with different coverage.`,
       ]
     : [
         `Local place-search data was unavailable, so this uses ${establishments.toLocaleString()} ${establishmentsLevel === "county" ? "county-level" : "statewide"} employer establishments in this category as a rougher competition proxy.`,
@@ -938,15 +1052,25 @@ function buildCategories(
       score: competitionScore,
       rationale: competitionRationale,
       reasons: competitionReasons,
-      primarySource: hasLocalCompetitorData
+      primarySource: input.googlePlaces
         ? {
             name: "Google Places",
             url: "https://developers.google.com/maps/documentation/places/web-service/text-search",
           }
-        : {
-            name: "Census County Business Patterns",
-            url: "https://www.census.gov/programs-surveys/cbp.html",
-          },
+        : input.foursquare
+          ? {
+              name: "Foursquare Places",
+              url: "https://foursquare.com/developer/",
+            }
+          : input.overpass
+            ? {
+                name: "OpenStreetMap Overpass",
+                url: "https://overpass-api.de/api/interpreter",
+              }
+            : {
+                name: "Census County Business Patterns",
+                url: "https://www.census.gov/programs-surveys/cbp.html",
+              },
       evidence: evidenceFor("competition"),
     },
     {
@@ -1303,20 +1427,30 @@ function polygonCentroid(rings: number[][][]): [number, number] | null {
   return [cx / (6 * area), cy / (6 * area)];
 }
 
+// Converts a point from Web Mercator meters (EPSG:3857/102100 — what
+// TIGERweb returns by default, see the maxAllowableOffset comment above) to
+// WGS84 lat/lon degrees, using the standard spherical Web Mercator inverse
+// formula. Needed because Overpass (and lat/lon in general) expects WGS84
+// degrees, not the projected meters the county point-in-polygon lookup
+// below uses.
+function webMercatorToLatLon(point: [number, number]): {
+  lat: number;
+  lon: number;
+} {
+  const [x, y] = point;
+  const lon = (x / 20037508.34) * 180;
+  const lat =
+    (180 / Math.PI) *
+    (2 * Math.atan(Math.exp((y * Math.PI) / 20037508.34)) - Math.PI / 2);
+  return { lat, lon };
+}
+
 // Finds the county containing a point (in the same Web Mercator SR the
 // simplified place geometry was returned in) via a spatial-intersects query
 // against the Counties layer. Matching counties by BASENAME the way places
 // are matched isn't reliable here (a city's name usually isn't its
 // county's name), so this is the correct approach even though it's more
 // work than a simple attribute match.
-async function fetchCountyForGeometry(
-  rings: number[][][],
-  stateFips: string,
-): Promise<CountyGeo | null> {
-  const centroid = polygonCentroid(rings);
-  return centroid ? fetchCountyForPoint(centroid, stateFips) : null;
-}
-
 async function fetchCountyForPoint(
   point: [number, number],
   stateFips: string,
@@ -1356,22 +1490,36 @@ async function fetchCountyForPoint(
 export async function resolveGeography(
   formationCity: string | undefined,
   stateFips: string | undefined,
-): Promise<{ place: PlaceGeo | null; county: CountyGeo | null }> {
+): Promise<{
+  place: PlaceGeo | null;
+  county: CountyGeo | null;
+  // WGS84 centroid of the resolved place's largest ring — added so
+  // location-radius APIs (Overpass) can query "near the formation city"
+  // without a separate geocoding round-trip. Only populated when a place
+  // resolved with usable geometry; there's no county-only or state-only
+  // centroid because a bare point isn't a meaningful "near me" origin at
+  // that coarseness the way it is for a specific city.
+  centroid: { lat: number; lon: number } | null;
+}> {
   const city = clean(formationCity);
-  if (!city || !stateFips) return { place: null, county: null };
+  if (!city || !stateFips) return { place: null, county: null, centroid: null };
   const baseName = cleanCityNameForMatch(city);
-  if (!baseName) return { place: null, county: null };
+  if (!baseName) return { place: null, county: null, centroid: null };
   const placeLookup = await fetchPlaceGeo(baseName, stateFips);
-  if (!placeLookup) return { place: null, county: null };
+  if (!placeLookup) return { place: null, county: null, centroid: null };
   const place: PlaceGeo = {
     fips: placeLookup.fips,
     name: placeLookup.name,
     stateFips,
   };
-  const county = placeLookup.rings
-    ? await fetchCountyForGeometry(placeLookup.rings, stateFips)
+  const centroidPoint = placeLookup.rings
+    ? polygonCentroid(placeLookup.rings)
     : null;
-  return { place, county };
+  const county = centroidPoint
+    ? await fetchCountyForPoint(centroidPoint, stateFips)
+    : null;
+  const centroid = centroidPoint ? webMercatorToLatLon(centroidPoint) : null;
+  return { place, county, centroid };
 }
 
 // ACS is the only source that supports place-level geography (see the
@@ -1849,6 +1997,82 @@ async function fetchPopulationTrend(
   return null;
 }
 
+// BLS's public Time Series API (the same BLS family QCEW's CSV endpoint and
+// OEWS's HTML scrape both belong to) serves LAUS (Local Area Unemployment
+// Statistics) state-level unemployment-rate series at
+// api.bls.gov/publicAPI/v2/timeseries/data/{seriesId}, keyless, with the
+// series ID format LASST{state FIPS}0000000000003 — verified live against
+// Colorado (LASST080000000000003) before wiring this in, returning monthly
+// values back through at least 2019 with no API key required.
+const LAUS_UNEMPLOYMENT_RATE_SUFFIX = "0000000000003";
+
+type BlsTimeSeriesPoint = {
+  year: string;
+  period: string;
+  periodName?: string;
+  value: string;
+};
+
+async function fetchLausTrend(
+  stateFips: string | undefined,
+): Promise<TrendResult | null> {
+  if (!stateFips) return null;
+  const seriesId = `LASST${stateFips}${LAUS_UNEMPLOYMENT_RATE_SUFFIX}`;
+  const newestYear = new Date().getFullYear() - 1;
+  const oldestYear = newestYear - OUTLOOK_TREND_YEARS + 1;
+  const url = new URL(
+    `https://api.bls.gov/publicAPI/v2/timeseries/data/${seriesId}`,
+  );
+  url.searchParams.set("startyear", String(oldestYear));
+  url.searchParams.set("endyear", String(newestYear));
+  try {
+    const response = await fetch(url.toString(), {
+      signal: AbortSignal.timeout(7000),
+    });
+    if (!response.ok) return null;
+    const data = (await response.json()) as {
+      status?: string;
+      Results?: { series?: Array<{ data?: BlsTimeSeriesPoint[] }> };
+    };
+    if (data.status !== "REQUEST_SUCCEEDED") return null;
+    const points = data.Results?.series?.[0]?.data ?? [];
+    // Monthly-only periods (M01-M12) exclude LAUS's annual-average M13 rows,
+    // so the oldest/newest comparison is always month-to-month.
+    const monthly = points
+      .filter((p) => /^M(0[1-9]|1[0-2])$/.test(p.period))
+      .sort((a, b) => `${a.year}${a.period}`.localeCompare(`${b.year}${b.period}`));
+    if (monthly.length < 2) return null;
+    const oldest = num(monthly[0].value);
+    const newest = num(monthly[monthly.length - 1].value);
+    if (oldest <= 0) return null;
+    // Direction is inverted relative to a plain % change: a FALLING
+    // unemployment rate is the positive/good signal for outlook, so this
+    // returns the negated raw percent change (rate down 20% -> +20%
+    // "trend"), matching the "positive is good" convention trendPoints()
+    // and every other outlook trend already use.
+    const rawChangePercent = ((newest - oldest) / oldest) * 100;
+    return {
+      trendPercent: -rawChangePercent,
+      oldestLabel: `${monthly[0].periodName ?? monthly[0].period} ${monthly[0].year}`,
+      newestLabel: `${monthly[monthly.length - 1].periodName ?? monthly[monthly.length - 1].period} ${monthly[monthly.length - 1].year}`,
+    };
+  } catch {
+    return null;
+  }
+}
+
+function lausUnavailableItem(state: string): EvidenceItem {
+  return item(
+    "Unemployment rate trend",
+    "Unavailable",
+    `Desk checks BLS LAUS for a multi-year statewide unemployment-rate trend in ${STATE_NAMES[state] ?? state}; this source did not return usable data for this run.`,
+    "BLS LAUS",
+    "https://www.bls.gov/lau/",
+    "limited",
+    "outlook",
+  );
+}
+
 // Each trend contributes points on its own 0-max scale; a missing trend
 // contributes a neutral ~50% of its max rather than 0, so a business isn't
 // unfairly penalized just because an optional data source (BFS/BEA both
@@ -1867,15 +2091,33 @@ export function scoreOutlook(input: {
   qcewTrend: TrendResult | null;
   beaGrowthPercent: number | null;
   populationTrend: TrendResult | null;
+  // BLS LAUS statewide unemployment-rate trend (see fetchLausTrend).
+  // trendPercent here is already inverted (falling unemployment -> positive
+  // trendPercent) so it plugs into trendPoints() with the same "positive is
+  // good" convention as the other three trends.
+  lausTrend: TrendResult | null;
 }): { score: number; rationale: string; reasons: string[] } {
-  const bfsPoints = trendPoints(input.bfsTrend?.trendPercent ?? null, 30);
-  const qcewPoints = trendPoints(input.qcewTrend?.trendPercent ?? null, 30);
-  const beaPoints = trendPoints(input.beaGrowthPercent, 25);
+  // Point buckets were rebalanced to make room for the new LAUS signal
+  // (added at 18, a real, direct near-term labor-market health indicator —
+  // second in weight only to BFS/QCEW) while keeping the max-achievable
+  // total at exactly 100: bfs 30->25, qcew 30->25, bea 25->20, population
+  // 15->12. BFS and QCEW stay the two strongest signals since they're the
+  // most direct measures of entrepreneurial/establishment activity; BEA and
+  // population trends stay present but slightly lighter, matching their
+  // prior relative ordering.
+  const bfsPoints = trendPoints(input.bfsTrend?.trendPercent ?? null, 25);
+  const qcewPoints = trendPoints(input.qcewTrend?.trendPercent ?? null, 25);
+  const beaPoints = trendPoints(input.beaGrowthPercent, 20);
   const popPoints = trendPoints(
     input.populationTrend?.trendPercent ?? null,
-    15,
+    12,
   );
-  const score = clamp(bfsPoints + qcewPoints + beaPoints + popPoints, 0, 100);
+  const lausPoints = trendPoints(input.lausTrend?.trendPercent ?? null, 18);
+  const score = clamp(
+    bfsPoints + qcewPoints + beaPoints + popPoints + lausPoints,
+    0,
+    100,
+  );
 
   const bfsNote = input.bfsTrend
     ? `statewide new-business applications changed ${input.bfsTrend.trendPercent.toFixed(1)}% from ${input.bfsTrend.oldestLabel} to ${input.bfsTrend.newestLabel}`
@@ -1890,6 +2132,9 @@ export function scoreOutlook(input: {
   const popNote = input.populationTrend
     ? `population changed ${input.populationTrend.trendPercent.toFixed(1)}% from ${input.populationTrend.oldestLabel} to ${input.populationTrend.newestLabel}`
     : "a multi-year population trend was unavailable";
+  const lausNote = input.lausTrend
+    ? `the statewide unemployment rate ${input.lausTrend.trendPercent >= 0 ? "improved (fell)" : "worsened (rose)"} ${Math.abs(input.lausTrend.trendPercent).toFixed(1)}% from ${input.lausTrend.oldestLabel} to ${input.lausTrend.newestLabel}`
+    : "a multi-year unemployment-rate trend was unavailable";
 
   const rationale =
     `${verdictWord(score)} short-term outlook (${score}/100). This looks backward at recent ` +
@@ -1900,6 +2145,7 @@ export function scoreOutlook(input: {
     { text: `${cap(qcewNote)}.`, weight: qcewPoints },
     { text: `${cap(beaNote)}.`, weight: beaPoints },
     { text: `${cap(popNote)}.`, weight: popPoints },
+    { text: `${cap(lausNote)}.`, weight: lausPoints },
   ]);
 
   return { score, rationale, reasons };
@@ -2456,6 +2702,119 @@ function foursquareNotConfiguredItem(): EvidenceItem {
     "competition",
   );
 }
+
+// ── OpenStreetMap Overpass competition signal ──────────────────────────────
+//
+// Free, keyless, real-time — verified live before wiring this in:
+//   curl -X POST "https://overpass-api.de/api/interpreter" \
+//     -d 'data=[out:json][timeout:15];node["amenity"="cafe"](around:5000,39.7392,-104.9903);out count;'
+// returned a real count (207 cafes near downtown Denver) in under 2 seconds.
+//
+// This is a deliberately modest mapping — the ~20-25 most common business
+// types in inferNaicsCodes/normal usage, not all 80+ categories this
+// codebase could theoretically classify. Patterns are checked in order and
+// the first match wins; a business idea with no sensible OSM tag (e.g. a
+// novel SaaS idea, or a B2B category with no physical-storefront analog)
+// intentionally has no entry here, so callers skip Overpass entirely for
+// it rather than forcing a bad generic query.
+type OverpassTag = { key: string; value?: string; label: string };
+
+const OSM_INDUSTRY_TAGS: Array<{ pattern: RegExp; tag: OverpassTag }> = [
+  { pattern: /\bcafe\b|coffee/i, tag: { key: "amenity", value: "cafe", label: "cafes/coffee shops" } },
+  { pattern: /restaurant|dining|eatery|bistro/i, tag: { key: "amenity", value: "restaurant", label: "restaurants" } },
+  { pattern: /bakery|bakeshop/i, tag: { key: "shop", value: "bakery", label: "bakeries" } },
+  { pattern: /\bbar\b|\bpub\b|tavern/i, tag: { key: "amenity", value: "bar", label: "bars/pubs" } },
+  { pattern: /\bbank\b|credit union/i, tag: { key: "amenity", value: "bank", label: "banks" } },
+  { pattern: /pharmacy|drugstore/i, tag: { key: "amenity", value: "pharmacy", label: "pharmacies" } },
+  { pattern: /\bgym\b|fitness|crossfit|personal training/i, tag: { key: "leisure", value: "fitness_centre", label: "gyms/fitness centers" } },
+  { pattern: /auto repair|car repair|\bmechanic\b|automotive repair/i, tag: { key: "shop", value: "car_repair", label: "auto repair shops" } },
+  { pattern: /hair salon|hairdresser|barber ?shop|\bbarber\b/i, tag: { key: "shop", value: "hairdresser", label: "hair salons/barbershops" } },
+  { pattern: /nail salon|nail spa|manicure/i, tag: { key: "shop", value: "beauty", label: "nail/beauty salons" } },
+  { pattern: /\bspa\b|day spa|esthetic/i, tag: { key: "shop", value: "beauty", label: "spas/beauty salons" } },
+  { pattern: /grocery|supermarket/i, tag: { key: "shop", value: "supermarket", label: "grocery stores/supermarkets" } },
+  { pattern: /convenience store/i, tag: { key: "shop", value: "convenience", label: "convenience stores" } },
+  { pattern: /hotel|motel|\binn\b|lodging|bed and breakfast/i, tag: { key: "tourism", value: "hotel", label: "hotels/lodging" } },
+  { pattern: /law firm|attorney|legal services|\blaw\b/i, tag: { key: "office", value: "lawyer", label: "law offices" } },
+  { pattern: /accounting|bookkeeping|tax prep/i, tag: { key: "office", value: "accountant", label: "accounting firms" } },
+  { pattern: /real estate|realtor/i, tag: { key: "office", value: "estate_agent", label: "real estate agencies" } },
+  { pattern: /insurance/i, tag: { key: "office", value: "insurance", label: "insurance agencies" } },
+  { pattern: /dental|dentist/i, tag: { key: "amenity", value: "dentist", label: "dentists" } },
+  { pattern: /medical clinic|urgent care|\bclinic\b|physician|doctor'?s? office/i, tag: { key: "amenity", value: "doctors", label: "doctors'/medical offices" } },
+  { pattern: /veterinary|\bvet\b|animal hospital/i, tag: { key: "amenity", value: "veterinary", label: "veterinary clinics" } },
+  { pattern: /child ?care|daycare|preschool/i, tag: { key: "amenity", value: "childcare", label: "childcare centers" } },
+  { pattern: /laundry|dry clean/i, tag: { key: "shop", value: "laundry", label: "laundry/dry-cleaning shops" } },
+  { pattern: /retail|\bstore\b|boutique|apparel|clothing/i, tag: { key: "shop", label: "retail shops" } },
+];
+
+export function inferOverpassTag(
+  industry: string,
+  businessIdea: string,
+): OverpassTag | null {
+  const text = `${industry} ${businessIdea}`;
+  for (const { pattern, tag } of OSM_INDUSTRY_TAGS) {
+    if (pattern.test(text)) return tag;
+  }
+  return null;
+}
+
+const OVERPASS_RADIUS_METERS = 5000;
+const OVERPASS_URL = "https://overpass-api.de/api/interpreter";
+
+// Overpass is a shared public instance with no SLA, so this follows the
+// same catch-and-continue pattern every other source in this file uses: a
+// short client-side abort (well under Hono's own request budget) plus a
+// try/catch that resolves to null on any failure, timeout, or non-OK
+// response rather than ever throwing into the Promise.all above.
+export async function fetchOverpassCompetition(
+  industry: string,
+  businessIdea: string,
+  centroid: { lat: number; lon: number } | null,
+): Promise<MetricSet | null> {
+  if (!centroid) return null;
+  const tag = inferOverpassTag(industry, businessIdea);
+  if (!tag) return null;
+  const filter = tag.value ? `["${tag.key}"="${tag.value}"]` : `["${tag.key}"]`;
+  const query = `[out:json][timeout:6];node${filter}(around:${OVERPASS_RADIUS_METERS},${centroid.lat},${centroid.lon});out count;`;
+  try {
+    const response = await fetch(OVERPASS_URL, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/x-www-form-urlencoded",
+        // Overpass's Apache frontend 406s requests with no User-Agent
+        // (confirmed live against the local Workers runtime, which sends
+        // none by default) — every other outbound fetch in this file either
+        // goes to an API that doesn't content-negotiate on User-Agent, or
+        // (OEWS) already sets one, so this wasn't caught until testing this
+        // specific source live.
+        "User-Agent": "Desk/1.0 market-research",
+      },
+      body: `data=${encodeURIComponent(query)}`,
+      signal: AbortSignal.timeout(7000),
+    });
+    if (!response.ok) return null;
+    const data = (await response.json()) as {
+      elements?: Array<{ tags?: { total?: string } }>;
+    };
+    const count = num(data.elements?.[0]?.tags?.total);
+    return {
+      values: { overpassCompetitors: count },
+      evidence: [
+        item(
+          "OpenStreetMap nearby competitor count",
+          String(count),
+          `OpenStreetMap Overpass found ${count} ${tag.label} within ${(OVERPASS_RADIUS_METERS / 1000).toFixed(0)}km of the formation location (tag ${filter}). This is a raw radius count rather than a capped text-search result list the way Google/Foursquare are, so it's blended alongside them rather than used on its own.`,
+          "OpenStreetMap Overpass",
+          "https://overpass-api.de/api/interpreter",
+          "medium",
+          "competition",
+        ),
+      ],
+    };
+  } catch {
+    return null;
+  }
+}
+
 async function fetchComplianceSignals(
   config: AppConfig,
   state: string,
