@@ -58,9 +58,26 @@ type CategoryResult = {
   label: string;
   score: number;
   rationale: string;
+  // Ranked bullet points explaining the score, most prevalent (highest
+  // point-contribution) first. The UI shows the top 3 on the card and the
+  // full list in the expanded view.
+  reasons: string[];
   primarySource: CategorySource;
   evidence: EvidenceItem[];
 };
+
+// Orders reason bullets by how many of the category's 0-100 points each one
+// actually contributed — the sub-signal that moved the score the most is
+// the most "prevalent" explanation for why the score landed where it did.
+function rankedReasons(entries: Array<{ text: string; weight: number }>): string[] {
+  return [...entries]
+    .sort((a, b) => b.weight - a.weight)
+    .map((entry) => entry.text);
+}
+
+function cap(text: string): string {
+  return text.length ? text.charAt(0).toUpperCase() + text.slice(1) : text;
+}
 
 const STATE_FIPS: Record<string, string> = {
   AL: "01",
@@ -512,7 +529,7 @@ export function scoreStartupDifficulty(input: {
   naicsCodes: string[];
   customerType: string;
   unemploymentRate: number | undefined;
-}): { score: number; rationale: string } {
+}): { score: number; rationale: string; reasons: string[] } {
   const text = `${input.industry} ${input.businessIdea}`;
   const isLicensedTrade = LICENSED_TRADE_PATTERN.test(text);
   const isB2B = input.customerType.trim().toUpperCase() === "B2B";
@@ -580,11 +597,25 @@ export function scoreStartupDifficulty(input: {
     : "this category does not typically require formal licensing to operate";
 
   const rationale =
-    `${verdictWord(score)} to start (${score}/100): estimated startup capital needs are ${capitalNote}, ` +
-    `the barrier to winning early customers/contracts is ${barrierNote}, ${productNote}, ${laborNote}, and ${knowledgeNote}. ` +
-    `Capital, contract-barrier, and knowledge signals come from Desk's classification of this business idea rather than a single external dataset — treat this as a directional estimate.`;
+    `${verdictWord(score)} to start (${score}/100). Capital, contract-barrier, and knowledge ` +
+    `signals come from Desk's classification of this business idea rather than a single ` +
+    `external dataset — treat this as a directional estimate.`;
 
-  return { score, rationale };
+  const reasons = rankedReasons([
+    {
+      text: `Estimated startup capital needs are ${capitalNote}.`,
+      weight: capitalPoints,
+    },
+    {
+      text: `The barrier to winning early customers/contracts is ${barrierNote}.`,
+      weight: barrierPoints,
+    },
+    { text: `${cap(productNote)}.`, weight: productPoints },
+    { text: `${cap(laborNote)}.`, weight: laborPoints },
+    { text: `${cap(knowledgeNote)}.`, weight: knowledgePoints },
+  ]);
+
+  return { score, rationale, reasons };
 }
 
 function buildCategories(
@@ -604,8 +635,8 @@ function buildCategories(
   },
   state: string,
   allEvidence: EvidenceItem[],
-  startupDifficulty: { score: number; rationale: string },
-  outlook: { score: number; rationale: string },
+  startupDifficulty: { score: number; rationale: string; reasons: string[] },
+  outlook: { score: number; rationale: string; reasons: string[] },
 ): CategoryResult[] {
   const stateName = STATE_NAMES[state] ?? state;
   const evidenceFor = (key: CategoryKey) =>
@@ -653,11 +684,25 @@ function buildCategories(
     0,
     100,
   );
-  const demandRationale =
-    `${verdictWord(demandScore)} demand (${demandScore}/100): ${stateName} has a population of ` +
-    `${population.toLocaleString() || "an unreported"} and median household income of ${money(income)}, ` +
-    `with ${establishments.toLocaleString()} existing establishments in this category and ` +
-    `${beaGrowth.toFixed(1)}% recent regional income growth.`;
+  const demandRationale = `${verdictWord(demandScore)} demand (${demandScore}/100).`;
+  const demandReasons = rankedReasons([
+    {
+      text: `${stateName} has a population of ${population.toLocaleString() || "an unreported amount"} in the target area.`,
+      weight: populationTier,
+    },
+    {
+      text: `Median household income is ${money(income)}.`,
+      weight: incomeTier,
+    },
+    {
+      text: `${establishments.toLocaleString()} existing establishments already operate in this category.`,
+      weight: establishmentTier,
+    },
+    {
+      text: `Recent regional personal income growth is ${beaGrowth.toFixed(1)}%.`,
+      weight: growthTier,
+    },
+  ]);
 
   // ── Competition: how crowded is the category near the formation city ──
   const competitionScore = clamp(
@@ -679,9 +724,14 @@ function buildCategories(
     0,
     100,
   );
-  const competitionRationale = hasLocalCompetitorData
-    ? `${verdictWord(competitionScore)} competitive landscape (${competitionScore}/100): ${localCompetitors} nearby matching places were found within Google/Foursquare search results for this category and location.`
-    : `${verdictWord(competitionScore)} competitive landscape (${competitionScore}/100): local place-search data was unavailable, so this falls back to ${establishments.toLocaleString()} statewide employer establishments in this category as a rougher competition proxy.`;
+  const competitionRationale = `${verdictWord(competitionScore)} competitive landscape (${competitionScore}/100).`;
+  const competitionReasons = hasLocalCompetitorData
+    ? [
+        `${localCompetitors} nearby matching places were found within Google/Foursquare search results for this category and location.`,
+      ]
+    : [
+        `Local place-search data was unavailable, so this uses ${establishments.toLocaleString()} statewide employer establishments in this category as a rougher competition proxy.`,
+      ];
 
   // ── Revenue: how much cash is likely moving through this category ──
   const receiptsTier =
@@ -701,22 +751,39 @@ function buildCategories(
     0,
     100,
   );
-  const revenueRationale =
-    `${verdictWord(revenueScore)} revenue potential (${revenueScore}/100): businesses without paid employees in this category average ` +
-    `${money(receipts)} in receipts in ${stateName}, against a labor-cost benchmark of ${wages > 0 ? `${money(wages)}/week` : "an unreported wage"}. ` +
-    `${planCompleteness}/3 of your own pricing/validation plan fields are filled in, which sharpens this score without another AI call.`;
+  const revenueRationale = `${verdictWord(revenueScore)} revenue potential (${revenueScore}/100).`;
+  const revenueReasons = rankedReasons([
+    {
+      text: `Businesses without paid employees in this category average ${money(receipts)} in receipts in ${stateName}.`,
+      weight: receiptsTier,
+    },
+    {
+      text: `Median household income of ${money(income)} supports category-wide spending power.`,
+      weight: revenueIncomeTier,
+    },
+    {
+      text: `The labor-cost benchmark is ${wages > 0 ? `${money(wages)}/week` : "unreported"}.`,
+      weight: wageTier,
+    },
+    {
+      text: `${planCompleteness}/3 of your own pricing/validation plan fields are filled in, which sharpens this score without another AI call.`,
+      weight: planTier,
+    },
+  ]);
 
   // ── Startup difficulty: capital, barrier-to-entry, build complexity, ──
   // ── labor-market tightness, and industry-knowledge depth — computed ──
   // ── once by scoreStartupDifficulty() before this function runs.      ──
   const startupDifficultyScore = startupDifficulty.score;
   const startupDifficultyRationale = startupDifficulty.rationale;
+  const startupDifficultyReasons = startupDifficulty.reasons;
 
   // ── Regulatory friction: ongoing legal/compliance drag — licenses, ──
   // ── permits, taxes, filings, recordkeeping, and government approvals ──
   // ── from Compliance-OS, weighted by severity and renewal cadence. ──
   const regulatoryFrictionScore = input.compliance.frictionScore;
-  const regulatoryFrictionRationale = `${verdictWord(regulatoryFrictionScore)} regulatory friction (${regulatoryFrictionScore}/100): based on ${input.compliance.requirementCount} known law/license/permit/tax/filing/recordkeeping requirement(s) for this category and state, weighted by how mandatory each one is and whether it recurs on a renewal schedule.`;
+  const regulatoryFrictionRationale = `${verdictWord(regulatoryFrictionScore)} regulatory friction (${regulatoryFrictionScore}/100).`;
+  const regulatoryFrictionReasons = input.compliance.reasons;
 
   // ── Outlook: multi-year momentum — business formation, establishment, ──
   // ── income, and population trends — computed once by scoreOutlook()   ──
@@ -725,6 +792,7 @@ function buildCategories(
   // ── derived from each category's own evidence quality ratings.        ──
   const outlookScore = outlook.score;
   const outlookRationale = outlook.rationale;
+  const outlookReasons = outlook.reasons;
 
   return [
     {
@@ -732,6 +800,7 @@ function buildCategories(
       label: CATEGORY_LABELS.demand,
       score: demandScore,
       rationale: demandRationale,
+      reasons: demandReasons,
       primarySource: {
         name: "U.S. Census ACS",
         url: "https://www.census.gov/programs-surveys/acs",
@@ -743,6 +812,7 @@ function buildCategories(
       label: CATEGORY_LABELS.competition,
       score: competitionScore,
       rationale: competitionRationale,
+      reasons: competitionReasons,
       primarySource: hasLocalCompetitorData
         ? {
             name: "Google Places",
@@ -759,6 +829,7 @@ function buildCategories(
       label: CATEGORY_LABELS.revenue,
       score: revenueScore,
       rationale: revenueRationale,
+      reasons: revenueReasons,
       primarySource: {
         name: "Census Nonemployer Statistics",
         url: "https://www.census.gov/programs-surveys/nonemployer-statistics.html",
@@ -770,6 +841,7 @@ function buildCategories(
       label: CATEGORY_LABELS.startupDifficulty,
       score: startupDifficultyScore,
       rationale: startupDifficultyRationale,
+      reasons: startupDifficultyReasons,
       primarySource: {
         name: "Compliance-OS",
         url: "https://www.sba.gov/business-guide/launch-your-business/apply-licenses-permits",
@@ -781,6 +853,7 @@ function buildCategories(
       label: CATEGORY_LABELS.regulatoryFriction,
       score: regulatoryFrictionScore,
       rationale: regulatoryFrictionRationale,
+      reasons: regulatoryFrictionReasons,
       primarySource: {
         name: "SBA Business Guide",
         url: "https://www.sba.gov/business-guide/launch-your-business/apply-licenses-permits",
@@ -792,6 +865,7 @@ function buildCategories(
       label: CATEGORY_LABELS.outlook,
       score: outlookScore,
       rationale: outlookRationale,
+      reasons: outlookReasons,
       primarySource: {
         name: "Census Business Formation Statistics",
         url: "https://www.census.gov/econ/bfs/index.html",
@@ -812,6 +886,7 @@ type MetricSet = { values: Record<string, number>; evidence: EvidenceItem[] };
 type ComplianceSignal = {
   requirementCount: number;
   frictionScore: number;
+  reasons: string[];
   evidence: EvidenceItem[];
 };
 
@@ -875,6 +950,37 @@ function summarizeRequirementCategories(
     .sort((a, b) => b[1] - a[1])
     .map(([label, count]) => `${count} ${label}${count === 1 ? "" : "s"}`)
     .join(", ");
+}
+
+// Groups requirements by category and ranks the groups by their actual
+// contribution to the friction score (severity weight + renewal bonus,
+// summed per category) rather than raw count, so the most prevalent reason
+// really is the one that moved the score the most.
+function rankRequirementReasons(
+  requirements: ComplianceRequirementRow[],
+): string[] {
+  if (requirements.length === 0) {
+    return [
+      "No known compliance requirements were found for this category and state.",
+    ];
+  }
+  const weightByLabel = new Map<string, number>();
+  const countByLabel = new Map<string, number>();
+  for (const requirement of requirements) {
+    const label =
+      REQUIREMENT_CATEGORY_LABELS[requirement.category ?? ""] ?? "other";
+    const weight =
+      (REGULATORY_SEVERITY_WEIGHT[requirement.severity ?? ""] ?? 1.5) +
+      (requirement.renewalFrequency ? 0.5 : 0);
+    weightByLabel.set(label, (weightByLabel.get(label) ?? 0) + weight);
+    countByLabel.set(label, (countByLabel.get(label) ?? 0) + 1);
+  }
+  return Array.from(weightByLabel.entries())
+    .sort((a, b) => b[1] - a[1])
+    .map(([label]) => {
+      const count = countByLabel.get(label) ?? 0;
+      return `${count} ${label}${count === 1 ? "" : "s"} requirement${count === 1 ? "" : "s"} found for this category and state.`;
+    });
 }
 
 // Census geography helpers ("county" here means the geocoded formation
@@ -1399,7 +1505,7 @@ export function scoreOutlook(input: {
   qcewTrend: TrendResult | null;
   beaGrowthPercent: number | null;
   populationTrend: TrendResult | null;
-}): { score: number; rationale: string } {
+}): { score: number; rationale: string; reasons: string[] } {
   const bfsPoints = trendPoints(input.bfsTrend?.trendPercent ?? null, 30);
   const qcewPoints = trendPoints(input.qcewTrend?.trendPercent ?? null, 30);
   const beaPoints = trendPoints(input.beaGrowthPercent, 25);
@@ -1424,10 +1530,17 @@ export function scoreOutlook(input: {
     : "a multi-year population trend was unavailable";
 
   const rationale =
-    `${verdictWord(score)} short-term outlook (${score}/100): ${bfsNote}; ${qcewNote}; ${beaNote}; and ${popNote}. ` +
-    `This looks backward at recent multi-year trends as a proxy for near-term momentum, not a guarantee of future results.`;
+    `${verdictWord(score)} short-term outlook (${score}/100). This looks backward at recent ` +
+    `multi-year trends as a proxy for near-term momentum, not a guarantee of future results.`;
 
-  return { score, rationale };
+  const reasons = rankedReasons([
+    { text: `${cap(bfsNote)}.`, weight: bfsPoints },
+    { text: `${cap(qcewNote)}.`, weight: qcewPoints },
+    { text: `${cap(beaNote)}.`, weight: beaPoints },
+    { text: `${cap(popNote)}.`, weight: popPoints },
+  ]);
+
+  return { score, rationale, reasons };
 }
 
 async function fetchCachedOrLiveOewsState(
@@ -2001,6 +2114,7 @@ async function fetchComplianceSignals(
         return {
           requirementCount: items.length,
           frictionScore,
+          reasons: rankRequirementReasons(items),
           evidence: [
             item(
               "Compliance requirements found",
@@ -2027,6 +2141,11 @@ async function fetchComplianceSignals(
   return {
     requirementCount: regulated ? 8 : 3,
     frictionScore: regulated ? 40 : 78,
+    reasons: [
+      regulated
+        ? "This category is typically subject to health, safety, or licensing regulation, which increases friction."
+        : "This category is not typically subject to heavy licensing or safety regulation.",
+    ],
     evidence: [
       item(
         "Compliance estimate",

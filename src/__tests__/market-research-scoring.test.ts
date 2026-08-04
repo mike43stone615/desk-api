@@ -80,7 +80,7 @@ describe('scoreStartupDifficulty', () => {
     });
     expect(result.score).toBeGreaterThanOrEqual(0);
     expect(result.score).toBeLessThanOrEqual(100);
-    expect(result.rationale).toContain('unavailable');
+    expect(result.reasons.join(' ')).toContain('unavailable');
   });
 
   it('is not affected by requirement/permit counts (that belongs to regulatoryFriction instead)', () => {
@@ -103,5 +103,28 @@ describe('scoreStartupDifficulty', () => {
       unemploymentRate: 5,
     });
     expect(a.score).toBe(b.score);
+  });
+
+  it('ranks reasons with the largest point contributor first', () => {
+    // Capital-intensive (5 pts, lowest of the five signals) vs. barrier
+    // (25 pts, the max for a non-licensed B2C business) — barrier should
+    // lead the ranked reasons, capital should trail.
+    const result = scoreStartupDifficulty({
+      industry: 'Manufacturing',
+      businessIdea: 'small-batch furniture manufacturing',
+      naicsCodes: ['31-33'],
+      customerType: 'B2C',
+      unemploymentRate: 5,
+    });
+    const barrierIndex = result.reasons.findIndex((r) =>
+      r.toLowerCase().includes('barrier'),
+    );
+    const capitalIndex = result.reasons.findIndex((r) =>
+      r.toLowerCase().includes('capital'),
+    );
+    expect(barrierIndex).toBeGreaterThanOrEqual(0);
+    expect(capitalIndex).toBeGreaterThanOrEqual(0);
+    expect(barrierIndex).toBeLessThan(capitalIndex);
+    expect(result.reasons.length).toBe(5);
   });
 });

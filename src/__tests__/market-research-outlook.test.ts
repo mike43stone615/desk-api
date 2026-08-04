@@ -72,16 +72,38 @@ describe("scoreOutlook", () => {
     expect(shrinking.score).toBeLessThan(missing.score);
   });
 
-  it("mentions each of the four signals in the rationale", () => {
+  it("mentions each of the four signals across the ranked reasons", () => {
     const result = scoreOutlook({
       bfsTrend: trend(4),
       qcewTrend: trend(4),
       beaGrowthPercent: 4,
       populationTrend: trend(4),
     });
-    expect(result.rationale).toContain("business applications");
-    expect(result.rationale).toContain("establishments");
-    expect(result.rationale).toContain("personal income");
-    expect(result.rationale).toContain("population");
+    expect(result.reasons).toHaveLength(4);
+    const joined = result.reasons.join(" ").toLowerCase();
+    expect(joined).toContain("business applications");
+    expect(joined).toContain("establishments");
+    expect(joined).toContain("personal income");
+    expect(joined).toContain("population");
+  });
+
+  it("ranks reasons by how many points each signal actually contributed", () => {
+    const result = scoreOutlook({
+      bfsTrend: trend(15), // strong growth -> full 30 points
+      qcewTrend: trend(-10), // shrinking -> low points
+      beaGrowthPercent: null, // missing -> neutral ~50%
+      populationTrend: trend(-10),
+    });
+    // The BFS trend (30-point max, maxed out) should be the most prevalent
+    // reason; it must appear before the population trend note.
+    const bfsIndex = result.reasons.findIndex((r) =>
+      r.toLowerCase().includes("business applications"),
+    );
+    const popIndex = result.reasons.findIndex((r) =>
+      r.toLowerCase().includes("population"),
+    );
+    expect(bfsIndex).toBeGreaterThanOrEqual(0);
+    expect(popIndex).toBeGreaterThanOrEqual(0);
+    expect(bfsIndex).toBeLessThan(popIndex);
   });
 });
