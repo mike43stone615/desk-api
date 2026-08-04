@@ -212,7 +212,10 @@ router.post("/analyze", async (c) => {
     businessIdea,
   );
   const stateName = STATE_NAMES[state] ?? state;
-  const county = await fetchCountyFips(body.formationCity, stateFips, state);
+  const { place, county } = await resolveGeography(
+    body.formationCity,
+    stateFips,
+  );
 
   const [
     acs,
@@ -231,7 +234,7 @@ router.post("/analyze", async (c) => {
     qcewTrend,
     populationTrend,
   ] = await Promise.all([
-    fetchAcsState(stateFips, config.censusApiKey, county),
+    fetchAcsState(stateFips, config.censusApiKey, place, county),
     fetchCbpState(stateFips, naicsCodes, config.censusApiKey, county),
     fetchNonemployerState(stateFips, naicsCodes, config.censusApiKey, county),
     fetchBeaRegionalState(state, stateFips, config.beaApiKey),
@@ -257,7 +260,7 @@ router.post("/analyze", async (c) => {
     analyzePlanFields(body),
     fetchBfsTrend(stateFips),
     fetchQcewTrend(stateFips, naicsCodes, county),
-    fetchPopulationTrend(stateFips, config.censusApiKey, county),
+    fetchPopulationTrend(stateFips, config.censusApiKey, place, county),
   ]);
 
   const evidence: EvidenceItem[] = [];
@@ -370,25 +373,37 @@ router.post("/analyze", async (c) => {
   }
 
   evidence.push(
-    county
+    place
       ? item(
           "Geography used for this score",
-          county.name,
-          `Desk resolved "${clean(body.formationCity)}" to ${county.name}, ${stateName} and used county-level data where available instead of a statewide average. Some sources fall back to statewide numbers when a small county's data is suppressed for privacy.`,
-          "U.S. Census Geocoder",
-          "https://geocoding.geo.census.gov/geocoder/",
+          place.name,
+          county
+            ? `Desk resolved "${clean(body.formationCity)}" to ${place.name} in ${county.name}, ${stateName}. Population, income, and unemployment figures below use ${place.name} directly; establishment and receipts figures use ${county.name} since those sources don't support city-level queries. Some sources still fall back to statewide numbers when a small area's data is suppressed for privacy.`
+            : `Desk resolved "${clean(body.formationCity)}" to ${place.name}, ${stateName}, but could not determine its containing county. Population, income, and unemployment figures below use ${place.name} directly; establishment and receipts figures fall back to statewide ${stateName} numbers since those sources don't support city-level queries.`,
+          "U.S. Census TIGERweb",
+          "https://tigerweb.geo.census.gov/",
           "medium",
           "demand",
         )
-      : item(
-          "Geography used for this score",
-          `${stateName} (statewide)`,
-          `Desk could not resolve "${clean(body.formationCity)}" to a specific county, so demand, competition, and revenue below reflect statewide ${stateName} averages rather than the formation city specifically — a small city can look very different from its state average.`,
-          "U.S. Census Geocoder",
-          "https://geocoding.geo.census.gov/geocoder/",
-          "limited",
-          "demand",
-        ),
+      : county
+        ? item(
+            "Geography used for this score",
+            county.name,
+            `Desk resolved "${clean(body.formationCity)}" to ${county.name}, ${stateName} and used county-level data where available instead of a statewide average. Some sources fall back to statewide numbers when a small county's data is suppressed for privacy.`,
+            "U.S. Census TIGERweb",
+            "https://tigerweb.geo.census.gov/",
+            "medium",
+            "demand",
+          )
+        : item(
+            "Geography used for this score",
+            `${stateName} (statewide)`,
+            `Desk could not resolve "${clean(body.formationCity)}" to a specific city or county, so demand, competition, and revenue below reflect statewide ${stateName} averages rather than the formation city specifically — a small city can look very different from its state average.`,
+            "U.S. Census TIGERweb",
+            "https://tigerweb.geo.census.gov/",
+            "limited",
+            "demand",
+          ),
   );
 
   // A business idea that didn't match any keyword library entry isn't
@@ -447,6 +462,7 @@ router.post("/analyze", async (c) => {
       planFields,
     },
     state,
+    { place, county },
     evidence,
     startupDifficulty,
     outlook,
@@ -618,6 +634,122 @@ export function scoreStartupDifficulty(input: {
   return { score, rationale, reasons };
 }
 
+// Population/establishment/receipts tiers are sized for state-scale
+// magnitudes by default. Once a metric actually resolves at city or county
+// level (see resolveGeography/fetchAcsState/fetchCbpState/etc.), a city or
+// county almost never reaches the state-scale thresholds even for a strong
+// local market — so each of these picks a threshold table sized for the
+// geography level the underlying number actually came from. Income is
+// deliberately excluded from this scaling: a small city can have just as
+// high a median income as a big state, so income tiers stay absolute.
+export function populationTierFor(
+  population: number,
+  level: GeographyLevel | undefined,
+): number {
+  if (level === "place") {
+    return population > 150000
+      ? 40
+      : population > 50000
+        ? 30
+        : population > 10000
+          ? 20
+          : 10;
+  }
+  if (level === "county") {
+    return population > 300000
+      ? 40
+      : population > 75000
+        ? 30
+        : population > 15000
+          ? 20
+          : 10;
+  }
+  return population > 500000
+    ? 40
+    : population > 100000
+      ? 30
+      : population > 25000
+        ? 20
+        : 10;
+}
+
+export function establishmentTierFor(
+  establishments: number,
+  level: GeographyLevel | undefined,
+): number {
+  // Establishments never resolve at place level (CBP has no place-level
+  // geography — see the geography-support table in the resolver comments),
+  // so this only ever branches between county and state scale.
+  if (level === "county") {
+    return establishments > 300
+      ? 20
+      : establishments > 75
+        ? 15
+        : establishments > 20
+          ? 10
+          : 5;
+  }
+  return establishments > 1000
+    ? 20
+    : establishments > 250
+      ? 15
+      : establishments > 50
+        ? 10
+        : 5;
+}
+
+// Competition's fallback-mode proxy (used only when Google/Foursquare local
+// search data is unavailable) scores in the opposite direction — a higher
+// establishment count reads as more crowded, so a higher count maps to a
+// *lower* score. County-scale thresholds are proportioned the same ~0.3x
+// ratio as establishmentTierFor's county:state scaling above.
+export function competitionEstablishmentFallbackScore(
+  establishments: number,
+  level: GeographyLevel | undefined,
+): number {
+  if (level === "county") {
+    return establishments > 600
+      ? 45
+      : establishments > 150
+        ? 60
+        : establishments > 30
+          ? 75
+          : 65;
+  }
+  return establishments > 2000
+    ? 45
+    : establishments > 500
+      ? 60
+      : establishments > 100
+        ? 75
+        : 65;
+}
+
+export function receiptsTierFor(
+  receipts: number,
+  level: GeographyLevel | undefined,
+): number {
+  // Nonemployer receipts never resolve at place level either (see the
+  // geography-support table), so — like establishments — this only
+  // branches between county and state scale, proportioned the same way.
+  if (level === "county") {
+    return receipts > 300000
+      ? 40
+      : receipts > 75000
+        ? 30
+        : receipts > 15000
+          ? 20
+          : 10;
+  }
+  return receipts > 1000000
+    ? 40
+    : receipts > 250000
+      ? 30
+      : receipts > 50000
+        ? 20
+        : 10;
+}
+
 function buildCategories(
   input: {
     acs: MetricSet | null;
@@ -634,6 +766,7 @@ function buildCategories(
     planFields: MetricSet;
   },
   state: string,
+  geo: { place: PlaceGeo | null; county: CountyGeo | null },
   allEvidence: EvidenceItem[],
   startupDifficulty: { score: number; rationale: string; reasons: string[] },
   outlook: { score: number; rationale: string; reasons: string[] },
@@ -642,9 +775,21 @@ function buildCategories(
   const evidenceFor = (key: CategoryKey) =>
     allEvidence.filter((entry) => entry.category === key);
 
+  // Names the geography a given metric's number actually came from, so
+  // reason text can say "Denver has a population of..." instead of always
+  // naming the state, now that population/income might be city-specific
+  // while establishments/receipts are still only county-or-state.
+  const geoNameFor = (level: GeographyLevel | undefined): string => {
+    if (level === "place" && geo.place) return geo.place.name;
+    if (level === "county" && geo.county) return geo.county.name;
+    return stateName;
+  };
+
   const population = input.acs?.values.population ?? 0;
+  const populationLevel = input.acs?.geographyLevel;
   const income = input.acs?.values.medianIncome ?? 0;
   const establishments = input.cbp?.values.establishments ?? 0;
+  const establishmentsLevel = input.cbp?.geographyLevel;
   const hasLocalCompetitorData =
     Boolean(input.foursquare) || Boolean(input.googlePlaces);
   const localCompetitors = Math.max(
@@ -652,6 +797,7 @@ function buildCategories(
     input.googlePlaces?.values.googleCompetitors ?? 0,
   );
   const receipts = input.nonemployer?.values.receipts ?? 0;
+  const receiptsLevel = input.nonemployer?.geographyLevel;
   const wages = Math.max(
     input.qcew?.values.averageWeeklyWage ?? 0,
     input.oews?.values.meanWeeklyWage ?? 0,
@@ -660,24 +806,13 @@ function buildCategories(
   const planCompleteness = input.planFields.values.planCompleteness ?? 0;
 
   // ── Demand: how big and how well-funded is the potential customer base ──
-  const populationTier =
-    population > 500000
-      ? 40
-      : population > 100000
-        ? 30
-        : population > 25000
-          ? 20
-          : 10;
+  const populationTier = populationTierFor(population, populationLevel);
   const incomeTier =
     income > 90000 ? 25 : income > 65000 ? 19 : income > 45000 ? 13 : 7;
-  const establishmentTier =
-    establishments > 1000
-      ? 20
-      : establishments > 250
-        ? 15
-        : establishments > 50
-          ? 10
-          : 5;
+  const establishmentTier = establishmentTierFor(
+    establishments,
+    establishmentsLevel,
+  );
   const growthTier = beaGrowth > 4 ? 15 : beaGrowth > 1 ? 8 : 0;
   const demandScore = clamp(
     populationTier + incomeTier + establishmentTier + growthTier,
@@ -687,7 +822,7 @@ function buildCategories(
   const demandRationale = `${verdictWord(demandScore)} demand (${demandScore}/100).`;
   const demandReasons = rankedReasons([
     {
-      text: `${stateName} has a population of ${population.toLocaleString() || "an unreported amount"} in the target area.`,
+      text: `${geoNameFor(populationLevel)} has a population of ${population.toLocaleString() || "an unreported amount"} in the target area.`,
       weight: populationTier,
     },
     {
@@ -714,13 +849,10 @@ function buildCategories(
           : localCompetitors > 3
             ? 75
             : 90
-      : establishments > 2000
-        ? 45
-        : establishments > 500
-          ? 60
-          : establishments > 100
-            ? 75
-            : 65,
+      : competitionEstablishmentFallbackScore(
+          establishments,
+          establishmentsLevel,
+        ),
     0,
     100,
   );
@@ -730,18 +862,11 @@ function buildCategories(
         `${localCompetitors} nearby matching places were found within Google/Foursquare search results for this category and location.`,
       ]
     : [
-        `Local place-search data was unavailable, so this uses ${establishments.toLocaleString()} statewide employer establishments in this category as a rougher competition proxy.`,
+        `Local place-search data was unavailable, so this uses ${establishments.toLocaleString()} ${establishmentsLevel === "county" ? "county-level" : "statewide"} employer establishments in this category as a rougher competition proxy.`,
       ];
 
   // ── Revenue: how much cash is likely moving through this category ──
-  const receiptsTier =
-    receipts > 1000000
-      ? 40
-      : receipts > 250000
-        ? 30
-        : receipts > 50000
-          ? 20
-          : 10;
+  const receiptsTier = receiptsTierFor(receipts, receiptsLevel);
   const revenueIncomeTier = income > 75000 ? 25 : income > 50000 ? 17 : 9;
   const wageTier =
     wages > 0 && wages < 1200 ? 20 : wages > 0 && wages < 1800 ? 14 : 8;
@@ -754,7 +879,7 @@ function buildCategories(
   const revenueRationale = `${verdictWord(revenueScore)} revenue potential (${revenueScore}/100).`;
   const revenueReasons = rankedReasons([
     {
-      text: `Businesses without paid employees in this category average ${money(receipts)} in receipts in ${stateName}.`,
+      text: `Businesses without paid employees in this category average ${money(receipts)} in receipts in ${geoNameFor(receiptsLevel)}.`,
       weight: receiptsTier,
     },
     {
@@ -882,7 +1007,14 @@ function verdictWord(score: number): string {
   return "Weak";
 }
 
-type MetricSet = { values: Record<string, number>; evidence: EvidenceItem[] };
+type MetricSet = {
+  values: Record<string, number>;
+  evidence: EvidenceItem[];
+  // Which geography level these values actually came from — undefined for
+  // sources with no jurisdiction-scaled tiers (BEA, OEWS, Google Places,
+  // Foursquare, registry, guidance, plan fields), where it isn't consumed.
+  geographyLevel?: GeographyLevel;
+};
 type ComplianceSignal = {
   requirementCount: number;
   frictionScore: number;
@@ -983,10 +1115,19 @@ function rankRequirementReasons(
     });
 }
 
-// Census geography helpers ("county" here means the geocoded formation
-// county, when Desk was able to resolve one — see fetchCountyFips) let the
-// fetchers below prefer county-level data over blunt statewide numbers.
+// Census geography helpers. "county"/"place" here mean the geocoded
+// formation county/place, when Desk was able to resolve one — see
+// resolveGeography below. These let the fetchers below prefer city- or
+// county-level data over blunt statewide numbers.
 type CountyGeo = { fips: string; name: string; stateFips: string };
+type PlaceGeo = { fips: string; name: string; stateFips: string };
+
+// Which geography level a given metric's number actually came from —
+// carried per-metric (not as one global flag) because a single request can
+// have population/income at place level while establishments/receipts are
+// only available at county or state level (see the geography-support table
+// below).
+type GeographyLevel = "place" | "county" | "state";
 
 function geoParams(
   stateFips: string,
@@ -997,51 +1138,214 @@ function geoParams(
     : { for: `state:${stateFips}` };
 }
 
-// Census's free, keyless Geocoder resolves a "city, state" string to a
-// county FIPS code so demand/revenue/competition data can be pulled for the
-// actual formation county instead of always falling back to a statewide
-// average — a small town's real population/income can look nothing like its
-// state's. Returns null (and callers fall back to state-level data, exactly
-// as before this existed) on any failure, since this is a best-effort
-// refinement, not a hard requirement.
-async function fetchCountyFips(
-  formationCity: string | undefined,
-  stateFips: string | undefined,
-  stateAbbr: string,
-): Promise<CountyGeo | null> {
-  const city = clean(formationCity);
-  if (!city || !stateFips) return null;
-  const address = city.toLowerCase().includes(stateAbbr.toLowerCase())
-    ? city
-    : `${city}, ${stateAbbr}`;
-  const url = new URL(
-    "https://geocoding.geo.census.gov/geocoder/geographies/onelineaddress",
+// ── Geography resolution ───────────────────────────────────────────────────
+//
+// Census's free, keyless Geocoder (`/geographies/onelineaddress`) requires a
+// full street address — passing it a bare "City, State" string reliably
+// returns zero address matches, even for a well-known city (verified live:
+// Denver, CO returns an empty addressMatches array). That endpoint was
+// silently failing for most requests, so this resolver uses Census's
+// TIGERweb ArcGIS REST services instead, which resolve a bare city name
+// directly.
+//
+// Verified per-source geography support (tested live against each API):
+//   | Source                          | State | County | Place (city) |
+//   |----------------------------------|-------|--------|---------------|
+//   | ACS (population/income/unemp.)  | yes   | yes    | yes           |
+//   | CBP (establishments)            | yes   | yes    | no ("unknown/unsupported geography hierarchy") |
+//   | Nonemployer (receipts)          | yes   | yes    | no (same error) |
+//   | BEA, QCEW, OEWS, BFS            | yes   | QCEW only | not attempted, assumed no |
+//
+// So only ACS's population/income/unemployment fields can go to true
+// city-level precision; establishments/receipts stay at county-or-state.
+//
+// Resolution has two steps:
+//   1. Query the "Incorporated Places" layer for a place whose BASENAME
+//      matches the cleaned formation city (case-insensitive), scoped to the
+//      formation state.
+//   2. CBP/Nonemployer/QCEW don't support place-level geography, so to still
+//      get county-level data for those, compute the resolved place
+//      polygon's centroid and run a point-in-polygon spatial query against
+//      the Counties layer to find the containing county.
+//
+// Both steps are best-effort: any failure returns null for that piece and
+// callers fall back to the next-coarsest geography level, exactly as before
+// this resolver existed.
+const TIGERWEB_PLACES_URL =
+  "https://tigerweb.geo.census.gov/arcgis/rest/services/TIGERweb/Places_CouSub_ConCity_SubMCD/MapServer/4/query";
+// Layer 4 of this service is "Incorporated Places" (current vintage) —
+// confirmed via `Places_CouSub_ConCity_SubMCD/MapServer?f=json`, where layer
+// ids 4/11/18/25 are all "Incorporated Places" across vintages; 4 is the
+// newest ("Current").
+const TIGERWEB_COUNTIES_URL =
+  "https://tigerweb.geo.census.gov/arcgis/rest/services/TIGERweb/State_County/MapServer/1/query";
+// Layer 1 of this service is the finest-detail "Counties" layer in the
+// "Current" (un-vintage-grouped) scale-tier set — confirmed via
+// `State_County/MapServer?f=json`, mirroring how layer 4 (not one of the
+// ACS2025/ACS2024/Census2020 vintage groups) was chosen for Places above.
+
+// TIGERweb's `where` clause is a SQL fragment; escape embedded single quotes
+// (e.g. "O'Fallon") so the query stays well-formed instead of breaking or
+// (in theory) allowing injection.
+function escapeForArcgisLike(value: string): string {
+  return value.replace(/'/g, "''");
+}
+
+// formationCity is sometimes supplied as "City, ST" even though
+// formationState already carries the state separately — TIGERweb matches on
+// the bare place name only, so strip a trailing ", ST" state suffix if
+// present.
+function cleanCityNameForMatch(city: string): string {
+  return city.replace(/,\s*[A-Za-z]{2}$/, "").trim();
+}
+
+type ArcgisPlaceFeature = {
+  attributes?: {
+    NAME?: string;
+    PLACE?: string;
+    STATE?: string;
+    BASENAME?: string;
+  };
+  geometry?: { rings?: number[][][] };
+};
+
+// Resolves a bare city name + state FIPS to a TIGERweb "Incorporated
+// Places" feature. Prefers an exact BASENAME match over a prefix match when
+// both are present (there can be same-named places in different states, but
+// this query is already scoped to one state, so same-state duplicates are
+// rare); otherwise just takes the first result rather than trying to
+// disambiguate further.
+async function fetchPlaceGeo(
+  baseName: string,
+  stateFips: string,
+): Promise<{ fips: string; name: string; rings: number[][][] | null } | null> {
+  if (!baseName) return null;
+  const escaped = escapeForArcgisLike(baseName);
+  const url = new URL(TIGERWEB_PLACES_URL);
+  url.searchParams.set(
+    "where",
+    `UPPER(BASENAME) LIKE UPPER('${escaped}%') AND STATE='${stateFips}'`,
   );
-  url.searchParams.set("address", address);
-  url.searchParams.set("benchmark", "Public_AR_Current");
-  url.searchParams.set("vintage", "Current_Current");
-  url.searchParams.set("layers", "Counties");
-  url.searchParams.set("format", "json");
+  url.searchParams.set("outFields", "NAME,PLACE,STATE,BASENAME");
+  url.searchParams.set("returnGeometry", "true");
+  // Simplifies the returned polygon (in meters, matching the default
+  // 102100/Web Mercator output SR) so it's light enough to compute a
+  // centroid from client-side — an unsimplified city polygon can run to
+  // thousands of points per ring.
+  url.searchParams.set("maxAllowableOffset", "100");
+  url.searchParams.set("f", "json");
+  try {
+    const response = await fetch(url.toString(), {
+      signal: AbortSignal.timeout(5000),
+    });
+    if (!response.ok) return null;
+    const data = (await response.json()) as { features?: ArcgisPlaceFeature[] };
+    const features = data.features ?? [];
+    if (features.length === 0) return null;
+    const upperBase = baseName.toUpperCase();
+    const exact = features.find(
+      (f) => (f.attributes?.BASENAME ?? "").toUpperCase() === upperBase,
+    );
+    const best = exact ?? features[0];
+    const placeFips = best.attributes?.PLACE;
+    if (!placeFips) return null;
+    return {
+      fips: placeFips,
+      name: best.attributes?.NAME ?? baseName,
+      rings: best.geometry?.rings ?? null,
+    };
+  } catch {
+    return null;
+  }
+}
+
+function ringSignedArea(ring: number[][]): number {
+  let area = 0;
+  for (let i = 0; i < ring.length; i += 1) {
+    const [x1, y1] = ring[i];
+    const [x2, y2] = ring[(i + 1) % ring.length];
+    area += x1 * y2 - x2 * y1;
+  }
+  return area / 2;
+}
+
+// City polygons frequently have multiple rings (islands/annexed exclaves) —
+// the largest ring by area is treated as the primary body, and its centroid
+// (shoelace-formula area-weighted centroid, not a plain point average) is
+// used for the county point-in-polygon lookup. A point anywhere in the
+// city's main body is enough to identify the containing county for this
+// best-effort lookup; exact accuracy for edge-straddling exclaves isn't
+// worth the extra complexity here.
+function polygonCentroid(rings: number[][][]): [number, number] | null {
+  let best: number[][] | null = null;
+  let bestArea = 0;
+  for (const ring of rings) {
+    const area = Math.abs(ringSignedArea(ring));
+    if (area > bestArea) {
+      bestArea = area;
+      best = ring;
+    }
+  }
+  if (!best || best.length < 3) return null;
+  let area = 0;
+  let cx = 0;
+  let cy = 0;
+  for (let i = 0; i < best.length; i += 1) {
+    const [x1, y1] = best[i];
+    const [x2, y2] = best[(i + 1) % best.length];
+    const cross = x1 * y2 - x2 * y1;
+    area += cross;
+    cx += (x1 + x2) * cross;
+    cy += (y1 + y2) * cross;
+  }
+  area = area / 2;
+  if (area === 0) return null;
+  return [cx / (6 * area), cy / (6 * area)];
+}
+
+// Finds the county containing a point (in the same Web Mercator SR the
+// simplified place geometry was returned in) via a spatial-intersects query
+// against the Counties layer. Matching counties by BASENAME the way places
+// are matched isn't reliable here (a city's name usually isn't its
+// county's name), so this is the correct approach even though it's more
+// work than a simple attribute match.
+async function fetchCountyForGeometry(
+  rings: number[][][],
+  stateFips: string,
+): Promise<CountyGeo | null> {
+  const centroid = polygonCentroid(rings);
+  return centroid ? fetchCountyForPoint(centroid, stateFips) : null;
+}
+
+async function fetchCountyForPoint(
+  point: [number, number],
+  stateFips: string,
+): Promise<CountyGeo | null> {
+  const [x, y] = point;
+  const url = new URL(TIGERWEB_COUNTIES_URL);
+  url.searchParams.set("geometry", `${x},${y}`);
+  url.searchParams.set("geometryType", "esriGeometryPoint");
+  url.searchParams.set("inSR", "102100");
+  url.searchParams.set("spatialRel", "esriSpatialRelIntersects");
+  url.searchParams.set("outFields", "NAME,COUNTY,STATE");
+  url.searchParams.set("returnGeometry", "false");
+  url.searchParams.set("f", "json");
   try {
     const response = await fetch(url.toString(), {
       signal: AbortSignal.timeout(5000),
     });
     if (!response.ok) return null;
     const data = (await response.json()) as {
-      result?: {
-        addressMatches?: Array<{
-          geographies?: {
-            Counties?: Array<{ GEOID?: string; NAME?: string }>;
-          };
-        }>;
-      };
+      features?: Array<{
+        attributes?: { NAME?: string; COUNTY?: string; STATE?: string };
+      }>;
     };
-    const county = data.result?.addressMatches?.[0]?.geographies?.Counties?.[0];
-    const geoid = county?.GEOID;
-    if (!geoid || geoid.length < 5) return null;
+    const feature = data.features?.[0];
+    const countyFips = feature?.attributes?.COUNTY;
+    if (!countyFips) return null;
     return {
-      fips: geoid.slice(2),
-      name: county?.NAME ?? "the formation county",
+      fips: countyFips,
+      name: feature?.attributes?.NAME ?? "the formation county",
       stateFips,
     };
   } catch {
@@ -1049,59 +1353,107 @@ async function fetchCountyFips(
   }
 }
 
+export async function resolveGeography(
+  formationCity: string | undefined,
+  stateFips: string | undefined,
+): Promise<{ place: PlaceGeo | null; county: CountyGeo | null }> {
+  const city = clean(formationCity);
+  if (!city || !stateFips) return { place: null, county: null };
+  const baseName = cleanCityNameForMatch(city);
+  if (!baseName) return { place: null, county: null };
+  const placeLookup = await fetchPlaceGeo(baseName, stateFips);
+  if (!placeLookup) return { place: null, county: null };
+  const place: PlaceGeo = {
+    fips: placeLookup.fips,
+    name: placeLookup.name,
+    stateFips,
+  };
+  const county = placeLookup.rings
+    ? await fetchCountyForGeometry(placeLookup.rings, stateFips)
+    : null;
+  return { place, county };
+}
+
+// ACS is the only source that supports place-level geography (see the
+// geography-support table in resolveGeography's comments) — so this tries
+// place first, then falls back to county, then state, stopping at the first
+// level that returns a usable row. A place-level row can still be missing
+// (e.g. suppressed for a very small place), so this is a real cascade, not
+// just a one-shot pick.
 async function fetchAcsState(
   stateFips: string | undefined,
   key: string | undefined,
+  place: PlaceGeo | null,
   county: CountyGeo | null,
 ): Promise<MetricSet | null> {
   if (!stateFips) return null;
-  const url = censusUrl(
-    "https://api.census.gov/data/2023/acs/acs5/profile",
-    key,
-    {
-      get: "NAME,DP05_0001E,DP03_0062E,DP03_0119PE,DP03_0009PE",
-      ...geoParams(stateFips, county),
-    },
-  );
-  const row = await fetchCensusRow(url);
-  if (!row) return null;
-  return {
-    values: {
-      population: num(row.DP05_0001E),
-      medianIncome: num(row.DP03_0062E),
-      povertyRate: num(row.DP03_0119PE),
-      unemploymentRate: num(row.DP03_0009PE),
-    },
-    evidence: [
-      item(
-        "Population",
-        row.DP05_0001E,
-        `${row.NAME} total population from ACS 5-year profile.`,
-        "U.S. Census ACS",
-        url,
-        "strong",
-        "demand",
-      ),
-      item(
-        "Median household income",
-        money(row.DP03_0062E),
-        `${row.NAME} median household income from ACS 5-year profile.`,
-        "U.S. Census ACS",
-        url,
-        "strong",
-        "demand",
-      ),
-      item(
-        "Local unemployment rate",
-        `${row.DP03_0009PE}%`,
-        `${row.NAME} unemployment rate from ACS 5-year profile — a lower rate suggests a tighter local labor market that can make hiring slower or costlier.`,
-        "U.S. Census ACS",
-        url,
-        "strong",
-        "startupDifficulty",
-      ),
-    ],
-  };
+  const levels: Array<{
+    level: GeographyLevel;
+    params: { for: string; in?: string };
+  }> = [];
+  if (place)
+    levels.push({
+      level: "place",
+      params: { for: `place:${place.fips}`, in: `state:${stateFips}` },
+    });
+  if (county)
+    levels.push({
+      level: "county",
+      params: { for: `county:${county.fips}`, in: `state:${stateFips}` },
+    });
+  levels.push({ level: "state", params: { for: `state:${stateFips}` } });
+
+  for (const { level, params } of levels) {
+    const url = censusUrl(
+      "https://api.census.gov/data/2023/acs/acs5/profile",
+      key,
+      {
+        get: "NAME,DP05_0001E,DP03_0062E,DP03_0119PE,DP03_0009PE",
+        ...params,
+      },
+    );
+    const row = await fetchCensusRow(url);
+    if (!row) continue;
+    return {
+      values: {
+        population: num(row.DP05_0001E),
+        medianIncome: num(row.DP03_0062E),
+        povertyRate: num(row.DP03_0119PE),
+        unemploymentRate: num(row.DP03_0009PE),
+      },
+      geographyLevel: level,
+      evidence: [
+        item(
+          "Population",
+          row.DP05_0001E,
+          `${row.NAME} total population from ACS 5-year profile.`,
+          "U.S. Census ACS",
+          url,
+          "strong",
+          "demand",
+        ),
+        item(
+          "Median household income",
+          money(row.DP03_0062E),
+          `${row.NAME} median household income from ACS 5-year profile.`,
+          "U.S. Census ACS",
+          url,
+          "strong",
+          "demand",
+        ),
+        item(
+          "Local unemployment rate",
+          `${row.DP03_0009PE}%`,
+          `${row.NAME} unemployment rate from ACS 5-year profile — a lower rate suggests a tighter local labor market that can make hiring slower or costlier.`,
+          "U.S. Census ACS",
+          url,
+          "strong",
+          "startupDifficulty",
+        ),
+      ],
+    };
+  }
+  return null;
 }
 
 async function fetchCbpForCode(
@@ -1124,6 +1476,7 @@ async function fetchCbpForCode(
       employment: num(row.EMP),
       annualPayroll: num(row.PAYANN),
     },
+    geographyLevel: county ? "county" : "state",
     evidence: [
       item(
         "Employer establishments",
@@ -1189,6 +1542,7 @@ async function fetchNonemployerForCode(
       nonemployerEstablishments: num(row.NESTAB),
       receipts: num(row.NRCPTOT) * 1000,
     },
+    geographyLevel: county ? "county" : "state",
     evidence: [
       item(
         "Nonemployer receipts",
@@ -1450,41 +1804,49 @@ async function fetchQcewTrend(
 async function fetchPopulationTrend(
   stateFips: string | undefined,
   key: string | undefined,
+  place: PlaceGeo | null,
   county: CountyGeo | null,
 ): Promise<TrendResult | null> {
   if (!stateFips) return null;
   const newestYear = 2023;
   const oldestYear = 2019;
-  const [newestRow, oldestRow] = await Promise.all([
-    fetchCensusRow(
-      censusUrl(
-        `https://api.census.gov/data/${newestYear}/acs/acs5/profile`,
-        key,
-        {
-          get: "DP05_0001E",
-          ...geoParams(stateFips, county),
-        },
+  // Same place → county → state cascade as fetchAcsState, tried a level at
+  // a time so both vintages come from the same geography (mixing a
+  // place-level newest row with a state-level oldest row would produce a
+  // meaningless trend).
+  const levels: Array<{ for: string; in?: string }> = [];
+  if (place) levels.push({ for: `place:${place.fips}`, in: `state:${stateFips}` });
+  if (county) levels.push({ for: `county:${county.fips}`, in: `state:${stateFips}` });
+  levels.push({ for: `state:${stateFips}` });
+
+  for (const params of levels) {
+    const [newestRow, oldestRow] = await Promise.all([
+      fetchCensusRow(
+        censusUrl(
+          `https://api.census.gov/data/${newestYear}/acs/acs5/profile`,
+          key,
+          { get: "DP05_0001E", ...params },
+        ),
       ),
-    ),
-    fetchCensusRow(
-      censusUrl(
-        `https://api.census.gov/data/${oldestYear}/acs/acs5/profile`,
-        key,
-        {
-          get: "DP05_0001E",
-          ...geoParams(stateFips, county),
-        },
+      fetchCensusRow(
+        censusUrl(
+          `https://api.census.gov/data/${oldestYear}/acs/acs5/profile`,
+          key,
+          { get: "DP05_0001E", ...params },
+        ),
       ),
-    ),
-  ]);
-  const newest = num(newestRow?.DP05_0001E);
-  const oldest = num(oldestRow?.DP05_0001E);
-  if (!newest || !oldest) return null;
-  return {
-    trendPercent: ((newest - oldest) / oldest) * 100,
-    oldestLabel: String(oldestYear),
-    newestLabel: String(newestYear),
-  };
+    ]);
+    const newest = num(newestRow?.DP05_0001E);
+    const oldest = num(oldestRow?.DP05_0001E);
+    if (newest && oldest) {
+      return {
+        trendPercent: ((newest - oldest) / oldest) * 100,
+        oldestLabel: String(oldestYear),
+        newestLabel: String(newestYear),
+      };
+    }
+  }
+  return null;
 }
 
 // Each trend contributes points on its own 0-max scale; a missing trend
@@ -1976,11 +2338,17 @@ async function fetchQcewForCode(
           )
         : undefined);
     if (!row) return null;
+    // targetArea equals stateArea when no county was resolved, so the
+    // `county &&` check is what actually distinguishes a genuine
+    // county-level match from a same-value coincidence.
+    const geographyLevel: GeographyLevel =
+      county && row.area_fips === targetArea ? "county" : "state";
     return {
       values: {
         averageWeeklyWage: num(row.annual_avg_wkly_wage),
         establishments: num(row.annual_avg_estabs),
       },
+      geographyLevel,
       evidence: [
         item(
           "Average weekly wage",
@@ -2457,6 +2825,14 @@ function mergeMetricSets(
   return {
     values: combineValues(valid),
     evidence: valid.flatMap((set) => set.evidence),
+    // A compound (multi-NAICS-code) business idea fetches each code
+    // independently, and each can fall back to state-level on its own (e.g.
+    // county data suppressed for one industry but not the other) — count it
+    // as county-level overall if at least one code resolved there, since
+    // that's still meaningfully more county-specific than pure statewide.
+    geographyLevel: valid.some((set) => set.geographyLevel === "county")
+      ? "county"
+      : "state",
   };
 }
 
