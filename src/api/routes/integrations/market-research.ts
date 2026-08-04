@@ -30,7 +30,7 @@ type CategoryKey =
   | "revenue"
   | "startupDifficulty"
   | "regulatoryFriction"
-  | "dataQuality";
+  | "outlook";
 
 const CATEGORY_LABELS: Record<CategoryKey, string> = {
   demand: "Demand",
@@ -38,7 +38,7 @@ const CATEGORY_LABELS: Record<CategoryKey, string> = {
   revenue: "Revenue",
   startupDifficulty: "Startup Difficulty",
   regulatoryFriction: "Regulatory Friction",
-  dataQuality: "Data Quality",
+  outlook: "Outlook",
 };
 
 type EvidenceItem = {
@@ -210,6 +210,9 @@ router.post("/analyze", async (c) => {
     registry,
     guidance,
     planFields,
+    bfsTrend,
+    qcewTrend,
+    populationTrend,
   ] = await Promise.all([
     fetchAcsState(stateFips, config.censusApiKey, county),
     fetchCbpState(stateFips, naicsCodes, config.censusApiKey, county),
@@ -235,6 +238,9 @@ router.post("/analyze", async (c) => {
     fetchRegistrySignals(config, body.businessName, state),
     fetchGovernmentGuidance(state, industry, body),
     analyzePlanFields(body),
+    fetchBfsTrend(stateFips),
+    fetchQcewTrend(stateFips, naicsCodes, county),
+    fetchPopulationTrend(stateFips, config.censusApiKey, county),
   ]);
 
   const evidence: EvidenceItem[] = [];
@@ -252,7 +258,7 @@ router.post("/analyze", async (c) => {
         "U.S. Census Bureau",
         "https://api.census.gov/data/key_signup.html",
         "limited",
-        "dataQuality",
+        "demand",
       ),
     );
   }
@@ -268,6 +274,70 @@ router.post("/analyze", async (c) => {
   evidence.push(...guidance.evidence);
   evidence.push(...planFields.evidence);
 
+  evidence.push(
+    bfsTrend
+      ? item(
+          "Business formation trend",
+          `${bfsTrend.trendPercent >= 0 ? "+" : ""}${bfsTrend.trendPercent.toFixed(1)}%`,
+          `Statewide new-business applications changed ${bfsTrend.trendPercent.toFixed(1)}% from ${bfsTrend.oldestLabel} to ${bfsTrend.newestLabel}.`,
+          "Census Business Formation Statistics",
+          "https://www.census.gov/econ/bfs/index.html",
+          "medium",
+          "outlook",
+        )
+      : bfsUnavailableItem(state),
+  );
+  if (qcewTrend) {
+    evidence.push(
+      item(
+        "Establishment count trend",
+        `${qcewTrend.trendPercent >= 0 ? "+" : ""}${qcewTrend.trendPercent.toFixed(1)}%`,
+        `Employer establishments in this category changed ${qcewTrend.trendPercent.toFixed(1)}% from ${qcewTrend.oldestLabel} to ${qcewTrend.newestLabel}.`,
+        "BLS QCEW",
+        "https://www.bls.gov/cew/",
+        "medium",
+        "outlook",
+      ),
+    );
+  } else {
+    evidence.push(
+      item(
+        "Establishment count trend",
+        "Unavailable",
+        "Desk checks BLS QCEW for a multi-year employer-establishment trend in this category; this source did not return usable data across the requested years.",
+        "BLS QCEW",
+        "https://www.bls.gov/cew/",
+        "limited",
+        "outlook",
+      ),
+    );
+  }
+  if (populationTrend) {
+    evidence.push(
+      item(
+        "Population trend",
+        `${populationTrend.trendPercent >= 0 ? "+" : ""}${populationTrend.trendPercent.toFixed(1)}%`,
+        `Population changed ${populationTrend.trendPercent.toFixed(1)}% from ${populationTrend.oldestLabel} to ${populationTrend.newestLabel} (ACS 5-year profile).`,
+        "U.S. Census ACS",
+        "https://www.census.gov/programs-surveys/acs",
+        "medium",
+        "outlook",
+      ),
+    );
+  } else {
+    evidence.push(
+      item(
+        "Population trend",
+        "Unavailable",
+        "Desk compares two ACS 5-year profile vintages for a multi-year population trend; this source did not return usable data for both periods.",
+        "U.S. Census ACS",
+        "https://www.census.gov/programs-surveys/acs",
+        "limited",
+        "outlook",
+      ),
+    );
+  }
+
   if (naicsCodes.length > 1) {
     evidence.push(
       item(
@@ -277,7 +347,7 @@ router.post("/analyze", async (c) => {
         "Desk classification",
         "https://www.census.gov/naics/",
         "medium",
-        "dataQuality",
+        "demand",
       ),
     );
   }
@@ -291,7 +361,7 @@ router.post("/analyze", async (c) => {
           "U.S. Census Geocoder",
           "https://geocoding.geo.census.gov/geocoder/",
           "medium",
-          "dataQuality",
+          "demand",
         )
       : item(
           "Geography used for this score",
@@ -300,7 +370,7 @@ router.post("/analyze", async (c) => {
           "U.S. Census Geocoder",
           "https://geocoding.geo.census.gov/geocoder/",
           "limited",
-          "dataQuality",
+          "demand",
         ),
   );
 
@@ -318,7 +388,7 @@ router.post("/analyze", async (c) => {
         "Desk classification",
         "https://www.census.gov/naics/",
         "limited",
-        "dataQuality",
+        "demand",
       ),
     );
   }
@@ -335,6 +405,13 @@ router.post("/analyze", async (c) => {
     naicsCodes,
     customerType: clean(body.customerType),
     unemploymentRate: acs?.values.unemploymentRate,
+  });
+
+  const outlook = scoreOutlook({
+    bfsTrend,
+    qcewTrend,
+    beaGrowthPercent: bea?.values.personalIncomeGrowth ?? null,
+    populationTrend,
   });
 
   const categories = buildCategories(
@@ -355,6 +432,7 @@ router.post("/analyze", async (c) => {
     state,
     evidence,
     startupDifficulty,
+    outlook,
   );
   const overallAverage = Math.round(
     categories.reduce((sum, cat) => sum + cat.score, 0) / categories.length,
@@ -472,7 +550,11 @@ export function scoreStartupDifficulty(input: {
   const knowledgePoints = isLicensedTrade ? 3 : 10;
 
   const score = clamp(
-    capitalPoints + barrierPoints + productPoints + laborPoints + knowledgePoints,
+    capitalPoints +
+      barrierPoints +
+      productPoints +
+      laborPoints +
+      knowledgePoints,
     0,
     100,
   );
@@ -523,6 +605,7 @@ function buildCategories(
   state: string,
   allEvidence: EvidenceItem[],
   startupDifficulty: { score: number; rationale: string },
+  outlook: { score: number; rationale: string },
 ): CategoryResult[] {
   const stateName = STATE_NAMES[state] ?? state;
   const evidenceFor = (key: CategoryKey) =>
@@ -547,11 +630,23 @@ function buildCategories(
 
   // ── Demand: how big and how well-funded is the potential customer base ──
   const populationTier =
-    population > 500000 ? 40 : population > 100000 ? 30 : population > 25000 ? 20 : 10;
+    population > 500000
+      ? 40
+      : population > 100000
+        ? 30
+        : population > 25000
+          ? 20
+          : 10;
   const incomeTier =
     income > 90000 ? 25 : income > 65000 ? 19 : income > 45000 ? 13 : 7;
   const establishmentTier =
-    establishments > 1000 ? 20 : establishments > 250 ? 15 : establishments > 50 ? 10 : 5;
+    establishments > 1000
+      ? 20
+      : establishments > 250
+        ? 15
+        : establishments > 50
+          ? 10
+          : 5;
   const growthTier = beaGrowth > 4 ? 15 : beaGrowth > 1 ? 8 : 0;
   const demandScore = clamp(
     populationTier + incomeTier + establishmentTier + growthTier,
@@ -590,9 +685,16 @@ function buildCategories(
 
   // ── Revenue: how much cash is likely moving through this category ──
   const receiptsTier =
-    receipts > 1000000 ? 40 : receipts > 250000 ? 30 : receipts > 50000 ? 20 : 10;
+    receipts > 1000000
+      ? 40
+      : receipts > 250000
+        ? 30
+        : receipts > 50000
+          ? 20
+          : 10;
   const revenueIncomeTier = income > 75000 ? 25 : income > 50000 ? 17 : 9;
-  const wageTier = wages > 0 && wages < 1200 ? 20 : wages > 0 && wages < 1800 ? 14 : 8;
+  const wageTier =
+    wages > 0 && wages < 1200 ? 20 : wages > 0 && wages < 1800 ? 14 : 8;
   const planTier = planCompleteness >= 3 ? 15 : planCompleteness >= 1 ? 8 : 0;
   const revenueScore = clamp(
     receiptsTier + revenueIncomeTier + wageTier + planTier,
@@ -614,33 +716,15 @@ function buildCategories(
   // ── permits, taxes, filings, recordkeeping, and government approvals ──
   // ── from Compliance-OS, weighted by severity and renewal cadence. ──
   const regulatoryFrictionScore = input.compliance.frictionScore;
-  const regulatoryFrictionRationale =
-    `${verdictWord(regulatoryFrictionScore)} regulatory friction (${regulatoryFrictionScore}/100): based on ${input.compliance.requirementCount} known law/license/permit/tax/filing/recordkeeping requirement(s) for this category and state, weighted by how mandatory each one is and whether it recurs on a renewal schedule.`;
+  const regulatoryFrictionRationale = `${verdictWord(regulatoryFrictionScore)} regulatory friction (${regulatoryFrictionScore}/100): based on ${input.compliance.requirementCount} known law/license/permit/tax/filing/recordkeeping requirement(s) for this category and state, weighted by how mandatory each one is and whether it recurs on a renewal schedule.`;
 
-  // ── Data quality: how much of this report rests on live public data ──
-  const totalPossibleSources = 12;
-  const sourceCount =
-    [
-      input.acs,
-      input.cbp,
-      input.nonemployer,
-      input.bea,
-      input.qcew,
-      input.oews,
-      input.googlePlaces,
-      input.foursquare,
-    ].filter(Boolean).length +
-    (input.compliance.evidence.length ? 1 : 0) +
-    (input.registry.evidence.length ? 1 : 0) +
-    (input.guidance.evidence.length ? 1 : 0) +
-    (input.planFields.evidence.length ? 1 : 0);
-  const dataQualityScore = clamp(
-    Math.round((sourceCount / totalPossibleSources) * 100),
-    0,
-    100,
-  );
-  const dataQualityRationale =
-    `${verdictWord(dataQualityScore)} data coverage (${dataQualityScore}/100): ${sourceCount} of ${totalPossibleSources} possible free public data sources returned usable data for this run. Add the missing API keys shown below to raise this score.`;
+  // ── Outlook: multi-year momentum — business formation, establishment, ──
+  // ── income, and population trends — computed once by scoreOutlook()   ──
+  // ── before this function runs. Data quality itself is no longer a     ──
+  // ── standalone category; it's shown per-category in the UI instead,   ──
+  // ── derived from each category's own evidence quality ratings.        ──
+  const outlookScore = outlook.score;
+  const outlookRationale = outlook.rationale;
 
   return [
     {
@@ -648,7 +732,10 @@ function buildCategories(
       label: CATEGORY_LABELS.demand,
       score: demandScore,
       rationale: demandRationale,
-      primarySource: { name: "U.S. Census ACS", url: "https://www.census.gov/programs-surveys/acs" },
+      primarySource: {
+        name: "U.S. Census ACS",
+        url: "https://www.census.gov/programs-surveys/acs",
+      },
       evidence: evidenceFor("demand"),
     },
     {
@@ -657,8 +744,14 @@ function buildCategories(
       score: competitionScore,
       rationale: competitionRationale,
       primarySource: hasLocalCompetitorData
-        ? { name: "Google Places", url: "https://developers.google.com/maps/documentation/places/web-service/text-search" }
-        : { name: "Census County Business Patterns", url: "https://www.census.gov/programs-surveys/cbp.html" },
+        ? {
+            name: "Google Places",
+            url: "https://developers.google.com/maps/documentation/places/web-service/text-search",
+          }
+        : {
+            name: "Census County Business Patterns",
+            url: "https://www.census.gov/programs-surveys/cbp.html",
+          },
       evidence: evidenceFor("competition"),
     },
     {
@@ -666,7 +759,10 @@ function buildCategories(
       label: CATEGORY_LABELS.revenue,
       score: revenueScore,
       rationale: revenueRationale,
-      primarySource: { name: "Census Nonemployer Statistics", url: "https://www.census.gov/programs-surveys/nonemployer-statistics.html" },
+      primarySource: {
+        name: "Census Nonemployer Statistics",
+        url: "https://www.census.gov/programs-surveys/nonemployer-statistics.html",
+      },
       evidence: evidenceFor("revenue"),
     },
     {
@@ -674,7 +770,10 @@ function buildCategories(
       label: CATEGORY_LABELS.startupDifficulty,
       score: startupDifficultyScore,
       rationale: startupDifficultyRationale,
-      primarySource: { name: "Compliance-OS", url: "https://www.sba.gov/business-guide/launch-your-business/apply-licenses-permits" },
+      primarySource: {
+        name: "Compliance-OS",
+        url: "https://www.sba.gov/business-guide/launch-your-business/apply-licenses-permits",
+      },
       evidence: evidenceFor("startupDifficulty"),
     },
     {
@@ -682,16 +781,22 @@ function buildCategories(
       label: CATEGORY_LABELS.regulatoryFriction,
       score: regulatoryFrictionScore,
       rationale: regulatoryFrictionRationale,
-      primarySource: { name: "SBA Business Guide", url: "https://www.sba.gov/business-guide/launch-your-business/apply-licenses-permits" },
+      primarySource: {
+        name: "SBA Business Guide",
+        url: "https://www.sba.gov/business-guide/launch-your-business/apply-licenses-permits",
+      },
       evidence: evidenceFor("regulatoryFriction"),
     },
     {
-      key: "dataQuality",
-      label: CATEGORY_LABELS.dataQuality,
-      score: dataQualityScore,
-      rationale: dataQualityRationale,
-      primarySource: { name: "U.S. Census Bureau", url: "https://www.census.gov/data/developers/data-sets.html" },
-      evidence: evidenceFor("dataQuality"),
+      key: "outlook",
+      label: CATEGORY_LABELS.outlook,
+      score: outlookScore,
+      rationale: outlookRationale,
+      primarySource: {
+        name: "Census Business Formation Statistics",
+        url: "https://www.census.gov/econ/bfs/index.html",
+      },
+      evidence: evidenceFor("outlook"),
     },
   ];
 }
@@ -1007,7 +1112,10 @@ async function fetchNonemployerState(
     }),
   );
   return mergeMetricSets(results, (sets) => ({
-    nonemployerEstablishments: sum(sets, (s) => s.values.nonemployerEstablishments),
+    nonemployerEstablishments: sum(
+      sets,
+      (s) => s.values.nonemployerEstablishments,
+    ),
     receipts: sum(sets, (s) => s.values.receipts),
   }));
 }
@@ -1038,18 +1146,22 @@ async function fetchBeaRegionalState(
     };
     const rows = data.BEAAPI?.Results?.Data ?? [];
     if (rows.length === 0) return null;
+    // "Year: LAST5" fetches 5 years of data, but growth should reflect the
+    // full span (oldest vs. newest) rather than just the last two points —
+    // otherwise a single volatile period dominates what's meant to be a
+    // multi-year trend signal.
     const newest = rows[rows.length - 1];
-    const previous = rows.length > 1 ? rows[rows.length - 2] : undefined;
+    const oldest = rows[0];
     const latest = num(newest.DataValue);
-    const prior = num(previous?.DataValue);
-    const growth = prior > 0 ? ((latest - prior) / prior) * 100 : 0;
+    const earliest = num(oldest.DataValue);
+    const growth = earliest > 0 ? ((latest - earliest) / earliest) * 100 : 0;
     return {
       values: { personalIncome: latest, personalIncomeGrowth: growth },
       evidence: [
         item(
           "Regional personal income",
           money(latest * 1000),
-          `${STATE_NAMES[state] ?? state} BEA regional personal income trend. Growth versus prior period is ${growth.toFixed(1)}%.`,
+          `${STATE_NAMES[state] ?? state} BEA regional personal income changed ${growth.toFixed(1)}% from ${oldest.TimePeriod ?? "the earliest available period"} to ${newest.TimePeriod ?? "the latest available period"}.`,
           "BEA Regional",
           url.toString(),
           "medium",
@@ -1070,8 +1182,252 @@ function beaNotConfiguredItem(): EvidenceItem {
     "BEA Regional",
     "https://apps.bea.gov/API/signup/",
     "limited",
-    "dataQuality",
+    "outlook",
   );
+}
+
+// ── Outlook trend signals ──────────────────────────────────────────────────
+// These all look backward across ~4-5 years as a proxy for near-term
+// momentum (is business formation, industry establishment count, regional
+// income, and population growing or shrinking here) — not a prediction.
+
+type TrendResult = {
+  trendPercent: number;
+  oldestLabel: string;
+  newestLabel: string;
+};
+
+const OUTLOOK_TREND_YEARS = 5;
+
+// Census's free, keyless Business Formation Statistics API tracks new
+// business applications over time — a direct signal of how much
+// entrepreneurial activity is happening, distinct from the establishment
+// counts CBP/QCEW report (which lag actual formation by a year or more).
+// Scoped to the whole state's applications (all categories) rather than a
+// NAICS-specific slice, since BFS's category coding for grouped sectors
+// like manufacturing (31-33) isn't reliably a plain NAICS code.
+async function fetchBfsTrend(
+  stateFips: string | undefined,
+): Promise<TrendResult | null> {
+  if (!stateFips) return null;
+  const fromYear = new Date().getFullYear() - OUTLOOK_TREND_YEARS;
+  const url = new URL("https://api.census.gov/data/timeseries/eits/bfs");
+  url.searchParams.set("get", "cell_value,time_slot_id");
+  url.searchParams.set("for", `state:${stateFips}`);
+  url.searchParams.set("time", `from ${fromYear}`);
+  url.searchParams.set("data_type_code", "BA_BA");
+  url.searchParams.set("seasonally_adj", "yes");
+  url.searchParams.set("category_code", "TOTAL");
+  try {
+    const response = await fetch(url.toString(), {
+      signal: AbortSignal.timeout(6000),
+    });
+    if (!response.ok) return null;
+    const rows = (await response.json()) as unknown;
+    if (!Array.isArray(rows) || rows.length < 3) return null;
+    const header = rows[0] as string[];
+    const valueIndex = header.indexOf("cell_value");
+    const timeIndex = header.indexOf("time_slot_id");
+    if (valueIndex === -1) return null;
+    const dataRows = (rows.slice(1) as string[][])
+      .filter((row) => row[valueIndex] != null)
+      .sort((a, b) => (a[timeIndex] ?? "").localeCompare(b[timeIndex] ?? ""));
+    if (dataRows.length < 2) return null;
+    const oldest = num(dataRows[0][valueIndex]);
+    const newest = num(dataRows[dataRows.length - 1][valueIndex]);
+    if (oldest <= 0) return null;
+    return {
+      trendPercent: ((newest - oldest) / oldest) * 100,
+      oldestLabel:
+        dataRows[0][timeIndex] ?? `~${OUTLOOK_TREND_YEARS} years ago`,
+      newestLabel:
+        dataRows[dataRows.length - 1][timeIndex] ?? "the latest period",
+    };
+  } catch {
+    return null;
+  }
+}
+
+function bfsUnavailableItem(state: string): EvidenceItem {
+  return item(
+    "Business formation trend",
+    "Unavailable",
+    `Desk checks Census Business Formation Statistics for new-business application trends in ${STATE_NAMES[state] ?? state}; this source did not return usable data for this run.`,
+    "Census Business Formation Statistics",
+    "https://www.census.gov/econ/bfs/index.html",
+    "limited",
+    "outlook",
+  );
+}
+
+// Reuses the same per-year QCEW CSV endpoint fetchQcewForCode already
+// proves works, just for an explicit year rather than the always-latest
+// one, so a multi-year establishment trend can be computed for the same
+// NAICS code(s)/geography already used elsewhere in this report.
+async function fetchQcewEstablishmentsForYear(
+  stateFips: string | undefined,
+  naics: string,
+  county: CountyGeo | null,
+  year: number,
+): Promise<number | null> {
+  if (!stateFips) return null;
+  const industryFile = naics.replace(/-/g, "_");
+  const targetArea = county ? `${stateFips}${county.fips}` : `${stateFips}000`;
+  const stateArea = `${stateFips}000`;
+  const url = `https://data.bls.gov/cew/data/api/${year}/a/industry/${industryFile}.csv`;
+  try {
+    const response = await fetch(url);
+    if (!response.ok) return null;
+    const csv = await response.text();
+    const rows = parseCsvRows(csv);
+    const row =
+      rows.find(
+        (candidate) =>
+          candidate.area_fips === targetArea &&
+          candidate.own_code === "5" &&
+          candidate.size_code === "0",
+      ) ??
+      (targetArea !== stateArea
+        ? rows.find(
+            (candidate) =>
+              candidate.area_fips === stateArea &&
+              candidate.own_code === "5" &&
+              candidate.size_code === "0",
+          )
+        : undefined);
+    return row ? num(row.annual_avg_estabs) : null;
+  } catch {
+    return null;
+  }
+}
+
+function sumDefined(values: Array<number | null>): number | null {
+  const defined = values.filter((value): value is number => value !== null);
+  return defined.length === 0 ? null : defined.reduce((a, b) => a + b, 0);
+}
+
+async function fetchQcewTrend(
+  stateFips: string | undefined,
+  naicsCodes: string[],
+  county: CountyGeo | null,
+): Promise<TrendResult | null> {
+  if (!stateFips) return null;
+  const newestYear = new Date().getFullYear() - 1; // QCEW publishes ~1 year behind
+  const oldestYear = newestYear - OUTLOOK_TREND_YEARS + 1;
+  const [newestByCode, oldestByCode] = await Promise.all([
+    Promise.all(
+      naicsCodes.map((code) =>
+        fetchQcewEstablishmentsForYear(stateFips, code, county, newestYear),
+      ),
+    ),
+    Promise.all(
+      naicsCodes.map((code) =>
+        fetchQcewEstablishmentsForYear(stateFips, code, county, oldestYear),
+      ),
+    ),
+  ]);
+  const newest = sumDefined(newestByCode);
+  const oldest = sumDefined(oldestByCode);
+  if (newest === null || oldest === null || oldest <= 0) return null;
+  return {
+    trendPercent: ((newest - oldest) / oldest) * 100,
+    oldestLabel: String(oldestYear),
+    newestLabel: String(newestYear),
+  };
+}
+
+// Reuses the already-proven acs/acs5/profile endpoint (rather than the raw
+// Census PEP population dataset, whose variable names and available years
+// turned out to be inconsistent across vintages when checked) for two
+// vintages ~4 years apart, to get a population growth trend without
+// depending on a second, less stable data source.
+async function fetchPopulationTrend(
+  stateFips: string | undefined,
+  key: string | undefined,
+  county: CountyGeo | null,
+): Promise<TrendResult | null> {
+  if (!stateFips) return null;
+  const newestYear = 2023;
+  const oldestYear = 2019;
+  const [newestRow, oldestRow] = await Promise.all([
+    fetchCensusRow(
+      censusUrl(
+        `https://api.census.gov/data/${newestYear}/acs/acs5/profile`,
+        key,
+        {
+          get: "DP05_0001E",
+          ...geoParams(stateFips, county),
+        },
+      ),
+    ),
+    fetchCensusRow(
+      censusUrl(
+        `https://api.census.gov/data/${oldestYear}/acs/acs5/profile`,
+        key,
+        {
+          get: "DP05_0001E",
+          ...geoParams(stateFips, county),
+        },
+      ),
+    ),
+  ]);
+  const newest = num(newestRow?.DP05_0001E);
+  const oldest = num(oldestRow?.DP05_0001E);
+  if (!newest || !oldest) return null;
+  return {
+    trendPercent: ((newest - oldest) / oldest) * 100,
+    oldestLabel: String(oldestYear),
+    newestLabel: String(newestYear),
+  };
+}
+
+// Each trend contributes points on its own 0-max scale; a missing trend
+// contributes a neutral ~50% of its max rather than 0, so a business isn't
+// unfairly penalized just because an optional data source (BFS/BEA both
+// need free API keys) wasn't configured.
+function trendPoints(trendPercent: number | null, maxPoints: number): number {
+  if (trendPercent === null) return Math.round(maxPoints * 0.5);
+  if (trendPercent > 8) return maxPoints;
+  if (trendPercent > 3) return Math.round(maxPoints * 0.75);
+  if (trendPercent > 0) return Math.round(maxPoints * 0.55);
+  if (trendPercent > -5) return Math.round(maxPoints * 0.3);
+  return Math.round(maxPoints * 0.1);
+}
+
+export function scoreOutlook(input: {
+  bfsTrend: TrendResult | null;
+  qcewTrend: TrendResult | null;
+  beaGrowthPercent: number | null;
+  populationTrend: TrendResult | null;
+}): { score: number; rationale: string } {
+  const bfsPoints = trendPoints(input.bfsTrend?.trendPercent ?? null, 30);
+  const qcewPoints = trendPoints(input.qcewTrend?.trendPercent ?? null, 30);
+  const beaPoints = trendPoints(input.beaGrowthPercent, 25);
+  const popPoints = trendPoints(
+    input.populationTrend?.trendPercent ?? null,
+    15,
+  );
+  const score = clamp(bfsPoints + qcewPoints + beaPoints + popPoints, 0, 100);
+
+  const bfsNote = input.bfsTrend
+    ? `statewide new-business applications changed ${input.bfsTrend.trendPercent.toFixed(1)}% from ${input.bfsTrend.oldestLabel} to ${input.bfsTrend.newestLabel}`
+    : "statewide business-formation trend data was unavailable for this run";
+  const qcewNote = input.qcewTrend
+    ? `employer establishments in this category changed ${input.qcewTrend.trendPercent.toFixed(1)}% from ${input.qcewTrend.oldestLabel} to ${input.qcewTrend.newestLabel}`
+    : "a multi-year establishment trend was unavailable for this category";
+  const beaNote =
+    input.beaGrowthPercent !== null
+      ? `regional personal income changed ${input.beaGrowthPercent.toFixed(1)}% over roughly the last ${OUTLOOK_TREND_YEARS} years`
+      : "regional income trend data was unavailable";
+  const popNote = input.populationTrend
+    ? `population changed ${input.populationTrend.trendPercent.toFixed(1)}% from ${input.populationTrend.oldestLabel} to ${input.populationTrend.newestLabel}`
+    : "a multi-year population trend was unavailable";
+
+  const rationale =
+    `${verdictWord(score)} short-term outlook (${score}/100): ${bfsNote}; ${qcewNote}; ${beaNote}; and ${popNote}. ` +
+    `This looks backward at recent multi-year trends as a proxy for near-term momentum, not a guarantee of future results.`;
+
+  return { score, rationale };
 }
 
 async function fetchCachedOrLiveOewsState(
@@ -1084,7 +1440,10 @@ async function fetchCachedOrLiveOewsState(
   // market-research category tag, so stamp it on here at the boundary.
   return {
     values: cached.values,
-    evidence: cached.evidence.map((entry) => ({ ...entry, category: "revenue" })),
+    evidence: cached.evidence.map((entry) => ({
+      ...entry,
+      category: "revenue",
+    })),
   };
 }
 
@@ -1129,7 +1488,7 @@ function oewsUnavailableItem(state: string): EvidenceItem {
     "BLS OEWS",
     "https://www.bls.gov/oes/tables.htm",
     "limited",
-    "dataQuality",
+    "revenue",
   );
 }
 
@@ -1143,7 +1502,7 @@ function googlePlacesUnavailableItem(hasKey: string | undefined): EvidenceItem {
     "Google Places",
     "https://developers.google.com/maps/documentation/places/web-service/text-search",
     "limited",
-    "dataQuality",
+    "competition",
   );
 }
 
@@ -1613,7 +1972,7 @@ function foursquareNotConfiguredItem(): EvidenceItem {
     "Foursquare Places",
     "https://foursquare.com/developer/",
     "limited",
-    "dataQuality",
+    "competition",
   );
 }
 async function fetchComplianceSignals(
