@@ -5,6 +5,7 @@ import {
   capitalPointsFor,
   productPointsFor,
   barrierPointsFor,
+  laborPointsFor,
 } from '../api/routes/integrations/market-research.js';
 
 describe('computeRegulatoryFrictionScore', () => {
@@ -124,11 +125,22 @@ describe('scoreStartupDifficulty', () => {
     expect(heavilyRegulated.reasons.join(' ')).toContain('15 known requirements');
   });
 
-  it('reaches exactly 100 when every signal, including the new licensing-complexity bucket, is maxed', () => {
+  it('reaches exactly 95 when every signal, including the new licensing-complexity bucket, is maxed for a labor-light sector', () => {
     // capital(low-capital NAICS base 20 + confirmed-zero bond/insurance
     // modifier +5 = 25) + barrier(unlicensed/B2C, 15) +
-    // product(non-physical, 20) + labor(unemployment > 6%, 20) +
-    // knowledge(unlicensed, 10) + licensing(requirementCount < 5, 10) = 100.
+    // product(non-physical, 20) + labor(20 snapshot for unemployment > 6%,
+    // no trend data so no modifier, then blended 50% toward the neutral
+    // midpoint of 10 because NAICS 54 is labor-light -> round(20*0.5 +
+    // 10*0.5) = 15) + knowledge(unlicensed, 10) +
+    // licensing(requirementCount < 5, 10) = 95.
+    //
+    // NAICS 54/61/52 are simultaneously capitalPointsFor's LOW-capital tier
+    // and laborPointsFor's labor-light tier (laborPointsFor deliberately
+    // reuses the same NAICS_CAPITAL_LOW set — see its comment), so a
+    // business idea that maxes out capital/product via one of those codes
+    // can no longer also max out labor the way it could before the
+    // labor-intensity blend was added — the true achievable maximum for
+    // this exact input shape is 95, not 100.
     const result = scoreStartupDifficulty({
       industry: 'Software Consulting',
       businessIdea: 'general software consulting for small businesses',
@@ -138,7 +150,7 @@ describe('scoreStartupDifficulty', () => {
       requirementCount: 2,
       bondOrInsuranceCount: 0,
     });
-    expect(result.score).toBe(100);
+    expect(result.score).toBe(95);
   });
 
   it('ranks reasons with the largest point contributor first', () => {
@@ -567,5 +579,229 @@ describe('productPointsFor', () => {
       productPointsFor(['54']),
     ]);
     expect(values.size).toBe(4);
+  });
+});
+
+describe('laborPointsFor', () => {
+  it('uses the percentile-cache decile bucket over the hardcoded tiers when a bucket is provided', () => {
+    // unemploymentRate alone (2%) would hit the lowest hardcoded tier (4),
+    // but a real bucket of 10 (loosest labor market nationally) should win
+    // and map to the top of the 0-20 budget instead — naicsCodes chosen as
+    // a labor-intensive sector (23) so no blending dilutes the result.
+    const points = laborPointsFor({
+      naicsCodes: ['23'],
+      unemploymentRate: 2,
+      laborPercentileBucket: 10,
+    });
+    expect(points).toBe(20);
+  });
+
+  it('maps decile buckets 1-10 onto the 0-20 budget via bucket * 2', () => {
+    for (let bucket = 1; bucket <= 10; bucket += 1) {
+      expect(
+        laborPointsFor({
+          naicsCodes: ['23'],
+          unemploymentRate: 5,
+          laborPercentileBucket: bucket,
+        }),
+      ).toBe(bucket * 2);
+    }
+  });
+
+  it('falls back to the hardcoded unemployment-rate tiers when laborPercentileBucket is null (cache not populated)', () => {
+    // Same fallback tiers scoreStartupDifficulty always used: >6% -> 20,
+    // >4% -> 14, >2.5% -> 8, else -> 4. naicsCodes is labor-intensive so the
+    // blend step is a no-op and doesn't obscure the fallback tier value.
+    expect(
+      laborPointsFor({ naicsCodes: ['23'], unemploymentRate: 7, laborPercentileBucket: null }),
+    ).toBe(20);
+    expect(
+      laborPointsFor({ naicsCodes: ['23'], unemploymentRate: 5, laborPercentileBucket: null }),
+    ).toBe(14);
+    expect(
+      laborPointsFor({ naicsCodes: ['23'], unemploymentRate: 3, laborPercentileBucket: null }),
+    ).toBe(8);
+    expect(
+      laborPointsFor({ naicsCodes: ['23'], unemploymentRate: 1, laborPercentileBucket: null }),
+    ).toBe(4);
+  });
+
+  it('falls back to the same hardcoded tiers when laborPercentileBucket is simply omitted (undefined)', () => {
+    expect(laborPointsFor({ naicsCodes: ['23'], unemploymentRate: 7 })).toBe(20);
+  });
+
+  it('gives a neutral midpoint-leaning contribution when unemployment data itself is missing entirely', () => {
+    // hasLaborData=false path (unemploymentRate undefined, no bucket) -> 10
+    // is the hardcoded neutral tier, and NAICS 23 is labor-intensive so
+    // nothing blends it further.
+    expect(
+      laborPointsFor({ naicsCodes: ['23'], unemploymentRate: undefined }),
+    ).toBe(10);
+  });
+
+  it('measurably pulls the score toward neutral for a labor-light sector versus a labor-intensive one at the same unemployment rate', () => {
+    const intensive = laborPointsFor({
+      naicsCodes: ['72'], // food service — labor-intensive
+      unemploymentRate: 10, // top hardcoded tier -> snapshot 20
+      laborPercentileBucket: null,
+    });
+    const light = laborPointsFor({
+      naicsCodes: ['54'], // professional services — labor-light
+      unemploymentRate: 10,
+      laborPercentileBucket: null,
+    });
+    expect(intensive).toBe(20);
+    // 50% blend toward the neutral midpoint of 10: round(20*0.5+10*0.5)=15.
+    expect(light).toBe(15);
+    expect(light).toBeLessThan(intensive);
+
+    // And the same comparison at the tight end of the range: a light
+    // sector's score should be pulled UP toward neutral, not just down.
+    const intensiveTight = laborPointsFor({
+      naicsCodes: ['72'],
+      unemploymentRate: 1, // bottom hardcoded tier -> snapshot 4
+      laborPercentileBucket: null,
+    });
+    const lightTight = laborPointsFor({
+      naicsCodes: ['54'],
+      unemploymentRate: 1,
+      laborPercentileBucket: null,
+    });
+    expect(intensiveTight).toBe(4);
+    expect(lightTight).toBe(7); // round(4*0.5+10*0.5)=7
+    expect(lightTight).toBeGreaterThan(intensiveTight);
+  });
+
+  it('gives a mixed/unclassified sector the full unblended range, same as a labor-intensive one', () => {
+    // NAICS 53 (real estate) has no dedicated tier on either axis.
+    const mixed = laborPointsFor({
+      naicsCodes: ['53'],
+      unemploymentRate: 10,
+      laborPercentileBucket: null,
+    });
+    expect(mixed).toBe(20);
+  });
+
+  it('a trend modifier nudges the score up for a loosening market and down for a tightening one', () => {
+    const base = laborPointsFor({
+      naicsCodes: ['23'],
+      unemploymentRate: 5, // mid hardcoded tier -> snapshot 14
+      laborPercentileBucket: null,
+      laborTrendPercent: null,
+    });
+    const loosening = laborPointsFor({
+      naicsCodes: ['23'],
+      unemploymentRate: 5,
+      laborPercentileBucket: null,
+      laborTrendPercent: 10, // unemployment rising sharply -> loosening
+    });
+    const tightening = laborPointsFor({
+      naicsCodes: ['23'],
+      unemploymentRate: 5,
+      laborPercentileBucket: null,
+      laborTrendPercent: -10, // unemployment falling sharply -> tightening
+    });
+    expect(loosening).toBeGreaterThan(base);
+    expect(tightening).toBeLessThan(base);
+  });
+
+  it('prefers the trend percentile bucket over the raw trendPercent fallback when both are provided', () => {
+    const bucketDriven = laborPointsFor({
+      naicsCodes: ['23'],
+      unemploymentRate: 5,
+      laborPercentileBucket: null,
+      laborTrendBucket: 10, // strongest loosening bucket
+      laborTrendPercent: -10, // would otherwise read as strongly tightening
+    });
+    const percentDriven = laborPointsFor({
+      naicsCodes: ['23'],
+      unemploymentRate: 5,
+      laborPercentileBucket: null,
+      laborTrendPercent: -10,
+    });
+    expect(bucketDriven).toBeGreaterThan(percentDriven);
+  });
+
+  it('never exceeds the 0-20 range regardless of inputs, including at the extremes with a maxed trend modifier', () => {
+    const naicsOptions = [['23'], ['54'], ['53'], ['31-33'], ['61']];
+    const rates = [undefined, 0, 1, 2.5, 4, 6, 10, 25];
+    const buckets: Array<number | null | undefined> = [undefined, null, 1, 5, 10];
+    const trendPercents: Array<number | null | undefined> = [undefined, null, -100, -5, 0, 5, 100];
+    for (const naicsCodes of naicsOptions) {
+      for (const unemploymentRate of rates) {
+        for (const laborPercentileBucket of buckets) {
+          for (const laborTrendPercent of trendPercents) {
+            const points = laborPointsFor({
+              naicsCodes,
+              unemploymentRate,
+              laborPercentileBucket,
+              laborTrendPercent,
+            });
+            expect(points).toBeGreaterThanOrEqual(0);
+            expect(points).toBeLessThanOrEqual(20);
+          }
+        }
+      }
+    }
+  });
+});
+
+describe('scoreStartupDifficulty labor signal wiring', () => {
+  it('uses laborPercentileBucket end-to-end and names the decile in the reasons text', () => {
+    const result = scoreStartupDifficulty({
+      industry: 'Concrete Contractor',
+      businessIdea: 'concrete contractor serving commercial developers',
+      naicsCodes: ['23'],
+      customerType: 'B2B',
+      unemploymentRate: 1, // would hit the lowest hardcoded tier on its own
+      laborPercentileBucket: 10, // but the cache says the loosest decile
+    });
+    const laborReason = result.reasons.find((r) => r.toLowerCase().includes('decile'));
+    expect(laborReason).toBeDefined();
+    expect(laborReason?.toLowerCase()).toContain('decile 10 of 10');
+  });
+
+  it('falls back to describing the hardcoded tiers when laborPercentileBucket is null', () => {
+    const result = scoreStartupDifficulty({
+      industry: 'Concrete Contractor',
+      businessIdea: 'concrete contractor serving commercial developers',
+      naicsCodes: ['23'],
+      customerType: 'B2B',
+      unemploymentRate: 5,
+      laborPercentileBucket: null,
+    });
+    const laborReason = result.reasons.find((r) => r.toLowerCase().includes('unemployment rate is'));
+    expect(laborReason).toBeDefined();
+    expect(laborReason?.toLowerCase()).toContain('fallback tiers');
+  });
+
+  it('mentions the trend direction in the reasons text when trend data is available', () => {
+    const result = scoreStartupDifficulty({
+      industry: 'Concrete Contractor',
+      businessIdea: 'concrete contractor serving commercial developers',
+      naicsCodes: ['23'],
+      customerType: 'B2B',
+      unemploymentRate: 5,
+      laborTrendPercent: 10,
+    });
+    const laborReason = result.reasons.find((r) => r.toLowerCase().includes('loosening'));
+    expect(laborReason).toBeDefined();
+  });
+
+  it('never lets laborPoints push the total category score outside 0-100', () => {
+    const result = scoreStartupDifficulty({
+      industry: 'Concrete Contractor',
+      businessIdea: 'concrete contractor serving commercial developers',
+      naicsCodes: ['23'],
+      customerType: 'B2B',
+      unemploymentRate: 10,
+      laborPercentileBucket: 10,
+      laborTrendBucket: 10,
+      requirementCount: 0,
+      bondOrInsuranceCount: 0,
+      licenseOrRegistrationCount: 0,
+    });
+    expect(result.score).toBeGreaterThanOrEqual(0);
+    expect(result.score).toBeLessThanOrEqual(100);
   });
 });

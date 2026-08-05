@@ -2,6 +2,7 @@ import { Hono } from "hono";
 import type { AppConfig, AppEnv } from "../../../config.js";
 import { ApiError } from "../../middleware/errors.js";
 import { lookupCachedOewsState } from "../../../domain/labor/oews-cache.js";
+import { lookupPercentileRank } from "../../../domain/market/reference-distribution-cache.js";
 
 type Env = { Bindings: AppEnv; Variables: { config: AppConfig } };
 
@@ -470,6 +471,45 @@ router.post("/analyze", async (c) => {
       ? "medium"
       : "limited";
 
+  // Real national percentile-cache lookups for the Labor signal (see
+  // laborPointsFor below). Resolved here, in the already-async route
+  // handler, rather than inside scoreStartupDifficulty itself — that keeps
+  // scoreStartupDifficulty synchronous (its existing shape, and the shape
+  // every current unit test exercises) while still feeding it a live
+  // D1-backed signal, the same "resolve in the async caller, pass an
+  // optional field in" pattern bondOrInsuranceCount/licenseOrRegistrationCount
+  // above already use for their own live Compliance-OS data.
+  //
+  // acs.geographyLevel is whichever level (place/county/state)
+  // fetchAcsState actually resolved unemploymentRate at (see its cascade
+  // comment) — lookupPercentileRank needs that exact level, since the
+  // cached breakpoints are stored per (metric, jurisdictionLevel).
+  const laborPercentileBucket =
+    acs?.values.unemploymentRate !== undefined && acs?.geographyLevel
+      ? await lookupPercentileRank(
+          c.env.DB,
+          "unemployment_rate",
+          acs.geographyLevel,
+          acs.values.unemploymentRate,
+        )
+      : null;
+  // unemployment_trend is only ever populated at state level (see
+  // fetchUnemploymentTrendBulk in reference-distribution-batch.ts), and the
+  // raw value it stores is NOT inverted the way lausTrend.trendPercent is
+  // for the outlook score (see fetchLausTrend's comment above — positive
+  // there means "improved," i.e. unemployment fell). The batch job's raw
+  // convention is positive = unemployment ROSE, so this negates
+  // lausTrend.trendPercent back to that same raw sign before comparing it
+  // against the cached national distribution.
+  const laborTrendBucket = lausTrend
+    ? await lookupPercentileRank(
+        c.env.DB,
+        "unemployment_trend",
+        "state",
+        -lausTrend.trendPercent,
+      )
+    : null;
+
   const startupDifficulty = scoreStartupDifficulty({
     industry,
     businessIdea,
@@ -493,6 +533,16 @@ router.post("/analyze", async (c) => {
     // trusting a new provider" better than the LICENSED_TRADE_PATTERN
     // keyword guess alone (see barrierPointsFor).
     licenseOrRegistrationCount: compliance.licenseOrRegistrationCount,
+    // National percentile-cache decile bucket for the local unemployment
+    // rate, and its state-level trend counterpart — see laborPointsFor for
+    // how these fold into the 0-20 labor budget, and the comments above for
+    // why they're resolved here instead of inside scoreStartupDifficulty.
+    laborPercentileBucket,
+    laborTrendBucket,
+    // Raw (un-inverted) fallback trend signal for when laborTrendBucket is
+    // null (cache not populated yet for "unemployment_trend"/state — the
+    // common case until the batch job has run at least once).
+    laborTrendPercent: lausTrend ? -lausTrend.trendPercent : undefined,
   });
 
   const outlook = scoreOutlook({
@@ -902,6 +952,152 @@ export function barrierPointsFor(input: {
   return clamp(credentialSignal + customerTypeSignal + breadthSignal, 0, 15);
 }
 
+// laborPoints' snapshot tier: prefers the real national percentile-cache
+// decile bucket (see lookupPercentileRank/reference-distribution-cache.ts)
+// over the old hand-picked absolute unemployment-rate cutoffs, now that
+// "unemployment_rate" is a metric the batch job populates across
+// place/county/state (see reference-distribution-batch.ts). Bucket 10 = the
+// top decile nationally for this metric/jurisdiction level = the loosest
+// labor market (most available workers) = maps to the HIGH end of the 0-20
+// budget, matching this signal's existing "higher unemployment -> easier to
+// hire -> more points" direction; bucket * 2 spreads deciles 1-10 evenly
+// across 2-20.
+//
+// A null bucket (no cached breakpoints yet for this exact metric/level —
+// see lookupPercentileRank's return contract) always falls back to the
+// original hardcoded tiers below, never to the lowest bucket. Those tiers
+// are the permanent fallback path, not dead code — the reference-
+// distribution batch job may not have run yet in a given environment (e.g.
+// local dev), and this keeps scoring sane either way.
+function laborSnapshotPointsFor(
+  hasLaborData: boolean,
+  unemploymentRate: number,
+  laborPercentileBucket: number | null | undefined,
+): number {
+  if (laborPercentileBucket != null) return laborPercentileBucket * 2;
+  return !hasLaborData
+    ? 10
+    : unemploymentRate > 6
+      ? 20
+      : unemploymentRate > 4
+        ? 14
+        : unemploymentRate > 2.5
+          ? 8
+          : 4;
+}
+
+// Small directional nudge on top of the snapshot tier above, reflecting
+// which way the local labor market is actually moving rather than just its
+// current level — mirrors the shape of scoreOutlook's trendPoints() helper
+// (a handful of hardcoded percent-change bands) but capped much smaller,
+// since this is a secondary, directional signal layered on top of
+// laborSnapshotPointsFor rather than a primary driver in its own right.
+//
+// Positive raw values here mean unemployment is RISING (the labor market is
+// loosening, more workers becoming available) — the same "higher
+// unemployment = more hireable labor = more points" direction the snapshot
+// tier uses, and the mirror image of lausTrend's "falling is good" outlook
+// convention (see fetchLausTrend/scoreOutlook) — callers must pass the raw,
+// un-inverted percent change, not lausTrend's inverted trendPercent.
+const LABOR_TREND_MODIFIER_MAX = 3;
+
+function laborTrendModifierFor(rawTrendPercent: number | null): number {
+  if (rawTrendPercent === null) return 0;
+  if (rawTrendPercent > 5) return LABOR_TREND_MODIFIER_MAX;
+  if (rawTrendPercent > 1) return 1;
+  if (rawTrendPercent < -5) return -LABOR_TREND_MODIFIER_MAX;
+  if (rawTrendPercent < -1) return -1;
+  return 0;
+}
+
+// Same modifier, but sourced from the "unemployment_trend" percentile-cache
+// decile bucket (also raw/un-inverted, see reference-distribution-batch.ts's
+// fetchUnemploymentTrendBulk) when it's available, preferred over the
+// hardcoded-band version above the same way laborSnapshotPointsFor prefers
+// its own percentile bucket.
+function laborTrendModifierFromBucket(bucket: number): number {
+  if (bucket >= 9) return LABOR_TREND_MODIFIER_MAX;
+  if (bucket >= 7) return 1;
+  if (bucket <= 2) return -LABOR_TREND_MODIFIER_MAX;
+  if (bucket <= 4) return -1;
+  return 0;
+}
+
+// Labor-intensity classification, reusing capitalPointsFor's own NAICS-
+// sector research (NAICS_CAPITAL_HIGH/NAICS_CAPITAL_LOW above) along a labor
+// axis: which sectors actually need to hire a meaningful headcount to
+// operate, versus running on the founder's own labor or a small team of
+// specialists. Food service, retail, manufacturing, construction, and
+// transportation/warehousing (NAICS_CAPITAL_HIGH) are classic multi-
+// employee operations — a restaurant needs cooks and servers, a contractor
+// needs a crew — so local labor-market tightness genuinely determines how
+// hard it is to staff up. Professional/technical services, finance, and
+// education (NAICS_CAPITAL_LOW) typically run lean, so the same local
+// unemployment rate barely matters to them. Deliberately reused rather than
+// re-derived — this is the same tier boundary research capitalPointsFor
+// already did, just read along a different axis (see productPointsFor's
+// comment for the same reuse-vs-copy reasoning).
+const NAICS_LABOR_INTENSIVE = NAICS_CAPITAL_HIGH;
+const NAICS_LABOR_LIGHT = NAICS_CAPITAL_LOW;
+
+function laborIntensityTierFor(
+  naicsCodes: string[],
+): "intensive" | "light" | "mixed" {
+  // Worst-case-wins for a compound (two-code) business idea, the same
+  // priority order naicsCapitalBaseFor/productPointsFor use: if ANY matched
+  // code is genuinely labor-intensive, the local labor market really does
+  // matter for this business, so treat it as intensive even if another
+  // matched code is labor-light.
+  if (naicsCodes.some((code) => NAICS_LABOR_INTENSIVE.has(code)))
+    return "intensive";
+  if (naicsCodes.some((code) => NAICS_LABOR_LIGHT.has(code))) return "light";
+  return "mixed"; // unlisted/ambiguous codes (e.g. 53 real estate): full weight, no guess.
+}
+
+// For labor-light sectors, pull the combined snapshot+trend score halfway
+// toward the neutral midpoint of the 0-20 budget rather than letting a
+// tight/loose labor market swing the full range — a solo consultant's
+// score shouldn't move nearly as much on the local unemployment rate as a
+// restaurant's does. Labor-intensive and mixed/unclassified sectors keep
+// the full range: the signal is either known to matter, or not confidently
+// known not to.
+const LABOR_LIGHT_NEUTRAL_MIDPOINT = 10; // 50% of the 0-20 budget.
+const LABOR_LIGHT_BLEND_WEIGHT = 0.5;
+
+function laborIntensityBlend(points: number, naicsCodes: string[]): number {
+  if (laborIntensityTierFor(naicsCodes) !== "light") return points;
+  return Math.round(
+    points * (1 - LABOR_LIGHT_BLEND_WEIGHT) +
+      LABOR_LIGHT_NEUTRAL_MIDPOINT * LABOR_LIGHT_BLEND_WEIGHT,
+  );
+}
+
+// Combines the snapshot tier, trend modifier, and labor-intensity blend
+// above into laborPoints' final 0-20 score. Exported (like
+// capitalPointsFor/barrierPointsFor/productPointsFor) so each factor can be
+// unit-tested in isolation.
+export function laborPointsFor(input: {
+  naicsCodes: string[];
+  unemploymentRate: number | undefined;
+  laborPercentileBucket?: number | null;
+  laborTrendBucket?: number | null;
+  laborTrendPercent?: number | null;
+}): number {
+  const hasLaborData = input.unemploymentRate !== undefined;
+  const unemploymentRate = input.unemploymentRate ?? 0;
+  const snapshotPoints = laborSnapshotPointsFor(
+    hasLaborData,
+    unemploymentRate,
+    input.laborPercentileBucket,
+  );
+  const trendModifier =
+    input.laborTrendBucket != null
+      ? laborTrendModifierFromBucket(input.laborTrendBucket)
+      : laborTrendModifierFor(input.laborTrendPercent ?? null);
+  const combined = clamp(snapshotPoints + trendModifier, 0, 20);
+  return clamp(laborIntensityBlend(combined, input.naicsCodes), 0, 20);
+}
+
 // Startup difficulty is deliberately built from signals that are distinct
 // from regulatoryFriction (which is purely the Compliance-OS
 // license/permit/tax/filing burden). This is about how hard it is to
@@ -937,6 +1133,32 @@ export function scoreStartupDifficulty(input: {
   // back to the LICENSED_TRADE_PATTERN keyword guess instead of crashing or
   // assuming a bonus.
   licenseOrRegistrationCount?: number;
+  // Real national percentile-cache decile bucket (1-10, see
+  // lookupPercentileRank/reference-distribution-cache.ts) for this request's
+  // ACS unemployment rate against the "unemployment_rate" metric, at
+  // whichever jurisdiction level (place/county/state) that rate actually
+  // resolved at. Resolved by the async route handler (D1 access has to be
+  // awaited) and passed in here, the same "resolve in the async caller"
+  // pattern used for laborTrendBucket below. `undefined` covers existing
+  // callers/tests that don't pass it at all; `null` covers the route
+  // handler explicitly looking it up and getting nothing back (no cached
+  // breakpoints yet for that metric/level — see lookupPercentileRank's
+  // return contract). Both fall back to laborPointsFor's hardcoded tiers,
+  // never to the lowest bucket.
+  laborPercentileBucket?: number | null;
+  // Same percentile-cache decile bucket, but for the state-level
+  // "unemployment_trend" metric (see fetchUnemploymentTrendBulk in
+  // reference-distribution-batch.ts) — how this state's multi-year
+  // unemployment-rate trend compares nationally. Optional/nullable for the
+  // same reasons as laborPercentileBucket.
+  laborTrendBucket?: number | null;
+  // Raw (un-inverted — positive means unemployment ROSE) multi-year percent
+  // change in this state's unemployment rate, the same value the route
+  // handler looked laborTrendBucket up against. Used as laborPointsFor's
+  // fallback trend modifier when laborTrendBucket is null/unavailable, e.g.
+  // because the reference-distribution batch job hasn't populated
+  // "unemployment_trend" yet. Optional for callers/tests that don't have it.
+  laborTrendPercent?: number | null;
 }): { score: number; rationale: string; reasons: string[] } {
   const text = `${input.industry} ${input.businessIdea}`;
   const isLicensedTrade = LICENSED_TRADE_PATTERN.test(text);
@@ -976,15 +1198,19 @@ export function scoreStartupDifficulty(input: {
 
   const productPoints = productPointsFor(input.naicsCodes);
 
-  const laborPoints = !hasLaborData
-    ? 10
-    : unemploymentRate > 6
-      ? 20
-      : unemploymentRate > 4
-        ? 14
-        : unemploymentRate > 2.5
-          ? 8
-          : 4;
+  // See laborPointsFor and its laborSnapshotPointsFor/laborTrendModifierFor/
+  // laborIntensityBlend helpers above for the full breakdown this collapses
+  // to a single 0-20 value: a percentile-cache (or hardcoded-tier fallback)
+  // snapshot reading, a small trend nudge, and a labor-intensity blend
+  // toward neutral for sectors that don't hire much regardless of the local
+  // market.
+  const laborPoints = laborPointsFor({
+    naicsCodes: input.naicsCodes,
+    unemploymentRate: input.unemploymentRate,
+    laborPercentileBucket: input.laborPercentileBucket,
+    laborTrendBucket: input.laborTrendBucket,
+    laborTrendPercent: input.laborTrendPercent,
+  });
 
   const knowledgePoints = isLicensedTrade ? 3 : 10;
 
@@ -1066,9 +1292,54 @@ export function scoreStartupDifficulty(input: {
         : productPoints <= PRODUCT_POINTS_MODERATE
           ? "this needs a physical setup — fixtures, inventory, a POS/systems build-out — but not a production process or structural build of its own"
           : "the offering itself is a service or expertise with no physical product to design, manufacture, or build out";
-  const laborNote = !hasLaborData
+  // Describes whichever combination of signals actually drove laborPoints —
+  // percentile bucket vs. the hardcoded fallback tiers, the labor-intensity
+  // blend when it applied, and the trend direction when available — the
+  // same "name what actually happened" approach barrierNote above uses.
+  const laborIntensityTier = laborIntensityTierFor(input.naicsCodes);
+  const laborSourceClause = !hasLaborData
     ? "local labor-market data was unavailable for this run"
-    : `the state unemployment rate is ${unemploymentRate.toFixed(1)}%, ${unemploymentRate > 5 ? "suggesting workers are relatively available" : "suggesting a tighter labor market that can make hiring slower or costlier"}`;
+    : input.laborPercentileBucket != null
+      ? `this local unemployment rate (${unemploymentRate.toFixed(1)}%) ranks in decile ${input.laborPercentileBucket} of 10 nationally for its geography level, ${input.laborPercentileBucket >= 6 ? "suggesting workers are relatively available" : "suggesting a tighter labor market that can make hiring slower or costlier"}`
+      : `the local unemployment rate is ${unemploymentRate.toFixed(1)}% (no cached national percentile data yet for this geography level, so this uses Desk's fallback tiers), ${unemploymentRate > 5 ? "suggesting workers are relatively available" : "suggesting a tighter labor market that can make hiring slower or costlier"}`;
+  const laborIntensityClause =
+    laborIntensityTier === "light"
+      ? "this category typically runs on a small team or the founder's own expertise, so local labor-market conditions were weighted toward a neutral midpoint rather than swinging the score across its full range"
+      : laborIntensityTier === "intensive"
+        ? "this category typically needs to hire real staff to operate, so local labor-market conditions were weighted at full strength"
+        : "";
+  const laborTrendDirection: "loosening" | "tightening" | "stable" | null =
+    input.laborTrendBucket != null
+      ? input.laborTrendBucket >= 7
+        ? "loosening"
+        : input.laborTrendBucket <= 4
+          ? "tightening"
+          : "stable"
+      : input.laborTrendPercent != null
+        ? input.laborTrendPercent > 1
+          ? "loosening"
+          : input.laborTrendPercent < -1
+            ? "tightening"
+            : "stable"
+        : null;
+  const laborTrendClause =
+    laborTrendDirection === "loosening"
+      ? "the multi-year trend also shows the labor market loosening (unemployment rising), a further small positive for hiring"
+      : laborTrendDirection === "tightening"
+        ? "the multi-year trend also shows the labor market tightening (unemployment falling), a further small drag on hiring"
+        : laborTrendDirection === "stable"
+          ? "the multi-year trend shows a roughly stable labor market"
+          : "";
+  const laborNote = [laborSourceClause, laborIntensityClause, laborTrendClause]
+    .filter(Boolean)
+    .join(". ");
+  // Known ceiling: general unemployment rate (ACS/BLS LAUS) is the only
+  // free, place-resolvable labor-market signal available — no free API
+  // publishes local, occupation-specific unemployment (e.g. "unemployment
+  // among licensed electricians in this county"), so this will always be a
+  // general-labor-market proxy rather than a skilled-trade/tech-labor-
+  // specific one. A category that needs a narrow specialist pool can look
+  // easier to staff here than it really is, or vice versa.
   const knowledgeNote = isLicensedTrade
     ? "this category typically requires formal credentials or specialized training"
     : "this category does not typically require formal licensing to operate";
