@@ -835,13 +835,17 @@ export function productPointsFor(naicsCodes: string[]): number {
 
 // Trades and professions that generally require a license, certification,
 // or a multi-year apprenticeship/degree before someone can legally or
-// credibly operate. Still the only signal knowledgePoints has, and it
-// remains barrierPoints' fallback credential signal for when real
-// Compliance-OS LICENSE/REGISTRATION data isn't available (see
+// credibly operate. Remains barrierPoints' fallback credential signal for
+// when real Compliance-OS LICENSE/REGISTRATION data isn't available (see
 // barrierPointsFor/credentialSignalFor below) — but it's no longer
 // barrierPoints' primary signal: a real matched Compliance-OS requirement
 // answers "will buyers expect a license or credentials" directly, instead
-// of guessing it from keywords in the idea text.
+// of guessing it from keywords in the idea text. Also no longer
+// knowledgePoints' only signal — knowledgePointsFor (see below, past
+// laborPointsFor) pairs this same real-data-first credential signal with an
+// independent NAICS knowledge-intensity signal, since "licensed" and
+// "requires deep specialized expertise" are related but genuinely distinct
+// questions.
 const LICENSED_TRADE_PATTERN =
   /medical|health|law\b|legal|accounting|architect|engineer|contractor|child ?care|real estate|electrician|plumb|hvac/i;
 
@@ -1098,6 +1102,88 @@ export function laborPointsFor(input: {
   return clamp(laborIntensityBlend(combined, input.naicsCodes), 0, 20);
 }
 
+// knowledgePoints' 0-10 budget, split into two independent factors instead
+// of the old single binary regex check (isLicensedTrade ? 3 : 10): a
+// credential signal (max 6, reusing barrierPointsFor's exact real-data-
+// first credentialSignalFor helper) and a NAICS knowledge-intensity signal
+// (max 4, reusing productPointsFor's own NAICS_BUILD_LOW sector research).
+// 6 + 4 = 10.
+//
+// "Is this a licensed/credentialed trade" and "does this demand deep
+// specialized expertise" are related but genuinely different questions —
+// treating them as the same axis, the way the old binary did, scores a
+// regulated-but-operationally-simple trade (e.g. a barbershop) and an
+// unregulated-but-technically-deep field (software architecture, actuarial
+// or financial analysis, engineering consulting) as opposites, when
+// they're not actually correlated: plenty of licensed trades are
+// operationally straightforward once trained, and plenty of unlicensed
+// fields demand years of specialized expertise with no formal gate at all.
+//
+// Reusing credentialSignalFor here (rather than re-deriving a second
+// license-based check) means Knowledge automatically inherits the same
+// real-Compliance-OS-data-first, LICENSED_TRADE_PATTERN-fallback-second
+// behavior barrier's credential factor already has, instead of a second,
+// possibly-drifting copy of that preference order.
+const KNOWLEDGE_INTENSITY_LOW = 1; // NAICS 54/61/52 matched (Professional/
+// Scientific/Technical Services, Educational Services, Finance & Insurance
+// — see NAICS_BUILD_LOW's comment above): the "product" is the
+// practitioner's own specialized expertise, so knowledgePoints should be
+// reduced even when no license is required at all.
+const KNOWLEDGE_INTENSITY_MAX = 4; // no knowledge-intensive NAICS code
+// matched. Doesn't rule out real expertise requirements Desk simply has no
+// positive NAICS-level signal for — the credential factor above is still
+// free to catch those independently.
+
+function naicsKnowledgeIntensitySignalFor(naicsCodes: string[]): number {
+  return naicsCodes.some((code) => NAICS_BUILD_LOW.has(code))
+    ? KNOWLEDGE_INTENSITY_LOW
+    : KNOWLEDGE_INTENSITY_MAX;
+}
+
+// Combines the credential and NAICS knowledge-intensity signals into
+// knowledgePoints' final 0-10 score. Exported (like capitalPointsFor/
+// barrierPointsFor/productPointsFor/laborPointsFor) so each factor can be
+// unit-tested in isolation.
+//
+// The credential component lands on one of {1, 3, 6} (credentialSignalFor's
+// LOW/MODERATE/MAX) and the NAICS component lands on one of {1, 4}
+// (KNOWLEDGE_INTENSITY_LOW/MAX), giving these reachable combinations:
+//   licensed (2+ real matched requirements, or the regex fallback) AND
+//     knowledge-intensive NAICS — e.g. a licensed engineering, architecture,
+//     or accounting firm: real credentials AND deep domain expertise both
+//     apply. 1 + 1 = 2, the hardest tier.
+//   licensed AND NOT knowledge-intensive — e.g. a barbershop or
+//     electrician: a real license, but operationally straightforward once
+//     trained. 1 + 4 = 5.
+//   exactly one matched requirement (moderate credential signal) AND
+//     knowledge-intensive NAICS: 3 + 1 = 4.
+//   exactly one matched requirement AND NOT knowledge-intensive: 3 + 4 = 7.
+//   unlicensed (0 matched requirements, or regex says not a trade) AND
+//     knowledge-intensive NAICS — e.g. software consulting, actuarial or
+//     financial analysis, engineering consulting with no license
+//     requirement: real expertise demanded with no formal gate. 6 + 1 = 7
+//     (deliberately the same total as the row above — a moderate credential
+//     signal and an unlicensed-but-knowledge-intensive sector are
+//     comparably hard to break into, just for different reasons, not a
+//     coincidence to "fix").
+//   unlicensed AND NOT knowledge-intensive — e.g. a retail shop or virtual
+//     assistant service: neither signal applies. 6 + 4 = 10, the easiest
+//     tier.
+// Five distinct totals (2, 4, 5, 7, 10) are reachable across these six
+// combinations — genuine gradation in place of the old binary 3/10.
+export function knowledgePointsFor(input: {
+  isLicensedTrade: boolean;
+  licenseOrRegistrationCount: number | undefined;
+  naicsCodes: string[];
+}): number {
+  const credentialComponent = credentialSignalFor(
+    input.isLicensedTrade,
+    input.licenseOrRegistrationCount,
+  );
+  const naicsComponent = naicsKnowledgeIntensitySignalFor(input.naicsCodes);
+  return clamp(credentialComponent + naicsComponent, 0, 10);
+}
+
 // Startup difficulty is deliberately built from signals that are distinct
 // from regulatoryFriction (which is purely the Compliance-OS
 // license/permit/tax/filing burden). This is about how hard it is to
@@ -1212,7 +1298,23 @@ export function scoreStartupDifficulty(input: {
     laborTrendPercent: input.laborTrendPercent,
   });
 
-  const knowledgePoints = isLicensedTrade ? 3 : 10;
+  // See knowledgePointsFor and its naicsKnowledgeIntensitySignalFor helper
+  // above for the full two-factor breakdown this collapses to a single
+  // 0-10 value: the same real-data-first credential signal barrierPoints
+  // uses (credentialSignalFor), plus an independent NAICS knowledge-
+  // intensity signal.
+  const knowledgePoints = knowledgePointsFor({
+    isLicensedTrade,
+    licenseOrRegistrationCount: input.licenseOrRegistrationCount,
+    naicsCodes: input.naicsCodes,
+  });
+  // Recomputed here (not just inside knowledgePointsFor) purely so
+  // knowledgeNote below can name whether the NAICS knowledge-intensity
+  // signal actually applied, the same "recompute for the rationale text"
+  // approach credentialSignal above uses.
+  const knowledgeIntensiveSector = input.naicsCodes.some((code) =>
+    NAICS_BUILD_LOW.has(code),
+  );
 
   // New signal: real Compliance-OS requirement counts, independent of
   // whether LICENSED_TRADE_PATTERN happened to match the idea text. More
@@ -1340,9 +1442,21 @@ export function scoreStartupDifficulty(input: {
   // general-labor-market proxy rather than a skilled-trade/tech-labor-
   // specific one. A category that needs a narrow specialist pool can look
   // easier to staff here than it really is, or vice versa.
-  const knowledgeNote = isLicensedTrade
-    ? "this category typically requires formal credentials or specialized training"
-    : "this category does not typically require formal licensing to operate";
+  // Composed from the same two factors knowledgePointsFor scores on, the
+  // same "name what actually happened" approach barrierNote uses above —
+  // rather than collapsing "licensed" and "requires deep expertise" into
+  // one canned phrase the way the old binary knowledgeNote did.
+  const knowledgeCredentialClause = hasLicenseRegData
+    ? licenseOrRegistrationCount === 0
+      ? "Compliance-OS found no license or registration requirement for this category, a real signal formal credentials aren't a prerequisite"
+      : `Compliance-OS found ${licenseOrRegistrationCount} license/registration requirement${licenseOrRegistrationCount === 1 ? "" : "s"} for this category, a real signal formal credentials are expected`
+    : isLicensedTrade
+      ? "this looks like a licensed/credentialed trade based on the business description"
+      : "this doesn't look like a licensed/credentialed trade based on the business description";
+  const knowledgeSectorClause = knowledgeIntensiveSector
+    ? "it also sits in a professional/technical, education, or finance sector where deep specialized expertise is typically the product itself, independent of any license requirement"
+    : "it isn't in a sector Desk treats as inherently knowledge-intensive";
+  const knowledgeNote = `${knowledgeCredentialClause}; ${knowledgeSectorClause}`;
   const licensingNote = !hasRequirementData
     ? "a real compliance-requirement count was unavailable for this run"
     : requirementCount > 10

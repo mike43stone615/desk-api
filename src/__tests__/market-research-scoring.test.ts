@@ -6,6 +6,7 @@ import {
   productPointsFor,
   barrierPointsFor,
   laborPointsFor,
+  knowledgePointsFor,
 } from '../api/routes/integrations/market-research.js';
 
 describe('computeRegulatoryFrictionScore', () => {
@@ -125,22 +126,28 @@ describe('scoreStartupDifficulty', () => {
     expect(heavilyRegulated.reasons.join(' ')).toContain('15 known requirements');
   });
 
-  it('reaches exactly 95 when every signal, including the new licensing-complexity bucket, is maxed for a labor-light sector', () => {
+  it('reaches exactly 92 when every signal, including the new licensing-complexity bucket, is maxed for a labor-light, knowledge-intensive sector', () => {
     // capital(low-capital NAICS base 20 + confirmed-zero bond/insurance
     // modifier +5 = 25) + barrier(unlicensed/B2C, 15) +
     // product(non-physical, 20) + labor(20 snapshot for unemployment > 6%,
     // no trend data so no modifier, then blended 50% toward the neutral
     // midpoint of 10 because NAICS 54 is labor-light -> round(20*0.5 +
-    // 10*0.5) = 15) + knowledge(unlicensed, 10) +
-    // licensing(requirementCount < 5, 10) = 95.
+    // 10*0.5) = 15) + knowledge(unlicensed credential component 6 + NAICS
+    // 54 knowledge-intensive component 1 = 7) +
+    // licensing(requirementCount < 5, 10) = 92.
     //
-    // NAICS 54/61/52 are simultaneously capitalPointsFor's LOW-capital tier
-    // and laborPointsFor's labor-light tier (laborPointsFor deliberately
-    // reuses the same NAICS_CAPITAL_LOW set — see its comment), so a
-    // business idea that maxes out capital/product via one of those codes
-    // can no longer also max out labor the way it could before the
-    // labor-intensity blend was added — the true achievable maximum for
-    // this exact input shape is 95, not 100.
+    // NAICS 54/61/52 are simultaneously capitalPointsFor's LOW-capital tier,
+    // laborPointsFor's labor-light tier (laborPointsFor deliberately reuses
+    // the same NAICS_CAPITAL_LOW set — see its comment), AND
+    // knowledgePointsFor's knowledge-intensive tier (knowledgePointsFor
+    // deliberately reuses productPointsFor's NAICS_BUILD_LOW set — see its
+    // comment). A business idea that maxes out capital/product via one of
+    // those codes can therefore no longer also max out labor OR knowledge
+    // the way it could before the labor-intensity blend and the NAICS
+    // knowledge-intensity signal were added — the true achievable maximum
+    // for this exact input shape is 92, not 100 (previously 95, before
+    // knowledgePoints stopped treating "unlicensed" as sufficient on its
+    // own for the full 10).
     const result = scoreStartupDifficulty({
       industry: 'Software Consulting',
       businessIdea: 'general software consulting for small businesses',
@@ -150,7 +157,7 @@ describe('scoreStartupDifficulty', () => {
       requirementCount: 2,
       bondOrInsuranceCount: 0,
     });
-    expect(result.score).toBe(95);
+    expect(result.score).toBe(92);
   });
 
   it('ranks reasons with the largest point contributor first', () => {
@@ -430,6 +437,204 @@ describe('barrierPointsFor', () => {
     });
     expect(genuinelyEasy).toBe(15);
     expect(genuinelyEasy - merelyAverage).toBeGreaterThanOrEqual(3);
+  });
+});
+
+describe('knowledgePointsFor', () => {
+  it('maxes out at exactly 10 for an unlicensed business in a non-knowledge-intensive sector', () => {
+    expect(
+      knowledgePointsFor({
+        isLicensedTrade: false,
+        licenseOrRegistrationCount: 0,
+        naicsCodes: ['44'],
+      }),
+    ).toBe(10);
+  });
+
+  it('bottoms out at exactly 2 for a licensed business in a knowledge-intensive sector', () => {
+    expect(
+      knowledgePointsFor({
+        isLicensedTrade: true,
+        licenseOrRegistrationCount: 2,
+        naicsCodes: ['54'],
+      }),
+    ).toBe(2);
+  });
+
+  it('never exceeds the 0-10 range regardless of inputs', () => {
+    const bools = [true, false];
+    const counts = [0, 1, 2, 5, undefined];
+    const naicsCodes = [
+      ['23'], ['31-33'], ['72'], ['44'], ['48'], ['62'], ['54'], ['61'], ['52'], ['53'],
+    ];
+    for (const isLicensedTrade of bools) {
+      for (const licenseOrRegistrationCount of counts) {
+        for (const codes of naicsCodes) {
+          const points = knowledgePointsFor({
+            isLicensedTrade,
+            licenseOrRegistrationCount,
+            naicsCodes: codes,
+          });
+          expect(points).toBeGreaterThanOrEqual(0);
+          expect(points).toBeLessThanOrEqual(10);
+        }
+      }
+    }
+  });
+
+  it('reaches at least 4 distinct values across the credential x NAICS-intensity combinations', () => {
+    // Documents the 5 distinct reachable totals from knowledgePointsFor's
+    // comment: 2, 4, 5, 7, 10.
+    const values = new Set([
+      knowledgePointsFor({
+        isLicensedTrade: true,
+        licenseOrRegistrationCount: 2,
+        naicsCodes: ['54'], // licensed + knowledge-intensive -> 2
+      }),
+      knowledgePointsFor({
+        isLicensedTrade: true,
+        licenseOrRegistrationCount: 2,
+        naicsCodes: ['44'], // licensed + not knowledge-intensive -> 5
+      }),
+      knowledgePointsFor({
+        isLicensedTrade: false,
+        licenseOrRegistrationCount: 1,
+        naicsCodes: ['54'], // one matched requirement + knowledge-intensive -> 4
+      }),
+      knowledgePointsFor({
+        isLicensedTrade: false,
+        licenseOrRegistrationCount: 1,
+        naicsCodes: ['44'], // one matched requirement + not knowledge-intensive -> 7
+      }),
+      knowledgePointsFor({
+        isLicensedTrade: false,
+        licenseOrRegistrationCount: 0,
+        naicsCodes: ['54'], // unlicensed + knowledge-intensive -> 7
+      }),
+      knowledgePointsFor({
+        isLicensedTrade: false,
+        licenseOrRegistrationCount: 0,
+        naicsCodes: ['44'], // unlicensed + not knowledge-intensive -> 10
+      }),
+    ]);
+    expect(values.size).toBeGreaterThanOrEqual(4);
+    expect([...values].sort((a, b) => a - b)).toEqual([2, 4, 5, 7, 10]);
+  });
+
+  it('uses the real Compliance-OS license/registration count as the primary credential signal when available', () => {
+    const noRequirement = knowledgePointsFor({
+      isLicensedTrade: false,
+      licenseOrRegistrationCount: 0,
+      naicsCodes: ['44'],
+    });
+    const oneRequirement = knowledgePointsFor({
+      isLicensedTrade: false,
+      licenseOrRegistrationCount: 1,
+      naicsCodes: ['44'],
+    });
+    const twoRequirements = knowledgePointsFor({
+      isLicensedTrade: false,
+      licenseOrRegistrationCount: 2,
+      naicsCodes: ['44'],
+    });
+    expect(noRequirement).toBeGreaterThan(oneRequirement);
+    expect(oneRequirement).toBeGreaterThan(twoRequirements);
+  });
+
+  it('lets real Compliance-OS data override an incorrect LICENSED_TRADE_PATTERN guess in either direction', () => {
+    // Regex says licensed, real data confirms zero matched requirements —
+    // should score the same as a case that never looked licensed at all.
+    const regexWrongPositive = knowledgePointsFor({
+      isLicensedTrade: true,
+      licenseOrRegistrationCount: 0,
+      naicsCodes: ['44'],
+    });
+    const genuinelyUnlicensed = knowledgePointsFor({
+      isLicensedTrade: false,
+      licenseOrRegistrationCount: 0,
+      naicsCodes: ['44'],
+    });
+    expect(regexWrongPositive).toBe(genuinelyUnlicensed);
+
+    // Regex says unlicensed, real data finds matched requirements — should
+    // score the same as a case the regex correctly flagged.
+    const regexWrongNegative = knowledgePointsFor({
+      isLicensedTrade: false,
+      licenseOrRegistrationCount: 2,
+      naicsCodes: ['44'],
+    });
+    const genuinelyLicensed = knowledgePointsFor({
+      isLicensedTrade: true,
+      licenseOrRegistrationCount: 2,
+      naicsCodes: ['44'],
+    });
+    expect(regexWrongNegative).toBe(genuinelyLicensed);
+  });
+
+  it('falls back to the LICENSED_TRADE_PATTERN guess (binary) only when real license/registration data is unavailable', () => {
+    const unlicensedGuess = knowledgePointsFor({
+      isLicensedTrade: false,
+      licenseOrRegistrationCount: undefined,
+      naicsCodes: ['44'],
+    });
+    const licensedGuess = knowledgePointsFor({
+      isLicensedTrade: true,
+      licenseOrRegistrationCount: undefined,
+      naicsCodes: ['44'],
+    });
+    expect(unlicensedGuess).toBeGreaterThan(licensedGuess);
+  });
+
+  it('scores knowledge-intensive NAICS sectors (54/61/52) lower than non-intensive sectors at the same credential level', () => {
+    // Same credential inputs throughout — only the NAICS code changes — so
+    // any difference is attributable to the independent NAICS
+    // knowledge-intensity signal, not the credential signal.
+    for (const code of ['54', '61', '52']) {
+      const intensive = knowledgePointsFor({
+        isLicensedTrade: false,
+        licenseOrRegistrationCount: 0,
+        naicsCodes: [code],
+      });
+      const notIntensive = knowledgePointsFor({
+        isLicensedTrade: false,
+        licenseOrRegistrationCount: 0,
+        naicsCodes: ['44'],
+      });
+      expect(intensive).toBeLessThan(notIntensive);
+    }
+  });
+
+  it('treats an unlicensed knowledge-intensive sector as harder than a licensed non-knowledge-intensive one is easy, since neither axis alone tells the whole story', () => {
+    // A licensed trade that is NOT knowledge-intensive (e.g. a barbershop)
+    // and an unlicensed sector that IS knowledge-intensive (e.g. software
+    // consulting) should not simply invert each other under the old binary
+    // — both should land below the true best case (unlicensed AND not
+    // knowledge-intensive) and above the true worst case (licensed AND
+    // knowledge-intensive).
+    const best = knowledgePointsFor({
+      isLicensedTrade: false,
+      licenseOrRegistrationCount: 0,
+      naicsCodes: ['44'],
+    });
+    const worst = knowledgePointsFor({
+      isLicensedTrade: true,
+      licenseOrRegistrationCount: 2,
+      naicsCodes: ['54'],
+    });
+    const licensedSimpleTrade = knowledgePointsFor({
+      isLicensedTrade: true,
+      licenseOrRegistrationCount: 2,
+      naicsCodes: ['44'],
+    });
+    const unlicensedKnowledgeWork = knowledgePointsFor({
+      isLicensedTrade: false,
+      licenseOrRegistrationCount: 0,
+      naicsCodes: ['54'],
+    });
+    expect(licensedSimpleTrade).toBeLessThan(best);
+    expect(licensedSimpleTrade).toBeGreaterThan(worst);
+    expect(unlicensedKnowledgeWork).toBeLessThan(best);
+    expect(unlicensedKnowledgeWork).toBeGreaterThan(worst);
   });
 });
 
