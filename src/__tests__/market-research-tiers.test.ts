@@ -233,6 +233,96 @@ describe('establishment trend modifier (trendPoints reused for the QCEW establis
   });
 });
 
+describe('trendPoints percentile-bucket path (national reference-distribution cache)', () => {
+  // Regression guard: every existing two-argument call site (scoreOutlook's
+  // five signals, buildCategories' establishmentTrendTier) must keep
+  // producing byte-identical output now that a third argument exists. Not
+  // passing the third argument at all (undefined) and explicitly passing
+  // null must both hit the exact same hardcoded-band branch as before.
+  it('omitted and explicit-null percentileBucket both fall back to the pre-existing hardcoded bands, unchanged', () => {
+    const trendPercentValues = [15, 9, 4, 2.5, 0.5, -1, -4.9, -5, -10, -50];
+    const maxPointsValues = [4, 12, 18, 20, 25];
+    for (const trendPercent of trendPercentValues) {
+      for (const maxPoints of maxPointsValues) {
+        const omitted = trendPoints(trendPercent, maxPoints);
+        const explicitNull = trendPoints(trendPercent, maxPoints, null);
+        const explicitUndefined = trendPoints(trendPercent, maxPoints, undefined);
+        expect(explicitNull).toBe(omitted);
+        expect(explicitUndefined).toBe(omitted);
+      }
+    }
+    // And the null-trendPercent (missing-data) branch specifically.
+    for (const maxPoints of maxPointsValues) {
+      expect(trendPoints(null, maxPoints, null)).toBe(trendPoints(null, maxPoints));
+    }
+  });
+
+  it('exactly reproduces every hardcoded band by value, so the fallback math itself never regresses', () => {
+    expect(trendPoints(9, 25)).toBe(25); // >8 -> max
+    expect(trendPoints(4, 25)).toBe(19); // >3 -> 75%, rounded
+    expect(trendPoints(1, 25)).toBe(14); // >0 -> 55%, rounded
+    expect(trendPoints(-2, 25)).toBe(8); // >-5 -> 30%, rounded
+    expect(trendPoints(-10, 25)).toBe(3); // else -> 10%, rounded
+    expect(trendPoints(null, 25)).toBe(13); // missing -> 50%, rounded
+  });
+
+  it('a real percentile bucket produces a different (and correct) score than the hardcoded fallback for the same trendPercent', () => {
+    // trendPercent=2 alone would land in the ">0" 55% fallback band (14/25),
+    // but a real cached decile bucket of 9 (near-top nationally) should
+    // score far higher, and a bucket of 2 (near-bottom) should score far
+    // lower than the fallback would have — the whole point of preferring
+    // real distribution data over a hand-picked absolute-percent cutoff.
+    const fallback = trendPoints(2, 25);
+    const highBucket = trendPoints(2, 25, 9);
+    const lowBucket = trendPoints(2, 25, 2);
+    expect(fallback).toBe(14);
+    expect(highBucket).not.toBe(fallback);
+    expect(lowBucket).not.toBe(fallback);
+    expect(highBucket).toBeGreaterThan(lowBucket);
+  });
+
+  it('maps decile bucket onto maxPoints as bucket * maxPoints / 10, rounded — mirroring laborPointsFor\'s bucket * 2 for its 0-20 budget', () => {
+    for (const maxPoints of [4, 12, 18, 20, 25]) {
+      for (let bucket = 1; bucket <= 10; bucket += 1) {
+        expect(trendPoints(0, maxPoints, bucket)).toBe(
+          Math.round((bucket * maxPoints) / 10),
+        );
+      }
+    }
+  });
+
+  it('bucket 10 (top decile nationally = fastest growth) maps to the HIGH end of maxPoints; bucket 1 maps to the low end', () => {
+    expect(trendPoints(-99, 25, 10)).toBe(25); // ignores the (very negative) trendPercent entirely once a bucket is given
+    expect(trendPoints(-99, 25, 1)).toBe(3);
+    expect(trendPoints(99, 4, 10)).toBe(4);
+    expect(trendPoints(99, 4, 1)).toBe(0);
+  });
+
+  it('never exceeds maxPoints and never goes negative across the full 1-10 bucket range', () => {
+    for (const maxPoints of [1, 4, 12, 18, 20, 25, 100]) {
+      for (let bucket = 1; bucket <= 10; bucket += 1) {
+        const points = trendPoints(0, maxPoints, bucket);
+        expect(points).toBeGreaterThanOrEqual(0);
+        expect(points).toBeLessThanOrEqual(maxPoints);
+      }
+    }
+  });
+
+  it('the same resolved bucket feeds both Outlook\'s qcewPoints (25-max) and Demand\'s establishmentTrendTier (4-max) proportionally, from one D1 lookup', () => {
+    // Simulates the route handler resolving qcewPercentileBucket exactly
+    // once and threading it into both scoreOutlook (maxPoints 25) and
+    // buildCategories' establishmentTrendTier (maxPoints 4) — same metric,
+    // same bucket, two different budgets.
+    const qcewPercentileBucket = 7;
+    const outlookQcewPoints = trendPoints(3.2, 25, qcewPercentileBucket);
+    const demandTrendTier = trendPoints(3.2, 4, qcewPercentileBucket);
+    expect(outlookQcewPoints).toBe(Math.round((7 * 25) / 10)); // 18
+    expect(demandTrendTier).toBe(Math.round((7 * 4) / 10)); // 3
+    // Both land at the same ~70% of their respective budgets.
+    expect(outlookQcewPoints / 25).toBeCloseTo(demandTrendTier / 4, 1);
+  });
+});
+
 describe('establishment-related Demand points cap at exactly 20 when every signal peaks', () => {
   it('establishmentTierFor(12 max) + nonemployerEstablishmentTierFor(4 max) + trendPoints(4 max) = 20', () => {
     const peakEstablishmentTier = establishmentTierFor(200, 'county'); // 12
