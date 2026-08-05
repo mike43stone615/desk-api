@@ -161,6 +161,33 @@ describe('resolveGeography', () => {
     );
   });
 
+  it('strips a full "City, ST, USA" Google Places autocomplete description down to the bare city name', async () => {
+    // This is the real-world shape formationCity actually arrives in for
+    // any place picked from the setup wizard's autocomplete (not just a
+    // manually-typed "City, ST") — a prior version of cleanCityNameForMatch
+    // only handled the narrower ", ST" suffix and left this 3-segment form
+    // completely unmatched, which was the dominant cause of resolveGeography
+    // falling all the way back to state-level data in practice.
+    fetchMock
+      .mockResolvedValueOnce(
+        placesResponse([
+          {
+            attributes: { NAME: 'Denver city', PLACE: '20000', STATE: '08', BASENAME: 'Denver' },
+            geometry: { rings: [SQUARE_RING] },
+          },
+        ]),
+      )
+      .mockResolvedValueOnce(placesResponse([]))
+      .mockResolvedValueOnce(countiesResponse([]));
+
+    const result = await resolveGeography('Denver, CO, USA', '08');
+    expect(result.place).toEqual({ fips: '20000', name: 'Denver city', stateFips: '08' });
+    const placeUrl = new URL(fetchMock.mock.calls[0][0] as string);
+    expect(placeUrl.searchParams.get('where')).toBe(
+      "UPPER(BASENAME) LIKE UPPER('Denver%') AND STATE='08'",
+    );
+  });
+
   it('returns place with a null county when the place has no usable geometry to spatially resolve a county from', async () => {
     fetchMock
       .mockResolvedValueOnce(

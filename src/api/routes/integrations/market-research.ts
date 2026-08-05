@@ -3948,12 +3948,30 @@ function escapeForArcgisLike(value: string): string {
   return value.replace(/'/g, "''");
 }
 
-// formationCity is sometimes supplied as "City, ST" even though
-// formationState already carries the state separately — TIGERweb matches on
-// the bare place name only, so strip a trailing ", ST" state suffix if
-// present.
+// formationCity is frequently the FULL Google Places autocomplete
+// description ("Denver, CO, USA") rather than a bare city name — the
+// Flutter setup wizard's place picker (see _selectPlace in
+// not_registered_business_setup_page.dart) sets formationCity to the same
+// full description it shows the user and stores in formationAddress, and
+// that full string round-trips back into formationCity on every save via
+// the city text field, so this is the normal shape for any place actually
+// picked from the autocomplete list, not an edge case. A prior version of
+// this function only stripped a trailing ", ST" (handling a manually-typed
+// "Denver, CO"), which never matched the 3-segment
+// "Denver, CO, USA" shape — so fetchPlaceGeo's TIGERweb query almost never
+// matched, and resolveGeography fell all the way back to state-level data
+// for most real selections (confirmed live: this was the dominant cause of
+// "market validation keeps falling back to state" reports even after the
+// Census-Designated-Places layer fix below). Google's autocomplete
+// description format for a (cities)-restricted prediction is always
+// "City[, County][, ST], Country" — the city name is reliably the first
+// comma-separated segment regardless of how many trailing segments follow,
+// so this now just takes that first segment instead of trying to match
+// specific trailing-suffix shapes. TIGERweb matches on the bare place name
+// only, so formationState already carries the state separately.
 function cleanCityNameForMatch(city: string): string {
-  return city.replace(/,\s*[A-Za-z]{2}$/, "").trim();
+  const [firstSegment] = city.split(",");
+  return (firstSegment ?? "").trim();
 }
 
 // Shared by fetchPlaceGeo and fetchCountyForPoint: TIGERweb's AREALAND
