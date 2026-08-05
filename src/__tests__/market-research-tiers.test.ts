@@ -231,27 +231,69 @@ describe('receiptsTierFor', () => {
 });
 
 describe('competitionEstablishmentFallbackScore', () => {
-  it('scores in the opposite direction of the demand establishment tier (more establishments = more crowded = lower score)', () => {
-    expect(competitionEstablishmentFallbackScore(3000, 'state')).toBeLessThan(
-      competitionEstablishmentFallbackScore(50, 'state'),
-    );
-    expect(competitionEstablishmentFallbackScore(700, 'county')).toBeLessThan(
-      competitionEstablishmentFallbackScore(10, 'county'),
-    );
+  // This fallback used to maintain its own independent, hand-tuned tier
+  // table on the same raw establishment count establishmentTierFor reads
+  // for Demand — monotonic in the opposite direction ("more establishments
+  // = more crowded = lower score"). It now DERIVES its score from
+  // establishmentTierFor's own non-monotonic "moderate is healthiest"
+  // output instead, inverted — so these tests assert the new, non-monotonic
+  // shape, not raw-count monotonicity.
+
+  it('scores a MODERATE establishment count (Demand\'s healthiest zone) as the most-crowded fallback read', () => {
+    // 200 sits in establishmentTierFor's county "moderate" band (tier 12,
+    // Demand's peak/healthiest read) — Competition's fallback should read
+    // this as its most-crowded (lowest-score) case.
+    const moderateCounty = competitionEstablishmentFallbackScore(200, 'county');
+    const veryLowCounty = competitionEstablishmentFallbackScore(5, 'county');
+    const veryHighCounty = competitionEstablishmentFallbackScore(800, 'county');
+    expect(moderateCounty).toBeLessThan(veryLowCounty);
+    expect(moderateCounty).toBeLessThan(veryHighCounty);
+
+    const moderateState = competitionEstablishmentFallbackScore(600, 'state');
+    const veryLowState = competitionEstablishmentFallbackScore(10, 'state');
+    const veryHighState = competitionEstablishmentFallbackScore(2500, 'state');
+    expect(moderateState).toBeLessThan(veryLowState);
+    expect(moderateState).toBeLessThan(veryHighState);
   });
 
-  it('uses county-scale thresholds proportioned below state-scale ones', () => {
-    // 700 establishments reads as "very crowded" (lowest score) at county
-    // scale but only lands in the middle state-scale bracket.
-    expect(competitionEstablishmentFallbackScore(700, 'county')).toBe(45);
-    expect(competitionEstablishmentFallbackScore(700, 'state')).toBe(60);
+  it('scores a very-low or very-high establishment count (Demand\'s low-opportunity extremes) as the least-crowded fallback read', () => {
+    // establishmentTierFor's two extremes (tier 4 "saturated" and tier 5
+    // "very low") both sit near its minimum — both should land near the top
+    // (least-crowded) end of the fallback's envelope, well above the
+    // moderate-band score.
+    const veryLow = competitionEstablishmentFallbackScore(5, 'county'); // tier 5
+    const veryHigh = competitionEstablishmentFallbackScore(800, 'county'); // tier 4
+    const moderate = competitionEstablishmentFallbackScore(200, 'county'); // tier 12
+    expect(veryLow).toBeGreaterThan(moderate);
+    expect(veryHigh).toBeGreaterThan(moderate);
   });
 
-  it('falls back to state-scale thresholds when the level is unknown (no regression)', () => {
-    expect(competitionEstablishmentFallbackScore(2500, undefined)).toBe(45);
-    expect(competitionEstablishmentFallbackScore(600, undefined)).toBe(60);
-    expect(competitionEstablishmentFallbackScore(150, undefined)).toBe(75);
-    expect(competitionEstablishmentFallbackScore(10, undefined)).toBe(65);
+  it('matches the exact value implied by inverting establishmentTierFor into the preserved [45, 75] envelope', () => {
+    // county: tier 12 (moderate, est=200) -> most crowded -> envelope floor.
+    expect(competitionEstablishmentFallbackScore(200, 'county')).toBe(45);
+    // county: tier 4 (saturated, est=800) -> least crowded -> envelope ceiling.
+    expect(competitionEstablishmentFallbackScore(800, 'county')).toBe(75);
+    // state: tier 12 (moderate, est=600) -> envelope floor.
+    expect(competitionEstablishmentFallbackScore(600, 'state')).toBe(45);
+    // state: tier 4 (saturated, est=2500) -> envelope ceiling.
+    expect(competitionEstablishmentFallbackScore(2500, 'state')).toBe(75);
+  });
+
+  it('falls back to state-scale thresholds (via establishmentTierFor) when the level is unknown (no regression in which table is picked)', () => {
+    expect(competitionEstablishmentFallbackScore(300, undefined)).toBe(45); // moderate (state table)
+    expect(competitionEstablishmentFallbackScore(2000, undefined)).toBe(75); // saturated (state table)
+  });
+
+  it('never exceeds its preserved [45, 75] envelope, even at the extremes, and never reaches the primary local-search path\'s most extreme 35/90 verdicts', () => {
+    for (const establishments of [0, 1, 5, 20, 50, 75, 100, 250, 300, 500, 600, 1000, 1700, 2000, 5000, 100000]) {
+      for (const level of ['county', 'state', undefined] as const) {
+        const score = competitionEstablishmentFallbackScore(establishments, level);
+        expect(score).toBeGreaterThanOrEqual(45);
+        expect(score).toBeLessThanOrEqual(75);
+        expect(score).toBeGreaterThan(35);
+        expect(score).toBeLessThan(90);
+      }
+    }
   });
 });
 

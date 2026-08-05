@@ -994,31 +994,51 @@ export function nonemployerEstablishmentTierFor(
   return 1;
 }
 
-// Competition's fallback-mode proxy (used only when Google/Foursquare local
-// search data is unavailable) scores in the opposite direction — a higher
-// establishment count reads as more crowded, so a higher count maps to a
-// *lower* score. County-scale thresholds are proportioned the same ~0.3x
-// ratio as establishmentTierFor's county:state scaling above.
+// establishmentTierFor's known output range (see its five branches: county
+// and state tables both return exactly {4, 5, 8, 9, 12}) — used below to
+// invert its output rather than re-deriving thresholds from the raw
+// establishment count a second time.
+const DEMAND_ESTABLISHMENT_TIER_MIN = 4; // saturated / very-high-count band
+const DEMAND_ESTABLISHMENT_TIER_MAX = 12; // moderate band — the curve's peak ("healthiest")
+
+// Competition's fallback-mode proxy (used only when Google/Foursquare/
+// Overpass local search data is all unavailable) used to maintain its own
+// independent, hand-tuned tier table on the exact same raw CBP
+// employer-establishment count Demand's establishment signal already
+// interprets (see establishmentTierFor) — two unrelated lookups on one
+// input, with no guarantee they'd stay conceptually consistent as either got
+// tuned. This now DERIVES its score from establishmentTierFor's output
+// instead of duplicating its threshold logic: a moderate/healthy
+// establishment count is Demand's best read (its score sits at
+// DEMAND_ESTABLISHMENT_TIER_MAX, "healthiest") but Competition's worst read
+// (a moderate, established local presence is the strongest evidence of real
+// local competitive activity), while a very-low or very-high count is
+// Demand's most ambiguous/lowest-scoring read (near
+// DEMAND_ESTABLISHMENT_TIER_MIN — either untapped opportunity or a
+// saturated non-starter) and, for the same reason, Competition's weakest
+// evidence of confirmed local competition, so it maps to Competition's
+// *least*-crowded read instead. The [FALLBACK_SCORE_MIN, FALLBACK_SCORE_MAX]
+// envelope this scales into is unchanged from the old table (45-75) and
+// stays well inside the primary local-search path's full 35-90 range, since
+// this remains a weaker, proxy-based signal that shouldn't claim the same
+// confidence as an actual nearby-competitor count.
+const FALLBACK_SCORE_MIN = 45;
+const FALLBACK_SCORE_MAX = 75;
+
 export function competitionEstablishmentFallbackScore(
   establishments: number,
   level: GeographyLevel | undefined,
 ): number {
-  if (level === "county") {
-    return establishments > 600
-      ? 45
-      : establishments > 150
-        ? 60
-        : establishments > 30
-          ? 75
-          : 65;
-  }
-  return establishments > 2000
-    ? 45
-    : establishments > 500
-      ? 60
-      : establishments > 100
-        ? 75
-        : 65;
+  const demandEstablishmentTier = establishmentTierFor(establishments, level);
+  // 0 when Demand's tier is at its max (moderate/healthiest — Competition's
+  // most-crowded read), 1 when Demand's tier is at its min (an extreme —
+  // Competition's least-crowded read).
+  const inverted =
+    (DEMAND_ESTABLISHMENT_TIER_MAX - demandEstablishmentTier) /
+    (DEMAND_ESTABLISHMENT_TIER_MAX - DEMAND_ESTABLISHMENT_TIER_MIN);
+  return Math.round(
+    FALLBACK_SCORE_MIN + inverted * (FALLBACK_SCORE_MAX - FALLBACK_SCORE_MIN),
+  );
 }
 
 export function receiptsTierFor(
@@ -1498,8 +1518,29 @@ function buildCategories(
         `Nearby matching places found: ${competitionSourceNotes.join("; ")} — blended (averaged) into ${localCompetitors.toFixed(1)} for scoring since these are independent sources with different coverage.`,
       ]
     : [
-        `Local place-search data was unavailable, so this uses ${establishments.toLocaleString()} ${establishmentsLevel === "county" ? "county-level" : "statewide"} employer establishments in this category as a rougher competition proxy.`,
+        `Local place-search data was unavailable, so this score is derived from ${establishments.toLocaleString()} ${establishmentsLevel === "county" ? "county-level" : "statewide"} employer establishments in this category — specifically, from the same "moderate is healthiest" establishment curve Demand's establishment sub-score uses (see establishmentTierFor), inverted: a moderate count that reads as Demand's healthiest signal reads as this category's most crowded, while a very-low or very-high count reads as this category's least crowded, since neither extreme is strong evidence of real local competition either way.`,
       ];
+  // Explicit confidence marker for the fallback path itself — the
+  // per-source "unavailable"/"not configured" evidence items already note
+  // that Google/Foursquare individually came up empty, but nothing
+  // previously flagged the *resulting competition score* as a weaker,
+  // derived-proxy read rather than an actual nearby-competitor count. Only
+  // added when the fallback path was actually used (never for the primary
+  // local-search-based score), matching this file's "quality: limited"
+  // convention used elsewhere for missing/derived signals.
+  if (!hasLocalCompetitorData) {
+    allEvidence.push(
+      item(
+        "Competition score basis",
+        "Estimated from establishment density",
+        "No usable local competitor search results were returned by Google Places, Foursquare, or OpenStreetMap Overpass for this location and category, so the competition score above is a derived proxy from Census establishment-density data (see the reasoning below) rather than an actual nearby-competitor count — treat it as a weaker signal than a normal competition score.",
+        "Census County Business Patterns",
+        "https://www.census.gov/programs-surveys/cbp.html",
+        "limited",
+        "competition",
+      ),
+    );
+  }
 
   // ── Revenue: how much cash is likely moving through this category ──
   const receiptsTier = receiptsTierFor(receipts, receiptsLevel);
