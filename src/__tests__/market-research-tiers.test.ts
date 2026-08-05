@@ -10,7 +10,30 @@ import {
   trendPoints,
   growthTierFor,
   preferredWage,
+  planTierFor,
 } from '../api/routes/integrations/market-research.js';
+
+describe('planTierFor', () => {
+  it('scores presence and pricing-number quality independently, summing to the max of 15', () => {
+    expect(planTierFor(3, 3)).toBe(15); // all fields + 3+ numbers
+    expect(planTierFor(3, 0)).toBe(11); // all fields, no numbers
+    expect(planTierFor(0, 0)).toBe(0); // nothing filled in
+  });
+
+  it('rewards a pricing field with real numbers over one with none, even at equal field-presence', () => {
+    const vagueOnly = planTierFor(1, 0);
+    const withNumbers = planTierFor(1, 2);
+    expect(withNumbers).toBeGreaterThan(vagueOnly);
+  });
+
+  it('never exceeds 15 regardless of inputs', () => {
+    for (const completeness of [0, 1, 2, 3, 10]) {
+      for (const signals of [0, 1, 2, 3, 10]) {
+        expect(planTierFor(completeness, signals)).toBeLessThanOrEqual(15);
+      }
+    }
+  });
+});
 
 describe('preferredWage', () => {
   it('prefers QCEW when it has a value, even if OEWS is numerically larger', () => {

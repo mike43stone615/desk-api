@@ -1047,6 +1047,37 @@ export function competitionEstablishmentFallbackScore(
   );
 }
 
+// Prefer QCEW (can resolve to county level, like the rest of this file's
+// "prefer local over state" convention) over OEWS (always state-level) when
+// QCEW actually has a value, instead of Math.max(qcew, oews) — taking
+// whichever number happens to be numerically larger has nothing to do with
+// which source is more locally accurate, and could silently let a
+// less-granular statewide figure override a real county one just because it
+// happened to be bigger.
+export function preferredWage(qcewWage: number, oewsWage: number): number {
+  return qcewWage > 0 ? qcewWage : oewsWage;
+}
+
+// Worth up to 15 of Revenue's 100 points, split into two questions rather
+// than one: did the user fill in the 3 plan fields at all (presence, up to
+// 11), and — when they did — did the pricing field actually contain real
+// numbers rather than just prose (quality, up to 4, from priceSignals — the
+// count of dollar-amount-shaped matches already extracted from
+// pricingHypothesis but previously computed and shown in evidence text
+// without ever affecting the score). "$15 haircuts, $8 cost, 20/day" and
+// "premium pricing" both used to score identically as "1 of 3 fields
+// present"; this rewards the former for being something the rest of the
+// scoring can actually reason about.
+export function planTierFor(
+  planCompleteness: number,
+  priceSignals: number,
+): number {
+  const presenceTier =
+    planCompleteness >= 3 ? 11 : planCompleteness >= 1 ? 6 : 0;
+  const qualityTier = priceSignals >= 3 ? 4 : priceSignals >= 1 ? 2 : 0;
+  return presenceTier + qualityTier;
+}
+
 // Worth up to 30 of Revenue's 100 points (dropped from 40 to make room for
 // payrollTierFor below — see the 30+10+25+20+15 breakdown on revenueScore).
 //
@@ -1073,17 +1104,6 @@ export function competitionEstablishmentFallbackScore(
 // (e.g. real estate landed in the top tier at both scales; educational
 // services landed in the bottom tier at both scales), confirming a single
 // table is the right model once the input is a genuine per-business average.
-// Prefer QCEW (can resolve to county level, like the rest of this file's
-// "prefer local over state" convention) over OEWS (always state-level) when
-// QCEW actually has a value, instead of Math.max(qcew, oews) — taking
-// whichever number happens to be numerically larger has nothing to do with
-// which source is more locally accurate, and could silently let a
-// less-granular statewide figure override a real county one just because it
-// happened to be bigger.
-export function preferredWage(qcewWage: number, oewsWage: number): number {
-  return qcewWage > 0 ? qcewWage : oewsWage;
-}
-
 export function receiptsTierFor(receipts: number): number {
   return receipts > 100000
     ? 30
@@ -1433,6 +1453,7 @@ function buildCategories(
   );
   const beaGrowth = input.bea?.values.personalIncomeGrowth ?? 0;
   const planCompleteness = input.planFields.values.planCompleteness ?? 0;
+  const priceSignals = input.planFields.values.priceSignals ?? 0;
 
   // ── Demand: how big and how well-funded is the potential customer base ──
   // Population's 40-point contribution is now three sub-signals combined by
@@ -1673,7 +1694,7 @@ function buildCategories(
   const revenueIncomeTier = revenueIncome.score;
   const wageTier =
     wages > 0 && wages < 1200 ? 20 : wages > 0 && wages < 1800 ? 14 : 8;
-  const planTier = planCompleteness >= 3 ? 15 : planCompleteness >= 1 ? 8 : 0;
+  const planTier = planTierFor(planCompleteness, priceSignals);
   const revenueScore = clamp(
     receiptsTier + payrollTier + revenueIncomeTier + wageTier + planTier,
     0,
@@ -1710,7 +1731,10 @@ function buildCategories(
       weight: wageTier,
     },
     {
-      text: `${planCompleteness}/3 of your own pricing/validation plan fields are filled in, which sharpens this score without another AI call.`,
+      text:
+        priceSignals > 0
+          ? `${planCompleteness}/3 of your own pricing/validation plan fields are filled in, including ${priceSignals} concrete number${priceSignals === 1 ? "" : "s"} in your pricing notes, which sharpens this score without another AI call.`
+          : `${planCompleteness}/3 of your own pricing/validation plan fields are filled in, which sharpens this score without another AI call. Adding actual numbers to your pricing notes (e.g. "$15 per haircut") would sharpen it further.`,
       weight: planTier,
     },
   ]);
