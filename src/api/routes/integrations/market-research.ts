@@ -481,6 +481,18 @@ router.post("/analyze", async (c) => {
     // count can blend in directly rather than relying only on the
     // regex-based licensed-trade heuristic.
     requirementCount: compliance.requirementCount,
+    // Real Compliance-OS bond/insurance requirement count (undefined when
+    // Compliance-OS wasn't configured — see ComplianceSignal and
+    // fetchComplianceSignals), blended into capitalPoints as a live
+    // capital-need signal alongside the NAICS-sector base.
+    bondOrInsuranceCount: compliance.bondOrInsuranceCount,
+    // Real Compliance-OS license/registration requirement count, the same
+    // live-data pattern as bondOrInsuranceCount above but blended into
+    // barrierPoints instead — a matched LICENSE/REGISTRATION requirement
+    // directly answers "will buyers expect credentials/a license before
+    // trusting a new provider" better than the LICENSED_TRADE_PATTERN
+    // keyword guess alone (see barrierPointsFor).
+    licenseOrRegistrationCount: compliance.licenseOrRegistrationCount,
   });
 
   const outlook = scoreOutlook({
@@ -570,20 +582,325 @@ export { router as marketResearchRouter };
 // signal for that category (e.g. population dominates demand; competitor
 // density dominates competition) rather than splitting evenly.
 // NAICS 2-digit sectors that typically require real up-front capital
-// (equipment, materials, a storefront, or a kitchen) versus sectors that
-// can typically start with a laptop and a license. This is a coarse proxy —
-// there's no live "startup cost" dataset — so it's disclosed as such in the
-// rationale text rather than presented as a precise dollar estimate.
-const CAPITAL_INTENSIVE_NAICS = new Set(["23", "31-33", "72", "44"]);
-const LOW_CAPITAL_NAICS = new Set(["54", "61", "52"]);
+// (equipment, materials, a storefront, a kitchen, vehicles, or specialized
+// facilities) versus sectors that can typically start with a laptop and a
+// license. This is a coarse proxy — there's no live "startup cost"
+// dataset — so it's disclosed as such in the rationale text rather than
+// presented as a precise dollar estimate.
+//
+// Coverage is deliberately limited to the NAICS 2-digit codes
+// inferNaicsCodes() below can actually produce (72, 44, 23, 62, 54, 48, 53,
+// 61, 52, 31-33 — verified by reading its keyword table). Sectors that
+// inferNaicsCodes has no keyword path to (e.g. 21 mining, 22 utilities, 71
+// arts/entertainment, 81 other services, 56 admin/support, 55 management of
+// companies) are intentionally NOT listed here even though they have clear
+// real-world capital profiles — an entry this system can never look up
+// would just be dead code.
+const NAICS_CAPITAL_HIGH = new Set([
+  "23", // Construction — equipment, vehicles, and often a surety bond
+  // before the first contract (see the BOND/INSURANCE compliance modifier
+  // below for the live version of that same signal).
+  "31-33", // Manufacturing — machinery, raw materials, production space.
+  "72", // Accommodation & Food Service — kitchen build-out/equipment, a
+  // leased/built-out physical space, and up-front inventory.
+  "44", // Retail Trade — storefront lease plus up-front inventory
+  // purchase. Coarse (a car dealership and a handmade-goods stand both
+  // land here), but inferNaicsCodes never resolves retail below 2-digit
+  // granularity, so there's no finer code available to split this into.
+  "48", // Transportation & Warehousing — vehicles and/or warehouse space
+  // are close to unavoidable up-front costs for this sector.
+]);
+const NAICS_CAPITAL_MODERATE_HIGH = new Set([
+  "62", // Health Care & Social Assistance — exam rooms, clinical/medical
+  // equipment, and facility build-out are common, though a solo
+  // consulting-style practice can be lighter than a full clinic — hence
+  // "moderate-high" rather than the full HIGH tier above.
+]);
+// 54 (Professional/Technical Services), 61 (Educational Services), and 52
+// (Finance & Insurance) are typically knowledge/credential businesses that
+// can start from an office or home with a laptop and a license — no
+// inventory or heavy equipment required.
+const NAICS_CAPITAL_LOW = new Set(["54", "61", "52"]);
+// 53 (Real Estate & Rental/Leasing) deliberately has no dedicated tier — it
+// spans everything from a licensed agent (low capital) to a business that
+// buys and holds property to lease out (high capital), and inferNaicsCodes
+// can't distinguish which side of that split a given idea lands on, so it
+// falls through to the generic MODERATE default below rather than guessing.
+
+// capitalPoints' 25-point budget is split into a NAICS-sector base (up to
+// 20, this table) plus a bond/insurance modifier (-5 to +5, see
+// capitalModifierFor below) that blends in a real Compliance-OS signal.
+// These four base tiers are the old CAPITAL_INTENSIVE_NAICS (5/25) / default
+// (15/25) / LOW_CAPITAL_NAICS (25/25) tiers scaled proportionally down to a
+// 20-point max (5/25→4/20, 15/25→12/20, 25/25→20/20), plus one new
+// intermediate tier for the newly-added MODERATE_HIGH sector.
+const NAICS_CAPITAL_BASE_HIGH = 4;
+const NAICS_CAPITAL_BASE_MODERATE_HIGH = 8;
+const NAICS_CAPITAL_BASE_MODERATE = 12; // default for any unlisted code.
+const NAICS_CAPITAL_BASE_LOW = 20;
+
+// Priority order matters for compound (two-code) business ideas: the more
+// capital-intensive of the matched codes wins, the same conservative
+// "assume the harder case" choice the old flat lookup made by checking
+// CAPITAL_INTENSIVE_NAICS before LOW_CAPITAL_NAICS.
+function naicsCapitalBaseFor(naicsCodes: string[]): number {
+  if (naicsCodes.some((code) => NAICS_CAPITAL_HIGH.has(code)))
+    return NAICS_CAPITAL_BASE_HIGH;
+  if (naicsCodes.some((code) => NAICS_CAPITAL_MODERATE_HIGH.has(code)))
+    return NAICS_CAPITAL_BASE_MODERATE_HIGH;
+  if (naicsCodes.some((code) => NAICS_CAPITAL_LOW.has(code)))
+    return NAICS_CAPITAL_BASE_LOW;
+  return NAICS_CAPITAL_BASE_MODERATE;
+}
+
+// Compliance-OS's BOND and INSURANCE requirement categories (see
+// REQUIREMENT_CATEGORY_LABELS/ComplianceSignal further below) are a genuine,
+// live capital-need signal the NAICS-sector base above can't see on its
+// own: a required surety bond or insurance minimum is real money a business
+// has to put up or commit to before it can legally operate, independent of
+// which broad sector it's classified into. This is the only sub-signal in
+// scoreStartupDifficulty backed by a real matched external dataset rather
+// than a text/NAICS heuristic (same distinction licensingComplexityPoints
+// already draws from the rest of Startup Difficulty).
+//
+// A count of 0 is treated as a positive signal (evidence capital needs are
+// genuinely lighter than the NAICS base alone suggests), not just "no
+// penalty" — it's a real, confirmed absence, not missing data (see the
+// `undefined` branch below for the actual missing-data case). One or two
+// such requirements is common baseline friction across many categories and
+// isn't itself a strong signal, so it stays neutral; three or more is
+// treated as meaningful, real capital lock-up (stacked bond premiums and/or
+// insurance minimums).
+const CAPITAL_MODIFIER_NONE = 5;
+const CAPITAL_MODIFIER_NEUTRAL = 0;
+const CAPITAL_MODIFIER_HEAVY = -5;
+
+function capitalModifierFor(
+  bondOrInsuranceCount: number | undefined,
+): number {
+  // Missing data (Compliance-OS not configured, or the local fallback path
+  // with no real per-category breakdown — see fetchComplianceSignals) gets
+  // the same neutral mid-point treatment this file uses everywhere else for
+  // an unavailable optional signal, rather than either bonus or penalty.
+  if (bondOrInsuranceCount === undefined) return CAPITAL_MODIFIER_NEUTRAL;
+  if (bondOrInsuranceCount === 0) return CAPITAL_MODIFIER_NONE;
+  if (bondOrInsuranceCount <= 2) return CAPITAL_MODIFIER_NEUTRAL;
+  return CAPITAL_MODIFIER_HEAVY;
+}
+
+// Combines the NAICS base and the bond/insurance modifier into the final
+// 0-25 capitalPoints, clamped so the category's max-achievable total is
+// unchanged at exactly 25 — now only reachable with both a low-capital
+// NAICS code AND a confirmed (not missing) zero bond/insurance requirement
+// count, instead of a low-capital NAICS code alone.
+export function capitalPointsFor(
+  naicsCodes: string[],
+  bondOrInsuranceCount: number | undefined,
+): number {
+  return clamp(
+    naicsCapitalBaseFor(naicsCodes) +
+      capitalModifierFor(bondOrInsuranceCount),
+    0,
+    25,
+  );
+}
+
+// productPoints reuses the same underlying NAICS-sector membership research
+// as the capital tables above (which 2-digit codes inferNaicsCodes() can
+// actually produce, and which of those carry real physical resource
+// requirements) but regroups it along a different axis: how much genuine
+// design/production/build-out complexity the business itself involves to
+// stand up, rather than how much money it needs up front. The two axes
+// correlate for some sectors (construction and manufacturing top both) but
+// diverge for others — see the per-tier reasoning below — so this is a
+// distinct grouping, not a copy of capital's tiers or a simple inversion of
+// its point values.
+const NAICS_BUILD_HIGH = new Set([
+  "23", // Construction — the business *is* building physical structures:
+  // design/spec work, permitting-driven sequencing, and coordinating
+  // skilled trades before a single job is delivered.
+  "31-33", // Manufacturing — a product has to be engineered and a
+  // repeatable production process stood up before the first unit ships.
+  "48", // Transportation & Warehousing — routing/logistics systems and a
+  // vehicle/warehouse fleet that has to be built out and kept running;
+  // real operational infrastructure, not just capital outlay.
+]);
+const NAICS_BUILD_MODERATE_HIGH = new Set([
+  "72", // Accommodation & Food Service — a commercial kitchen has to be
+  // built out to code, plus a menu/recipe system and a perishable-
+  // inventory pipeline. Real build complexity even though, on the capital
+  // axis, the leasehold/equipment spend is what dominates.
+  "62", // Health Care & Social Assistance — clinical space and equipment
+  // typically need to be set up (and often inspected/accredited) before
+  // the first patient, though a solo consulting-style practice can be
+  // lighter than a full clinic — hence "moderate-high" rather than HIGH.
+]);
+const NAICS_BUILD_MODERATE = new Set([
+  "44", // Retail Trade — fixtures, a POS/inventory system, and a
+  // merchandising layout to stand up, but no production process or
+  // structural build of its own — closer to assembling a system than
+  // engineering one, so lighter than the tiers above.
+]);
+// 54 (Professional/Technical Services), 61 (Educational Services), and 52
+// (Finance & Insurance) are typically knowledge work: the "product" is the
+// practitioner's own labor/expertise, deliverable from a laptop with
+// nothing physical to design, manufacture, or build out.
+const NAICS_BUILD_LOW = new Set(["54", "61", "52"]);
+// 53 (Real Estate & Rental/Leasing) deliberately has no dedicated tier here
+// for the same reason naicsCapitalBaseFor's comment gives it none on the
+// capital axis: it spans a licensed agent (near-zero build complexity) to a
+// business that renovates and holds property to lease out (real build-out
+// work), and inferNaicsCodes can't tell which side of that split a given
+// idea lands on — so it falls through to the generic MODERATE default
+// below rather than guessing.
+
+// productPoints' full 0-20 budget, split into four tiers instead of the old
+// binary physical-product/service check. Ordered so "harder to build" maps
+// to fewer points, same convention capitalPoints and barrierPoints use.
+const PRODUCT_POINTS_HIGH = 6;
+const PRODUCT_POINTS_MODERATE_HIGH = 10;
+const PRODUCT_POINTS_MODERATE = 14; // default for any unlisted/ambiguous code.
+const PRODUCT_POINTS_LOW = 20;
+
+// Same worst-case-wins priority order naicsCapitalBaseFor uses for compound
+// (two-code) business ideas: the more build-complex of the matched codes
+// determines the score, not an average or the first match.
+//
+// NOTE: if a shared NAICS-classification table for this file consolidates
+// capital/product/barrier onto one lookup later, this can move onto it —
+// today it's kept as its own tiering because the tier *boundaries* (which
+// codes count as "high" vs "moderate-high" etc.) genuinely differ from
+// capital's, not just the point values assigned to them.
+export function productPointsFor(naicsCodes: string[]): number {
+  if (naicsCodes.some((code) => NAICS_BUILD_HIGH.has(code)))
+    return PRODUCT_POINTS_HIGH;
+  if (naicsCodes.some((code) => NAICS_BUILD_MODERATE_HIGH.has(code)))
+    return PRODUCT_POINTS_MODERATE_HIGH;
+  if (naicsCodes.some((code) => NAICS_BUILD_MODERATE.has(code)))
+    return PRODUCT_POINTS_MODERATE;
+  if (naicsCodes.some((code) => NAICS_BUILD_LOW.has(code)))
+    return PRODUCT_POINTS_LOW;
+  return PRODUCT_POINTS_MODERATE;
+}
 
 // Trades and professions that generally require a license, certification,
 // or a multi-year apprenticeship/degree before someone can legally or
-// credibly operate — used as a proxy for both "barrier to winning early
-// contracts" (clients often want a license or track record) and "industry
-// knowledge required" (the skill itself takes real time to learn).
+// credibly operate. Still the only signal knowledgePoints has, and it
+// remains barrierPoints' fallback credential signal for when real
+// Compliance-OS LICENSE/REGISTRATION data isn't available (see
+// barrierPointsFor/credentialSignalFor below) — but it's no longer
+// barrierPoints' primary signal: a real matched Compliance-OS requirement
+// answers "will buyers expect a license or credentials" directly, instead
+// of guessing it from keywords in the idea text.
 const LICENSED_TRADE_PATTERN =
   /medical|health|law\b|legal|accounting|architect|engineer|contractor|child ?care|real estate|electrician|plumb|hvac/i;
+
+// barrierPoints' 15-point budget is split into three genuine factors
+// instead of a flat 15-point ceiling with two independent on/off
+// deductions: a credential/license signal (max 6), a customer-type signal
+// (max 5), and a compliance-breadth signal (max 4) — 6 + 5 + 4 = 15. Under
+// the old model, ANY business that was neither a licensed trade nor B2B
+// scored an identical flat 15 regardless of anything else about it; here, a
+// genuinely-easy case (no license needed, B2C, a light overall compliance
+// load) still reaches the full 15, but a merely "not penalized" case with,
+// say, a heavier compliance load lands meaningfully lower instead of also
+// capping out at 15.
+
+// Credential signal: primarily driven by Compliance-OS's real matched
+// LICENSE/REGISTRATION requirement count (see
+// ComplianceSignal.licenseOrRegistrationCount) when available — a matched
+// requirement is real evidence buyers/regulators expect credentials, not a
+// guess. Falls back to the LICENSED_TRADE_PATTERN keyword guess (binary,
+// same two-value shape the old flat deduction used) only when that real
+// data is unavailable — the same "real data first, heuristic fallback"
+// pattern capitalModifierFor already uses for bond/insurance.
+const CREDENTIAL_SIGNAL_MAX = 6; // no matched requirement, or regex says not a licensed trade.
+const CREDENTIAL_SIGNAL_MODERATE = 3; // exactly one matched LICENSE/REGISTRATION requirement.
+const CREDENTIAL_SIGNAL_LOW = 1; // two+ matched requirements, or regex says licensed trade.
+
+function credentialSignalFor(
+  isLicensedTrade: boolean,
+  licenseOrRegistrationCount: number | undefined,
+): number {
+  if (licenseOrRegistrationCount === undefined)
+    return isLicensedTrade ? CREDENTIAL_SIGNAL_LOW : CREDENTIAL_SIGNAL_MAX;
+  if (licenseOrRegistrationCount === 0) return CREDENTIAL_SIGNAL_MAX;
+  if (licenseOrRegistrationCount === 1) return CREDENTIAL_SIGNAL_MODERATE;
+  return CREDENTIAL_SIGNAL_LOW;
+}
+
+// Customer-type signal: B2C buyers typically don't need to see a track
+// record to make a first purchase (full 5 points); B2B buyers generally do.
+// The old flat model gave every B2B business an identical deduction whether
+// it was also a licensed trade or not — a simple B2B lawn-care contract and
+// a complex enterprise software sale scored identically. Here, B2B's
+// baseline penalty on its own is smaller (5 -> 3) and only compounds
+// further (3 -> 1) when the credential signal above also indicates a real
+// licensing/credentialing expectation: B2B *and* licensed is a stronger
+// "buyers want a track record" signal than either alone, not two
+// independent, unconditional deductions stacked regardless of each other.
+const CUSTOMER_TYPE_B2C = 5;
+const CUSTOMER_TYPE_B2B_BASE = 3;
+const B2B_CREDENTIAL_COMPOUND_PENALTY = 2;
+
+function customerTypeSignalFor(
+  isB2B: boolean,
+  credentialed: boolean,
+): number {
+  if (!isB2B) return CUSTOMER_TYPE_B2C;
+  return credentialed
+    ? CUSTOMER_TYPE_B2B_BASE - B2B_CREDENTIAL_COMPOUND_PENALTY
+    : CUSTOMER_TYPE_B2B_BASE;
+}
+
+// Compliance-breadth signal: a lighter overall known-requirement count —
+// regardless of category — plausibly makes it faster to get in front of a
+// first customer at all, since there are simply fewer hoops to clear before
+// the business can legally operate and start selling. Deliberately reuses
+// the same real requirementCount already available on ComplianceSignal (see
+// fetchComplianceSignals) rather than inventing a new data source. This
+// looks at that same total from a different angle than
+// licensingComplexityPoints does elsewhere in scoreStartupDifficulty (this
+// is about the pre-first-sale barrier; licensingComplexityPoints is about
+// ongoing legal-operation overhead), so the two are complementary readings
+// of the same count rather than double-counting one question — and reuses
+// licensingComplexityPoints' own thresholds (<5 light, 5-10 moderate, >10
+// heavy) for consistency between the two buckets that read this field.
+const REQUIREMENT_BREADTH_MAX = 4; // requirementCount < 5.
+const REQUIREMENT_BREADTH_MODERATE = 1; // requirementCount 5-10.
+const REQUIREMENT_BREADTH_HEAVY = 0; // requirementCount > 10.
+const REQUIREMENT_BREADTH_NEUTRAL = 2; // missing data — midpoint of the range.
+
+function requirementBreadthSignalFor(
+  requirementCount: number | undefined,
+): number {
+  if (requirementCount === undefined) return REQUIREMENT_BREADTH_NEUTRAL;
+  if (requirementCount > 10) return REQUIREMENT_BREADTH_HEAVY;
+  if (requirementCount >= 5) return REQUIREMENT_BREADTH_MODERATE;
+  return REQUIREMENT_BREADTH_MAX;
+}
+
+// Combines the three factors above into barrierPoints' final 0-15 score,
+// clamped so the max-achievable value is unchanged at exactly 15 — now only
+// reachable with all three factors at their best (no real or guessed
+// licensing signal, a B2C customer type, and a light overall compliance
+// load) rather than simply "not a licensed trade and not B2B" the way the
+// old flat model worked.
+export function barrierPointsFor(input: {
+  isLicensedTrade: boolean;
+  isB2B: boolean;
+  licenseOrRegistrationCount: number | undefined;
+  requirementCount: number | undefined;
+}): number {
+  const credentialSignal = credentialSignalFor(
+    input.isLicensedTrade,
+    input.licenseOrRegistrationCount,
+  );
+  const credentialed = credentialSignal < CREDENTIAL_SIGNAL_MAX;
+  const customerTypeSignal = customerTypeSignalFor(input.isB2B, credentialed);
+  const breadthSignal = requirementBreadthSignalFor(input.requirementCount);
+  return clamp(credentialSignal + customerTypeSignal + breadthSignal, 0, 15);
+}
 
 // Startup difficulty is deliberately built from signals that are distinct
 // from regulatoryFriction (which is purely the Compliance-OS
@@ -605,38 +922,59 @@ export function scoreStartupDifficulty(input: {
   // isolation) still compile and get a neutral mid-point contribution rather
   // than a crash or a silently-zeroed bucket.
   requirementCount?: number;
+  // Count of Compliance-OS requirements specifically in the BOND or
+  // INSURANCE categories (see ComplianceSignal.bondOrInsuranceCount) — the
+  // live capital-need signal blended into capitalPoints (see
+  // capitalModifierFor). Optional for the same reason requirementCount is:
+  // existing callers/tests without this data get a neutral modifier rather
+  // than a crash or an assumed bonus.
+  bondOrInsuranceCount?: number;
+  // Count of Compliance-OS requirements specifically in the LICENSE or
+  // REGISTRATION categories (see ComplianceSignal.licenseOrRegistrationCount)
+  // — the live credential signal blended into barrierPoints (see
+  // barrierPointsFor/credentialSignalFor). Optional for the same reason
+  // bondOrInsuranceCount is: existing callers/tests without this data fall
+  // back to the LICENSED_TRADE_PATTERN keyword guess instead of crashing or
+  // assuming a bonus.
+  licenseOrRegistrationCount?: number;
 }): { score: number; rationale: string; reasons: string[] } {
   const text = `${input.industry} ${input.businessIdea}`;
   const isLicensedTrade = LICENSED_TRADE_PATTERN.test(text);
   const isB2B = input.customerType.trim().toUpperCase() === "B2B";
-  const isPhysicalProduct = input.naicsCodes.some(
-    (code) => code === "23" || code === "31-33",
-  );
   const hasLaborData = input.unemploymentRate !== undefined;
   const unemploymentRate = input.unemploymentRate ?? 0;
   const hasRequirementData = input.requirementCount !== undefined;
   const requirementCount = input.requirementCount ?? 0;
+  const hasBondInsuranceData = input.bondOrInsuranceCount !== undefined;
+  const bondOrInsuranceCount = input.bondOrInsuranceCount ?? 0;
+  const hasLicenseRegData = input.licenseOrRegistrationCount !== undefined;
+  const licenseOrRegistrationCount = input.licenseOrRegistrationCount ?? 0;
 
-  const capitalPoints = input.naicsCodes.some((code) =>
-    CAPITAL_INTENSIVE_NAICS.has(code),
-  )
-    ? 5
-    : input.naicsCodes.some((code) => LOW_CAPITAL_NAICS.has(code))
-      ? 25
-      : 15;
+  const capitalPoints = capitalPointsFor(
+    input.naicsCodes,
+    input.bondOrInsuranceCount,
+  );
 
-  // Barrier's max dropped from 25 to 15 (scaled proportionally, same ratio
-  // applied to its two deductions) to make room for licensingComplexityPoints
-  // below without changing the max-achievable total. This bucket stays a
-  // regex-based proxy for "will buyers expect a track record before their
-  // first contract" — a different question from licensingComplexityPoints,
-  // which is about real matched licensing/permit/registration requirements.
-  let barrierPoints = 15;
-  if (isLicensedTrade) barrierPoints -= 6;
-  if (isB2B) barrierPoints -= 5;
-  barrierPoints = clamp(barrierPoints, 0, 15);
+  // See barrierPointsFor and its credentialSignalFor/customerTypeSignalFor/
+  // requirementBreadthSignalFor helpers above for the full three-factor
+  // breakdown this collapses to a single 0-15 value.
+  const barrierPoints = barrierPointsFor({
+    isLicensedTrade,
+    isB2B,
+    licenseOrRegistrationCount: input.licenseOrRegistrationCount,
+    requirementCount: input.requirementCount,
+  });
+  // Recomputed here (not just inside barrierPointsFor) purely so the
+  // rationale/reasons text below can describe which credential source
+  // (real Compliance-OS data vs. the regex fallback) actually drove the
+  // score, and whether the B2B compounding penalty applied.
+  const credentialSignal = credentialSignalFor(
+    isLicensedTrade,
+    input.licenseOrRegistrationCount,
+  );
+  const credentialed = credentialSignal < CREDENTIAL_SIGNAL_MAX;
 
-  const productPoints = isPhysicalProduct ? 8 : 20;
+  const productPoints = productPointsFor(input.naicsCodes);
 
   const laborPoints = !hasLaborData
     ? 10
@@ -678,19 +1016,56 @@ export function scoreStartupDifficulty(input: {
     100,
   );
 
+  // Thresholds widened from the old flat 5/25 tier boundaries (<=5 high,
+  // >=25 low) to account for the bond/insurance modifier now shifting
+  // capitalPoints across a wider range of intermediate values (e.g. a
+  // low-capital NAICS base of 20 with several stacked bond/insurance
+  // requirements lands at 15 — genuinely "moderate", not "low" — while a
+  // high-capital NAICS base of 4 with zero such requirements lands at 9,
+  // arguably no longer squarely "high"). See capitalPointsFor's comment for
+  // the full base+modifier breakdown.
   const capitalNote =
-    capitalPoints <= 5 ? "high" : capitalPoints >= 25 ? "low" : "moderate";
-  const barrierNote =
-    isLicensedTrade && isB2B
-      ? "high — a licensed trade selling to businesses, which usually means clients expect a license and a track record before signing"
-      : isLicensedTrade
-        ? "elevated — this looks like a licensed/credentialed trade"
-        : isB2B
-          ? "elevated — B2B buyers often want references or a track record before their first contract"
-          : "low — consumer buyers typically don't require a track record to make a first purchase";
-  const productNote = isPhysicalProduct
-    ? "building a physical/manufactured product adds real design and production complexity"
-    : "a service or digital offering keeps build complexity relatively low";
+    capitalPoints <= 8 ? "high" : capitalPoints >= 18 ? "low" : "moderate";
+  const capitalBondNote = !hasBondInsuranceData
+    ? ""
+    : bondOrInsuranceCount === 0
+      ? " Compliance-OS found no bond or insurance requirements for this category, a real positive signal for up-front capital needs."
+      : ` Compliance-OS found ${bondOrInsuranceCount} bond/insurance requirement${bondOrInsuranceCount === 1 ? "" : "s"} for this category, a real signal of up-front capital needs.`;
+  // Composed from the same three factors barrierPointsFor scores on, so the
+  // explanation always names whichever combination actually drove the
+  // number rather than picking from a fixed set of canned phrases.
+  const credentialClause = hasLicenseRegData
+    ? licenseOrRegistrationCount === 0
+      ? "low — Compliance-OS found no license or registration requirements for this category, a real signal buyers won't expect formal credentials"
+      : `elevated — Compliance-OS found ${licenseOrRegistrationCount} license/registration requirement${licenseOrRegistrationCount === 1 ? "" : "s"} for this category, a real signal buyers will expect credentials or a license before trusting a new provider`
+    : isLicensedTrade
+      ? "elevated — this looks like a licensed/credentialed trade based on the business description"
+      : "low — this doesn't look like a licensed/credentialed trade based on the business description";
+  const customerTypeClause = !isB2B
+    ? ""
+    : credentialed
+      ? "; B2B buyers of a licensed/credentialed category compound that further, expecting both references and proof of credentials before signing"
+      : "; B2B buyers still often want references or a track record before their first contract";
+  const breadthClause = !hasRequirementData
+    ? ""
+    : requirementCount < 5
+      ? ` (a light overall compliance load — ${requirementCount} known requirement${requirementCount === 1 ? "" : "s"} — which also tends to make it faster to get in front of a first customer)`
+      : requirementCount > 10
+        ? ` (a heavy overall compliance load — ${requirementCount} known requirements — which can itself slow down winning a first customer)`
+        : "";
+  const barrierNote = `${credentialClause}${customerTypeClause}${breadthClause}`;
+  // productPoints is now one of four tiers (see productPointsFor) rather
+  // than a binary physical/service split, so the note is threshold-based
+  // the same way capitalNote is, and names the actual sectors that drove
+  // each tier rather than a generic "physical product" label.
+  const productNote =
+    productPoints <= PRODUCT_POINTS_HIGH
+      ? "this involves real physical infrastructure or production complexity — construction, manufacturing, and transportation/logistics all require standing up a repeatable physical process before the business can operate"
+      : productPoints <= PRODUCT_POINTS_MODERATE_HIGH
+        ? "this involves a genuine physical build-out — a commercial kitchen or clinical space and its equipment — even if it's smaller in scale than construction or manufacturing"
+        : productPoints <= PRODUCT_POINTS_MODERATE
+          ? "this needs a physical setup — fixtures, inventory, a POS/systems build-out — but not a production process or structural build of its own"
+          : "the offering itself is a service or expertise with no physical product to design, manufacture, or build out";
   const laborNote = !hasLaborData
     ? "local labor-market data was unavailable for this run"
     : `the state unemployment rate is ${unemploymentRate.toFixed(1)}%, ${unemploymentRate > 5 ? "suggesting workers are relatively available" : "suggesting a tighter labor market that can make hiring slower or costlier"}`;
@@ -706,14 +1081,16 @@ export function scoreStartupDifficulty(input: {
         : `Compliance-OS found ${requirementCount} known requirements for this category and state, a relatively light licensing/permitting load`;
 
   const rationale =
-    `${verdictWord(score)} to start (${score}/100). Capital, contract-barrier, product, labor, ` +
-    `and knowledge signals come from Desk's classification of this business idea rather than a ` +
-    `single external dataset — treat those as directional; the licensing-complexity signal, by ` +
-    `contrast, reflects a real matched Compliance-OS requirement count.`;
+    `${verdictWord(score)} to start (${score}/100). Product, labor, and knowledge signals ` +
+    `come from Desk's classification of this business idea rather than a single external ` +
+    `dataset — treat those as directional; capital and contract-barrier both blend that same ` +
+    `classification with real matched Compliance-OS signals where available (bond/insurance ` +
+    `for capital, license/registration for barrier), and the licensing-complexity signal ` +
+    `reflects a real matched Compliance-OS requirement count.`;
 
   const reasons = rankedReasons([
     {
-      text: `Estimated startup capital needs are ${capitalNote}.`,
+      text: `Estimated startup capital needs are ${capitalNote}.${capitalBondNote}`,
       weight: capitalPoints,
     },
     {
@@ -1873,6 +2250,23 @@ type ComplianceSignal = {
   frictionScore: number;
   reasons: string[];
   evidence: EvidenceItem[];
+  // Count of requirements in Compliance-OS's BOND or INSURANCE categories
+  // (see REQUIREMENT_CATEGORY_LABELS) — a live capital-need signal blended
+  // into Startup Difficulty's capitalPoints (see capitalModifierFor).
+  // undefined (not 0) when Compliance-OS wasn't configured and the local
+  // keyword-based fallback was used instead, since that fallback has no
+  // real per-category breakdown to count — this lets scoreStartupDifficulty
+  // tell "confirmed zero" apart from "unknown" and fall back to a neutral
+  // modifier rather than the optimistic no-bond/insurance bonus.
+  bondOrInsuranceCount?: number;
+  // Count of requirements in Compliance-OS's LICENSE or REGISTRATION
+  // categories — the same live, real-data pattern as bondOrInsuranceCount
+  // above, but for Startup Difficulty's barrierPoints (see
+  // barrierPointsFor): a matched LICENSE/REGISTRATION requirement is a real
+  // "buyers will expect credentials" signal, not a keyword guess. Same
+  // undefined-means-unavailable convention as bondOrInsuranceCount, for the
+  // same reason (the local fallback path has no per-category breakdown).
+  licenseOrRegistrationCount?: number;
 };
 
 type ComplianceRequirementRow = {
@@ -3822,10 +4216,28 @@ async function fetchComplianceSignals(
         const frictionScore = computeRegulatoryFrictionScore(items);
         const categorySummary = summarizeRequirementCategories(items);
         const withRenewal = items.filter((i) => i.renewalFrequency).length;
+        // Real per-category breakdown is only available on this
+        // Compliance-OS-configured path (the fallback below has no
+        // category data at all) — see ComplianceSignal.bondOrInsuranceCount
+        // and capitalModifierFor for how this feeds Startup Difficulty's
+        // capitalPoints.
+        const bondOrInsuranceCount = items.filter(
+          (i) => i.category === "BOND" || i.category === "INSURANCE",
+        ).length;
+        // Same real-per-category-breakdown idea as bondOrInsuranceCount
+        // above, reusing the same already-fetched `items` rather than a
+        // second Compliance-OS request — see
+        // ComplianceSignal.licenseOrRegistrationCount and barrierPointsFor
+        // for how this feeds Startup Difficulty's barrierPoints.
+        const licenseOrRegistrationCount = items.filter(
+          (i) => i.category === "LICENSE" || i.category === "REGISTRATION",
+        ).length;
         return {
           requirementCount: items.length,
           frictionScore,
           reasons: rankRequirementReasons(items),
+          bondOrInsuranceCount,
+          licenseOrRegistrationCount,
           evidence: [
             item(
               "Compliance requirements found",
