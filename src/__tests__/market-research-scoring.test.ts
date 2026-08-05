@@ -7,6 +7,7 @@ import {
   barrierPointsFor,
   laborPointsFor,
   knowledgePointsFor,
+  licensingComplexityPointsFor,
 } from '../api/routes/integrations/market-research.js';
 
 describe('computeRegulatoryFrictionScore', () => {
@@ -124,6 +125,46 @@ describe('scoreStartupDifficulty', () => {
     });
     expect(lightlyRegulated.score).toBeGreaterThan(heavilyRegulated.score);
     expect(heavilyRegulated.reasons.join(' ')).toContain('15 known requirements');
+  });
+
+  it('blends in the real Compliance-OS LICENSE-category composition as a licensing-complexity signal distinct from the flat requirement count', () => {
+    // Same requirementCount (6) throughout, so barrierPoints' compliance-
+    // breadth signal (which only looks at the flat count) contributes
+    // identically in both cases — only licenseCount changes, so any score
+    // difference here is attributable to the composition-aware licensing-
+    // complexity signal, proving it reads something breadth doesn't.
+    const base = {
+      industry: 'Consulting',
+      businessIdea: 'general business consulting',
+      naicsCodes: ['54'],
+      customerType: 'B2C' as const,
+      unemploymentRate: 5,
+      requirementCount: 6,
+    };
+    const licenseHeavy = scoreStartupDifficulty({ ...base, licenseCount: 5 });
+    const registrationHeavy = scoreStartupDifficulty({ ...base, licenseCount: 0 });
+    expect(registrationHeavy.score).toBeGreaterThan(licenseHeavy.score);
+
+    const licensingReason = licenseHeavy.reasons.find((r) =>
+      r.toLowerCase().includes('licenses requiring credentials'),
+    );
+    expect(licensingReason?.toLowerCase()).toContain('5 of 6 known requirement');
+  });
+
+  it('falls back to the flat requirementCount tiers for licensing-complexity when licenseCount is unavailable, even though composition-level tests above show a different score is possible', () => {
+    const result = scoreStartupDifficulty({
+      industry: 'Consulting',
+      businessIdea: 'general business consulting',
+      naicsCodes: ['54'],
+      customerType: 'B2C',
+      unemploymentRate: 5,
+      requirementCount: 6,
+      licenseCount: undefined,
+    });
+    const licensingReason = result.reasons.find((r) =>
+      r.toLowerCase().includes('moderate licensing/permitting load'),
+    );
+    expect(licensingReason).toBeDefined();
   });
 
   it('reaches exactly 92 when every signal, including the new licensing-complexity bucket, is maxed for a labor-light, knowledge-intensive sector', () => {
@@ -635,6 +676,66 @@ describe('knowledgePointsFor', () => {
     expect(licensedSimpleTrade).toBeGreaterThan(worst);
     expect(unlicensedKnowledgeWork).toBeLessThan(best);
     expect(unlicensedKnowledgeWork).toBeGreaterThan(worst);
+  });
+});
+
+describe('licensingComplexityPointsFor', () => {
+  it('falls back to the original flat-count tiers when composition data (licenseCount) is unavailable', () => {
+    expect(
+      licensingComplexityPointsFor({ requirementCount: undefined, licenseCount: undefined }),
+    ).toBe(5);
+    expect(
+      licensingComplexityPointsFor({ requirementCount: 2, licenseCount: undefined }),
+    ).toBe(10);
+    expect(
+      licensingComplexityPointsFor({ requirementCount: 7, licenseCount: undefined }),
+    ).toBe(6);
+    expect(
+      licensingComplexityPointsFor({ requirementCount: 15, licenseCount: undefined }),
+    ).toBe(2);
+  });
+
+  it('scores a LICENSE-heavy composition as harder than a REGISTRATION/FILING-heavy composition of the exact same total requirementCount', () => {
+    // This is the core fix: barrierPoints' compliance-breadth signal already
+    // scores requirementCount=6 identically regardless of composition (see
+    // requirementBreadthSignalFor) — licensingComplexityPointsFor now has to
+    // actually differ here, or the double-counting problem isn't fixed.
+    const licenseHeavy = licensingComplexityPointsFor({
+      requirementCount: 6,
+      licenseCount: 5,
+    });
+    const registrationHeavy = licensingComplexityPointsFor({
+      requirementCount: 6,
+      licenseCount: 0,
+    });
+    expect(licenseHeavy).toBeLessThan(registrationHeavy);
+    expect(registrationHeavy).toBe(10);
+  });
+
+  it('scores a roughly-half LICENSE composition strictly between the all-LICENSE and no-LICENSE cases for the same total', () => {
+    const allLicense = licensingComplexityPointsFor({ requirementCount: 6, licenseCount: 6 });
+    const halfLicense = licensingComplexityPointsFor({ requirementCount: 6, licenseCount: 3 });
+    const noLicense = licensingComplexityPointsFor({ requirementCount: 6, licenseCount: 0 });
+    expect(allLicense).toBeLessThan(halfLicense);
+    expect(halfLicense).toBeLessThan(noLicense);
+  });
+
+  it('treats a confirmed zero requirementCount as the easiest case regardless of licenseCount', () => {
+    expect(
+      licensingComplexityPointsFor({ requirementCount: 0, licenseCount: 0 }),
+    ).toBe(10);
+  });
+
+  it('never exceeds the 0-10 range regardless of inputs', () => {
+    const requirementCounts = [0, 1, 2, 5, 6, 10, 11, 20, undefined];
+    const licenseCounts = [0, 1, 2, 5, 6, 10, 20, undefined];
+    for (const requirementCount of requirementCounts) {
+      for (const licenseCount of licenseCounts) {
+        const points = licensingComplexityPointsFor({ requirementCount, licenseCount });
+        expect(points).toBeGreaterThanOrEqual(0);
+        expect(points).toBeLessThanOrEqual(10);
+      }
+    }
   });
 });
 

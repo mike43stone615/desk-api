@@ -510,6 +510,70 @@ router.post("/analyze", async (c) => {
       )
     : null;
 
+  // Real national percentile-cache lookups for scoreOutlook's five trend
+  // signals and buildCategories' establishmentTrendTier (see trendPoints()
+  // and trendSourceClause()) — the same "resolve in the async route
+  // handler, pass pre-resolved decile buckets in as optional fields"
+  // pattern laborPercentileBucket/laborTrendBucket above already use for
+  // Labor. All five trend metrics here (bfs_trend, qcew_establishment_trend,
+  // bea_income_growth, population_trend, unemployment_trend) are populated
+  // by the reference-distribution batch job exclusively at "state"
+  // jurisdiction level (see reference-distribution-batch.ts's per-metric
+  // comment block) — unlike e.g. unemployment_rate, which varies by level —
+  // so every lookup below always uses "state", even for populationTrend,
+  // whose raw trendPercent itself may have resolved at place/county level
+  // (see fetchPopulationTrend's cascade).
+  const beaGrowthPercent = bea?.values.personalIncomeGrowth ?? null;
+  const bfsPercentileBucket = bfsTrend
+    ? await lookupPercentileRank(c.env.DB, "bfs_trend", "state", bfsTrend.trendPercent)
+    : null;
+  // Looked up once here and reused for both scoreOutlook's qcewPoints and
+  // buildCategories' establishmentTrendTier below — same metric
+  // (qcew_establishment_trend), same state-level jurisdiction, same input
+  // value (qcewTrend.trendPercent) — rather than resolving the same D1 row
+  // twice. See qcewPercentileBucket's doc comment on buildCategories' input
+  // type.
+  const qcewPercentileBucket = qcewTrend
+    ? await lookupPercentileRank(
+        c.env.DB,
+        "qcew_establishment_trend",
+        "state",
+        qcewTrend.trendPercent,
+      )
+    : null;
+  const beaPercentileBucket =
+    beaGrowthPercent !== null
+      ? await lookupPercentileRank(
+          c.env.DB,
+          "bea_income_growth",
+          "state",
+          beaGrowthPercent,
+        )
+      : null;
+  const popPercentileBucket = populationTrend
+    ? await lookupPercentileRank(
+        c.env.DB,
+        "population_trend",
+        "state",
+        populationTrend.trendPercent,
+      )
+    : null;
+  // Looked up directly against lausTrend.trendPercent (already
+  // "positive = improving," see fetchLausTrend's comment), NOT re-negated
+  // back to the cache's raw "positive = unemployment rose" storage
+  // convention the way laborTrendBucket above does — Outlook and Labor
+  // deliberately read the same unemployment_trend cache metric in opposite
+  // directions (rising unemployment is bad for outlook, but loosens the
+  // labor market, which is good for hiring), so only Labor's lookup negates.
+  const lausPercentileBucket = lausTrend
+    ? await lookupPercentileRank(
+        c.env.DB,
+        "unemployment_trend",
+        "state",
+        lausTrend.trendPercent,
+      )
+    : null;
+
   const startupDifficulty = scoreStartupDifficulty({
     industry,
     businessIdea,
@@ -533,6 +597,13 @@ router.post("/analyze", async (c) => {
     // trusting a new provider" better than the LICENSED_TRADE_PATTERN
     // keyword guess alone (see barrierPointsFor).
     licenseOrRegistrationCount: compliance.licenseOrRegistrationCount,
+    // Real Compliance-OS LICENSE-category-only requirement count (undefined
+    // when Compliance-OS wasn't configured — see ComplianceSignal and
+    // fetchComplianceSignals), the same live-data pattern as
+    // bondOrInsuranceCount/licenseOrRegistrationCount above but blended into
+    // licensingComplexityPoints instead — see licensingComplexityPointsFor
+    // for how the LICENSE share of the known requirements drives that score.
+    licenseCount: compliance.licenseCount,
     // National percentile-cache decile bucket for the local unemployment
     // rate, and its state-level trend counterpart — see laborPointsFor for
     // how these fold into the 0-20 labor budget, and the comments above for
@@ -548,9 +619,14 @@ router.post("/analyze", async (c) => {
   const outlook = scoreOutlook({
     bfsTrend,
     qcewTrend,
-    beaGrowthPercent: bea?.values.personalIncomeGrowth ?? null,
+    beaGrowthPercent,
     populationTrend,
     lausTrend,
+    bfsPercentileBucket,
+    qcewPercentileBucket,
+    beaPercentileBucket,
+    popPercentileBucket,
+    lausPercentileBucket,
   });
 
   const categories = buildCategories(
@@ -570,6 +646,7 @@ router.post("/analyze", async (c) => {
       planFields,
       beaRpp,
       qcewTrend,
+      qcewPercentileBucket,
       ageFocus,
       acsAgeBracket,
     },
@@ -1184,6 +1261,60 @@ export function knowledgePointsFor(input: {
   return clamp(credentialComponent + naicsComponent, 0, 10);
 }
 
+// licensingComplexityPoints' 0-10 budget used to just re-score
+// requirementCount on the same <5/5-10/>10 thresholds barrierPoints'
+// compliance-breadth signal already uses (see requirementBreadthSignalFor
+// above, and its comment — the two were deliberately kept in sync on the
+// same thresholds). That meant the exact same raw number was driving two
+// different sub-scores within the same Startup Difficulty category: real
+// double-counting, not two genuinely different signals. Breadth
+// ("how many hoops") stays a flat-count read on barrierPoints; this asks a
+// different question about the SAME items — "how hard is each hoop to
+// clear" — using the real Compliance-OS category composition instead.
+//
+// Not every requirement category is an equal lift. A LICENSE is gated by a
+// professional credential or exam — a state board, a licensing exam date,
+// sometimes an apprenticeship — and can block someone from legally
+// operating for months. A REGISTRATION or FILING is typically a same-day
+// online form; PERMIT/TAX/RENEWAL/EMPLOYMENT/ENVIRONMENTAL/FEDERAL/ZONING/
+// BOND/INSURANCE/OTHER requirements vary in cost and paperwork but, unlike
+// LICENSE, none of them gate someone out on a credential or exam. So this
+// scores the *share* of the known requirements that fall in the LICENSE
+// category specifically (see ComplianceSignal.licenseCount) — a set of N
+// requirements that's mostly LICENSE scores harder than a set of the same N
+// that's mostly REGISTRATION/FILING/other paperwork, even though
+// barrierPoints' breadth signal reads both as an identical "N total hoops."
+const LICENSE_SHARE_NONE = 10; // 0 LICENSE-category requirements (or 0 requirements at all).
+const LICENSE_SHARE_MINORITY = 7; // LICENSE is a minority of the set (up to 1/3).
+const LICENSE_SHARE_HALF = 4; // roughly half the set is LICENSE-gated (up to 2/3).
+const LICENSE_SHARE_MAJORITY = 1; // LICENSE dominates the set (more than 2/3).
+
+export function licensingComplexityPointsFor(input: {
+  requirementCount: number | undefined;
+  licenseCount: number | undefined;
+}): number {
+  // Composition data is only real when BOTH the total and the LICENSE-only
+  // count are known — see ComplianceSignal.licenseCount/requirementCount and
+  // fetchComplianceSignals, where licenseCount is only ever populated
+  // alongside a real requirementCount on the Compliance-OS-configured path.
+  // Anything else (Compliance-OS not configured, or a caller/test exercising
+  // this signal in isolation) falls back to the ORIGINAL flat-count tiers
+  // unchanged, so licensingComplexityPoints still degrades gracefully to a
+  // coherent score instead of a missing one.
+  if (input.requirementCount === undefined || input.licenseCount === undefined) {
+    if (input.requirementCount === undefined) return 5;
+    if (input.requirementCount > 10) return 2;
+    if (input.requirementCount >= 5) return 6;
+    return 10;
+  }
+  if (input.requirementCount === 0 || input.licenseCount === 0)
+    return LICENSE_SHARE_NONE;
+  const licenseShare = input.licenseCount / input.requirementCount;
+  if (licenseShare <= 1 / 3) return LICENSE_SHARE_MINORITY;
+  if (licenseShare <= 2 / 3) return LICENSE_SHARE_HALF;
+  return LICENSE_SHARE_MAJORITY;
+}
+
 // Startup difficulty is deliberately built from signals that are distinct
 // from regulatoryFriction (which is purely the Compliance-OS
 // license/permit/tax/filing burden). This is about how hard it is to
@@ -1219,6 +1350,17 @@ export function scoreStartupDifficulty(input: {
   // back to the LICENSED_TRADE_PATTERN keyword guess instead of crashing or
   // assuming a bonus.
   licenseOrRegistrationCount?: number;
+  // Count of Compliance-OS requirements specifically in the LICENSE
+  // category alone (see ComplianceSignal.licenseCount) — a strict subset of
+  // licenseOrRegistrationCount above. Blended into
+  // licensingComplexityPoints (see licensingComplexityPointsFor) as a
+  // composition/severity signal: what fraction of the known requirements
+  // are exam/credential-gated licenses, as opposed to lighter registration/
+  // filing-style paperwork. Optional for the same reason
+  // licenseOrRegistrationCount is: existing callers/tests without this data
+  // fall back to licensingComplexityPointsFor's original flat-count tiers
+  // instead of crashing or assuming a composition that was never observed.
+  licenseCount?: number;
   // Real national percentile-cache decile bucket (1-10, see
   // lookupPercentileRank/reference-distribution-cache.ts) for this request's
   // ACS unemployment rate against the "unemployment_rate" metric, at
@@ -1316,22 +1458,29 @@ export function scoreStartupDifficulty(input: {
     NAICS_BUILD_LOW.has(code),
   );
 
-  // New signal: real Compliance-OS requirement counts, independent of
-  // whether LICENSED_TRADE_PATTERN happened to match the idea text. More
-  // required licenses/permits/registrations is a real barrier to actually
-  // getting the business running, distinct from regulatoryFriction (which
+  // See licensingComplexityPointsFor above for the full breakdown: the real
+  // Compliance-OS LICENSE-category share of the known requirements when
+  // available (composition/severity — "how hard is each hoop"), falling
+  // back to the original flat requirementCount tiers when it isn't
+  // (Compliance-OS not configured). Distinct from regulatoryFriction (which
   // weighs each requirement's severity/renewal cadence for ongoing
-  // compliance drag rather than counting raw hoops-to-clear at launch).
-  // Missing data (compliance signal unavailable) gets a neutral ~50% of
-  // max, matching the same "don't penalize for a missing optional source"
-  // policy used for labor data above.
-  const licensingComplexityPoints = !hasRequirementData
-    ? 5
-    : requirementCount > 10
-      ? 2
-      : requirementCount >= 5
-        ? 6
-        : 10;
+  // compliance drag) and from barrierPoints' compliance-breadth signal
+  // (which reads the same requirementCount as a flat "how many hoops"
+  // count) — see licensingComplexityPointsFor's comment for why scoring the
+  // flat count here too, on top of breadth already doing so, would have
+  // been double-counting the same raw number under two labels.
+  const licensingComplexityPoints = licensingComplexityPointsFor({
+    requirementCount: input.requirementCount,
+    licenseCount: input.licenseCount,
+  });
+  // Recomputed here (not just inside licensingComplexityPointsFor) purely so
+  // licensingNote below can describe which read actually drove the score —
+  // real composition vs. the flat-count fallback — the same "recompute for
+  // the rationale text" approach used for credentialSignal/
+  // knowledgeIntensiveSector above.
+  const hasCompositionData =
+    hasRequirementData && input.licenseCount !== undefined;
+  const licenseCount = input.licenseCount ?? 0;
 
   const score = clamp(
     capitalPoints +
@@ -1457,13 +1606,30 @@ export function scoreStartupDifficulty(input: {
     ? "it also sits in a professional/technical, education, or finance sector where deep specialized expertise is typically the product itself, independent of any license requirement"
     : "it isn't in a sector Desk treats as inherently knowledge-intensive";
   const knowledgeNote = `${knowledgeCredentialClause}; ${knowledgeSectorClause}`;
-  const licensingNote = !hasRequirementData
-    ? "a real compliance-requirement count was unavailable for this run"
-    : requirementCount > 10
-      ? `Compliance-OS found ${requirementCount} known requirements for this category and state, a high number of hoops to clear before operating legally`
-      : requirementCount >= 5
-        ? `Compliance-OS found ${requirementCount} known requirements for this category and state, a moderate licensing/permitting load`
-        : `Compliance-OS found ${requirementCount} known requirements for this category and state, a relatively light licensing/permitting load`;
+  // Composition-driven note (real LICENSE-category share) when
+  // licensingComplexityPointsFor actually had that data to work with;
+  // otherwise the original flat-count phrasing, unchanged, so the fallback
+  // path still reads exactly as it did before this rework.
+  const licenseShare = requirementCount > 0 ? licenseCount / requirementCount : 0;
+  const licenseShareLabel =
+    licenseCount === 0
+      ? "none of them"
+      : licenseShare <= 1 / 3
+        ? "a minority of them"
+        : licenseShare <= 2 / 3
+          ? "roughly half of them"
+          : "most of them — a heavily credential-gated category";
+  const licensingNote = hasCompositionData
+    ? requirementCount === 0
+      ? "Compliance-OS found no known requirements for this category and state"
+      : `Compliance-OS found ${licenseCount} of ${requirementCount} known requirement${requirementCount === 1 ? "" : "s"} for this category and state are licenses requiring credentials or an exam (${licenseShareLabel}), rather than lighter registration/filing-style paperwork`
+    : !hasRequirementData
+      ? "a real compliance-requirement count was unavailable for this run"
+      : requirementCount > 10
+        ? `Compliance-OS found ${requirementCount} known requirements for this category and state, a high number of hoops to clear before operating legally`
+        : requirementCount >= 5
+          ? `Compliance-OS found ${requirementCount} known requirements for this category and state, a moderate licensing/permitting load`
+          : `Compliance-OS found ${requirementCount} known requirements for this category and state, a relatively light licensing/permitting load`;
 
   const rationale =
     `${verdictWord(score)} to start (${score}/100). Product, labor, and knowledge signals ` +
@@ -1471,7 +1637,8 @@ export function scoreStartupDifficulty(input: {
     `dataset — treat those as directional; capital and contract-barrier both blend that same ` +
     `classification with real matched Compliance-OS signals where available (bond/insurance ` +
     `for capital, license/registration for barrier), and the licensing-complexity signal ` +
-    `reflects a real matched Compliance-OS requirement count.`;
+    `reflects the real matched Compliance-OS LICENSE-category share of the known requirements ` +
+    `where available, or the requirement count alone otherwise.`;
 
   const reasons = rankedReasons([
     {
@@ -2113,6 +2280,15 @@ function buildCategories(
     // scoring can react to whether the category's establishment count is
     // growing or shrinking, not just its point-in-time level.
     qcewTrend: TrendResult | null;
+    // The same "qcew_establishment_trend"/state percentile-cache decile
+    // bucket (see reference-distribution-cache.ts's lookupPercentileRank)
+    // scoreOutlook's qcewPoints uses for qcewTrend above — same metric, same
+    // jurisdiction level, same input value, just a different maxPoints
+    // budget here (4, vs. Outlook's 25), so the route handler resolves this
+    // once and threads it into both call sites rather than looking it up
+    // twice. `undefined`/`null` falls back to trendPoints()'s hardcoded
+    // bands, same as everywhere else this bucket pattern is used.
+    qcewPercentileBucket?: number | null;
     // Age-relevant population heuristic (see ageFocusFor/
     // ageAdjustmentMultiplier/populationScoreFor) — ageFocus is derived once
     // from the business idea/industry text in the route handler; acsAgeBracket
@@ -2272,6 +2448,7 @@ function buildCategories(
   const establishmentTrendTier = trendPoints(
     input.qcewTrend?.trendPercent ?? null,
     4,
+    input.qcewPercentileBucket,
   );
   const growthTier = growthTierFor(beaGrowth);
   const demandScore = clamp(
@@ -2308,7 +2485,7 @@ function buildCategories(
     return "a very high density suggesting the category is already saturated with solo/freelance operators";
   };
   const establishmentTrendText = input.qcewTrend
-    ? `Employer establishment counts in this category ${input.qcewTrend.trendPercent >= 0 ? "grew" : "shrank"} ${Math.abs(input.qcewTrend.trendPercent).toFixed(1)}% from ${input.qcewTrend.oldestLabel} to ${input.qcewTrend.newestLabel}.`
+    ? `Employer establishment counts in this category ${input.qcewTrend.trendPercent >= 0 ? "grew" : "shrank"} ${Math.abs(input.qcewTrend.trendPercent).toFixed(1)}% from ${input.qcewTrend.oldestLabel} to ${input.qcewTrend.newestLabel} (${trendSourceClause(input.qcewPercentileBucket)}).`
     : "A multi-year establishment-count trend was unavailable for this category, so this contributed a neutral score.";
   const incomeLevelText = regionalPriceParity
     ? `Cost-of-living-adjusted median household income is ${money(income.realIncome)} (nominal ${money(nominalIncome)}, adjusted using a regional price parity index of ${regionalPriceParity.toFixed(1)}, where 100 is the national average).`
@@ -2652,6 +2829,20 @@ type ComplianceSignal = {
   // undefined-means-unavailable convention as bondOrInsuranceCount, for the
   // same reason (the local fallback path has no per-category breakdown).
   licenseOrRegistrationCount?: number;
+  // Count of requirements specifically in Compliance-OS's LICENSE category
+  // (a strict subset of licenseOrRegistrationCount above, which also
+  // includes REGISTRATION) — the composition signal blended into Startup
+  // Difficulty's licensingComplexityPoints (see
+  // licensingComplexityPointsFor below). Distinct from
+  // licenseOrRegistrationCount: that field answers "will buyers expect a
+  // license or registration at all" for barrierPoints/knowledgePoints; this
+  // one isolates the LICENSE category alone so licensingComplexityPoints can
+  // ask "of the known requirements, how many are exam/credential-gated
+  // licenses versus lighter registration/filing-style paperwork" instead.
+  // Same undefined-means-unavailable convention as bondOrInsuranceCount/
+  // licenseOrRegistrationCount, for the same reason (the local fallback path
+  // has no per-category breakdown).
+  licenseCount?: number;
 };
 
 type ComplianceRequirementRow = {
@@ -3833,14 +4024,43 @@ function lausUnavailableItem(state: string): EvidenceItem {
   );
 }
 
+// Describes whether a given trend signal's points came from the real
+// national percentile distribution or the hardcoded fallback bands — the
+// same "name what actually happened" distinction laborSourceClause draws for
+// the Labor signal above, reused here for every trendPoints() call site.
+function trendSourceClause(bucket: number | null | undefined): string {
+  return bucket != null
+    ? `ranks in decile ${bucket} of 10 nationally for this metric`
+    : "no cached national percentile data yet for this metric, so this uses Desk's fallback bands";
+}
+
 // Each trend contributes points on its own 0-max scale; a missing trend
 // contributes a neutral ~50% of its max rather than 0, so a business isn't
 // unfairly penalized just because an optional data source (BFS/BEA both
 // need free API keys) wasn't configured.
+//
+// Third argument mirrors the laborPointsFor/laborSnapshotPointsFor
+// percentile-cache pattern (see reference-distribution-cache.ts's
+// lookupPercentileRank): when the caller has already resolved a real
+// national decile bucket (1-10, 10 = top decile nationally, i.e. the
+// fastest-growing/most-positive trend) for this exact trend metric, that
+// bucket is preferred over the hardcoded absolute-percent bands below —
+// spread evenly across 0-maxPoints the same way laborSnapshotPointsFor
+// spreads unemployment-rate deciles across its 0-20 budget (bucket * max /
+// 10, rounded). `undefined`/`null` (no cached breakpoints yet for this
+// metric/jurisdiction level — see lookupPercentileRank's return contract)
+// always falls back to the original hardcoded tiers unchanged, never to the
+// lowest bucket; those tiers remain the permanent fallback path for
+// environments (e.g. local dev) where the reference-distribution batch job
+// hasn't populated this metric yet.
 export function trendPoints(
   trendPercent: number | null,
   maxPoints: number,
+  percentileBucket?: number | null,
 ): number {
+  if (percentileBucket != null) {
+    return clamp(Math.round((percentileBucket * maxPoints) / 10), 0, maxPoints);
+  }
   if (trendPercent === null) return Math.round(maxPoints * 0.5);
   if (trendPercent > 8) return maxPoints;
   if (trendPercent > 3) return Math.round(maxPoints * 0.75);
@@ -3859,6 +4079,29 @@ export function scoreOutlook(input: {
   // trendPercent) so it plugs into trendPoints() with the same "positive is
   // good" convention as the other three trends.
   lausTrend: TrendResult | null;
+  // National percentile-cache decile buckets (1-10, see
+  // reference-distribution-cache.ts's lookupPercentileRank), resolved by the
+  // async route handler ahead of time — the same "resolve in the caller,
+  // pass an optional field in" pattern laborPercentileBucket/laborTrendBucket
+  // already use for Labor (see laborPointsFor). Each is `undefined`/`null`
+  // when the batch job hasn't populated breakpoints for that metric/level
+  // yet, in which case trendPoints() falls back to its hardcoded bands.
+  // qcewPercentileBucket is the exact same resolved value buildCategories'
+  // establishmentTrendTier uses for Demand — same metric
+  // (qcew_establishment_trend), same state-level jurisdiction, same input
+  // value (qcewTrend.trendPercent), just a different maxPoints budget, so
+  // the route handler resolves it once and threads it into both.
+  bfsPercentileBucket?: number | null;
+  qcewPercentileBucket?: number | null;
+  beaPercentileBucket?: number | null;
+  popPercentileBucket?: number | null;
+  // Looked up directly against lausTrend.trendPercent (already
+  // "positive = improving" — see the comment above), not re-negated back to
+  // the cache's raw "positive = unemployment rose" storage convention the
+  // way laborTrendBucket does for Labor's opposite-direction need — a rising
+  // percentile bucket here still means "improving," matching every other
+  // bucket in this input.
+  lausPercentileBucket?: number | null;
 }): { score: number; rationale: string; reasons: string[] } {
   // Point buckets were rebalanced to make room for the new LAUS signal
   // (added at 18, a real, direct near-term labor-market health indicator —
@@ -3868,14 +4111,31 @@ export function scoreOutlook(input: {
   // most direct measures of entrepreneurial/establishment activity; BEA and
   // population trends stay present but slightly lighter, matching their
   // prior relative ordering.
-  const bfsPoints = trendPoints(input.bfsTrend?.trendPercent ?? null, 25);
-  const qcewPoints = trendPoints(input.qcewTrend?.trendPercent ?? null, 25);
-  const beaPoints = trendPoints(input.beaGrowthPercent, 20);
+  const bfsPoints = trendPoints(
+    input.bfsTrend?.trendPercent ?? null,
+    25,
+    input.bfsPercentileBucket,
+  );
+  const qcewPoints = trendPoints(
+    input.qcewTrend?.trendPercent ?? null,
+    25,
+    input.qcewPercentileBucket,
+  );
+  const beaPoints = trendPoints(
+    input.beaGrowthPercent,
+    20,
+    input.beaPercentileBucket,
+  );
   const popPoints = trendPoints(
     input.populationTrend?.trendPercent ?? null,
     12,
+    input.popPercentileBucket,
   );
-  const lausPoints = trendPoints(input.lausTrend?.trendPercent ?? null, 18);
+  const lausPoints = trendPoints(
+    input.lausTrend?.trendPercent ?? null,
+    18,
+    input.lausPercentileBucket,
+  );
   const score = clamp(
     bfsPoints + qcewPoints + beaPoints + popPoints + lausPoints,
     0,
@@ -3883,20 +4143,20 @@ export function scoreOutlook(input: {
   );
 
   const bfsNote = input.bfsTrend
-    ? `statewide new-business applications changed ${input.bfsTrend.trendPercent.toFixed(1)}% from ${input.bfsTrend.oldestLabel} to ${input.bfsTrend.newestLabel}`
+    ? `statewide new-business applications changed ${input.bfsTrend.trendPercent.toFixed(1)}% from ${input.bfsTrend.oldestLabel} to ${input.bfsTrend.newestLabel} (${trendSourceClause(input.bfsPercentileBucket)})`
     : "statewide business-formation trend data was unavailable for this run";
   const qcewNote = input.qcewTrend
-    ? `employer establishments in this category changed ${input.qcewTrend.trendPercent.toFixed(1)}% from ${input.qcewTrend.oldestLabel} to ${input.qcewTrend.newestLabel}`
+    ? `employer establishments in this category changed ${input.qcewTrend.trendPercent.toFixed(1)}% from ${input.qcewTrend.oldestLabel} to ${input.qcewTrend.newestLabel} (${trendSourceClause(input.qcewPercentileBucket)})`
     : "a multi-year establishment trend was unavailable for this category";
   const beaNote =
     input.beaGrowthPercent !== null
-      ? `regional personal income changed ${input.beaGrowthPercent.toFixed(1)}% over roughly the last ${OUTLOOK_TREND_YEARS} years`
+      ? `regional personal income changed ${input.beaGrowthPercent.toFixed(1)}% over roughly the last ${OUTLOOK_TREND_YEARS} years (${trendSourceClause(input.beaPercentileBucket)})`
       : "regional income trend data was unavailable";
   const popNote = input.populationTrend
-    ? `population changed ${input.populationTrend.trendPercent.toFixed(1)}% from ${input.populationTrend.oldestLabel} to ${input.populationTrend.newestLabel}`
+    ? `population changed ${input.populationTrend.trendPercent.toFixed(1)}% from ${input.populationTrend.oldestLabel} to ${input.populationTrend.newestLabel} (${trendSourceClause(input.popPercentileBucket)})`
     : "a multi-year population trend was unavailable";
   const lausNote = input.lausTrend
-    ? `the statewide unemployment rate ${input.lausTrend.trendPercent >= 0 ? "improved (fell)" : "worsened (rose)"} ${Math.abs(input.lausTrend.trendPercent).toFixed(1)}% from ${input.lausTrend.oldestLabel} to ${input.lausTrend.newestLabel}`
+    ? `the statewide unemployment rate ${input.lausTrend.trendPercent >= 0 ? "improved (fell)" : "worsened (rose)"} ${Math.abs(input.lausTrend.trendPercent).toFixed(1)}% from ${input.lausTrend.oldestLabel} to ${input.lausTrend.newestLabel} (${trendSourceClause(input.lausPercentileBucket)})`
     : "a multi-year unemployment-rate trend was unavailable";
 
   const rationale =
@@ -4617,12 +4877,21 @@ async function fetchComplianceSignals(
         const licenseOrRegistrationCount = items.filter(
           (i) => i.category === "LICENSE" || i.category === "REGISTRATION",
         ).length;
+        // Same real-per-category-breakdown idea as bondOrInsuranceCount and
+        // licenseOrRegistrationCount above, reusing the same already-fetched
+        // `items` rather than a third Compliance-OS request — see
+        // ComplianceSignal.licenseCount and licensingComplexityPointsFor for
+        // how this feeds Startup Difficulty's licensingComplexityPoints.
+        const licenseCount = items.filter(
+          (i) => i.category === "LICENSE",
+        ).length;
         return {
           requirementCount: items.length,
           frictionScore,
           reasons: rankRequirementReasons(items),
           bondOrInsuranceCount,
           licenseOrRegistrationCount,
+          licenseCount,
           evidence: [
             item(
               "Compliance requirements found",
