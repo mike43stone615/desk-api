@@ -216,12 +216,17 @@ router.post("/analyze", async (c) => {
     body.formationCity,
     stateFips,
   );
+  // Cheap text-only check, done before the data fetches below so the
+  // conditional ACS age-bracket fetch (see fetchAcsAgeBracket) only fires
+  // when it actually matters — see ageFocusFor for the keyword rules.
+  const ageFocus = ageFocusFor(industry, businessIdea);
 
   const [
     acs,
     cbp,
     nonemployer,
     bea,
+    beaRpp,
     qcew,
     oews,
     googlePlaces,
@@ -235,11 +240,13 @@ router.post("/analyze", async (c) => {
     qcewTrend,
     populationTrend,
     lausTrend,
+    acsAgeBracket,
   ] = await Promise.all([
     fetchAcsState(stateFips, config.censusApiKey, place, county),
     fetchCbpState(stateFips, naicsCodes, config.censusApiKey, county),
     fetchNonemployerState(stateFips, naicsCodes, config.censusApiKey, county),
     fetchBeaRegionalState(state, stateFips, config.beaApiKey),
+    fetchBeaRegionalPriceParity(state, stateFips, config.beaApiKey),
     fetchQcewState(stateFips, naicsCodes, county),
     fetchCachedOrLiveOewsState(c.env.DB, state),
     fetchGooglePlacesCompetition(
@@ -265,6 +272,7 @@ router.post("/analyze", async (c) => {
     fetchQcewTrend(stateFips, naicsCodes, county),
     fetchPopulationTrend(stateFips, config.censusApiKey, place, county),
     fetchLausTrend(stateFips),
+    fetchAcsAgeBracket(stateFips, config.censusApiKey, place, county, ageFocus),
   ]);
 
   const evidence: EvidenceItem[] = [];
@@ -273,6 +281,11 @@ router.post("/analyze", async (c) => {
   if (nonemployer) evidence.push(...nonemployer.evidence);
   if (bea) evidence.push(...bea.evidence);
   else evidence.push(beaNotConfiguredItem());
+  // Regional Price Parity shares its "not configured" state with `bea`
+  // above (same BEA_API_KEY) — only add its own evidence item when it
+  // actually contributed a value, so a missing key doesn't produce two
+  // redundant "BEA API key: Not configured" entries.
+  if (beaRpp) evidence.push(...beaRpp.evidence);
   if (!config.censusApiKey) {
     evidence.push(
       item(
@@ -493,12 +506,20 @@ router.post("/analyze", async (c) => {
       registry,
       guidance,
       planFields,
+      beaRpp,
+      qcewTrend,
+      ageFocus,
+      acsAgeBracket,
     },
     state,
     { place, county },
     evidence,
     startupDifficulty,
     outlook,
+    {
+      pricingHypothesis: clean(body.pricingHypothesis),
+      targetMarket: clean(body.targetMarket),
+    },
   );
   const overallAverage = Math.round(
     categories.reduce((sum, cat) => sum + cat.score, 0) / categories.length,
@@ -716,37 +737,207 @@ export function scoreStartupDifficulty(input: {
 // geography level the underlying number actually came from. Income is
 // deliberately excluded from this scaling: a small city can have just as
 // high a median income as a big state, so income tiers stay absolute.
+//
+// This used to be the entire population signal (40 of Demand's 100 points).
+// It's now the raw-headcount sub-signal only, scaled down from a 40-point
+// max to a 32-point max (32/40 = 0.8, applied to every breakpoint's point
+// value — the dollar/count breakpoints themselves are unchanged) so
+// population density (see populationDensityTierFor, up to 8 points) can
+// claim the remaining 8 of the 40 population points as a genuinely
+// independent signal: two areas with the same headcount can have very
+// different commercial viability depending on how concentrated that
+// population is.
 export function populationTierFor(
   population: number,
   level: GeographyLevel | undefined,
 ): number {
   if (level === "place") {
     return population > 150000
-      ? 40
+      ? 32
       : population > 50000
-        ? 30
+        ? 24
         : population > 10000
-          ? 20
-          : 10;
+          ? 16
+          : 8;
   }
   if (level === "county") {
     return population > 300000
-      ? 40
+      ? 32
       : population > 75000
-        ? 30
+        ? 24
         : population > 15000
-          ? 20
-          : 10;
+          ? 16
+          : 8;
   }
   return population > 500000
-    ? 40
+    ? 32
     : population > 100000
-      ? 30
+      ? 24
       : population > 25000
-        ? 20
-        : 10;
+        ? 16
+        : 8;
 }
 
+// 1 square mile = 2,589,988 square meters — used to convert TIGERweb's
+// AREALAND (square meters of land area, deliberately excluding water) into
+// the people-per-square-mile units the density tiers below are expressed
+// in, since that's the more commonly recognized unit for U.S. commercial
+// density discussions.
+const SQ_METERS_PER_SQ_MILE = 2589988;
+
+// Computes people-per-square-mile from a population figure and the land
+// area (in square meters, as TIGERweb's AREALAND reports it) of the same
+// geography that population count came from. Returns null — not 0 — when
+// area is unavailable, so callers can distinguish "no data" from "zero
+// density" and skip the sub-signal gracefully instead of penalizing it (see
+// populationDensityTierFor).
+export function densityFor(
+  population: number,
+  areaLandSqMeters: number | null | undefined,
+): number | null {
+  if (!areaLandSqMeters || areaLandSqMeters <= 0) return null;
+  return population / (areaLandSqMeters / SQ_METERS_PER_SQ_MILE);
+}
+
+// Supplementary density signal, worth up to 8 of Demand's 40 population
+// points (see populationTierFor's comment above for how the other 32 were
+// freed up). Breakpoints are picked from real-world U.S. density bands: a
+// dense, walkable urban core with strong incidental foot traffic is
+// typically 5,000+ people/sq mi; a car-dependent but still meaningfully
+// populated suburb usually falls in the 1,000-5,000 range; under 1,000/sq
+// mi is rural/exurban, where the same headcount is spread across a much
+// larger area and a location-dependent business draws from a smaller
+// effective radius. Land area genuinely unavailable (e.g. geography only
+// resolved to state level, which has no meaningful "density" concept at
+// that scale) contributes 0 — not a penalty — matching this file's general
+// policy of never scoring missing optional data as if it were bad data.
+export function populationDensityTierFor(density: number | null): number {
+  if (density === null) return 0;
+  return density > 5000 ? 8 : density > 1000 ? 5 : 2;
+}
+
+// ── Age-relevant population heuristic ──────────────────────────────────────
+// Most businesses serve a broad adult population and shouldn't get any
+// age-based adjustment at all — this only activates for the minority of
+// ideas that read as explicitly child/family-oriented or senior-oriented,
+// via a simple keyword match on the industry/business-idea text (the same
+// style of text heuristic priceRelevanceMultiplier above uses for
+// budget/premium pricing signals). Deliberately not a precise
+// per-business-type age model — see ageAdjustmentMultiplier below.
+const CHILDREN_FOCUS_PATTERN =
+  /\b(child|children|kid|kids|daycare|day care|preschool|school|youth|famil(?:y|ies))\b/i;
+const SENIOR_FOCUS_PATTERN =
+  /\b(senior|seniors|retirement|retiree|retirees|elder|elderly|assisted living)\b/i;
+
+export function ageFocusFor(
+  industry: string,
+  businessIdea: string,
+): "children" | "seniors" | null {
+  const text = `${industry} ${businessIdea}`;
+  const isChildren = CHILDREN_FOCUS_PATTERN.test(text);
+  const isSenior = SENIOR_FOCUS_PATTERN.test(text);
+  // Both patterns matching is treated the same as neither matching (no
+  // adjustment) rather than guessing which one the idea "really" means —
+  // same mixed-signal-defaults-to-neutral choice priceRelevanceMultiplier
+  // makes for budget/premium text.
+  if (isChildren && !isSenior) return "children";
+  if (isSenior && !isChildren) return "seniors";
+  return null;
+}
+
+// National ACS baselines this heuristic compares a local area's
+// relevant-age-bracket share against: roughly 25% of the U.S. population is
+// under 18, and roughly 16% is 65+. An area sitting exactly at the baseline
+// gets no adjustment (multiplier 1.0). AGE_ADJUSTMENT_SPAN (0.15) sets how
+// much a doubling (or halving) of that baseline share moves the multiplier —
+// see ageAdjustmentMultiplier for why log2 is used to keep the adjustment
+// symmetric in both directions.
+const CHILDREN_BASELINE_RATIO = 0.25;
+const SENIOR_BASELINE_RATIO = 0.16;
+const AGE_ADJUSTMENT_SPAN = 0.15;
+const AGE_ADJUSTMENT_MIN = 0.85;
+const AGE_ADJUSTMENT_MAX = 1.15;
+
+// Converts a relevant-age-bracket ratio (e.g. under-18 population / total
+// population) into a modest multiplier on the 32-point headcount tier —
+// not a wholesale replacement of the raw count, since this is a heuristic
+// layered on top of real data, not itself a precise model. log2 scaling
+// keeps the adjustment symmetric around the baseline: an area with double
+// the baseline share (relativeRepresentation = 2) gets the same-sized nudge
+// as one with half the baseline share (relativeRepresentation = 0.5) gets
+// in the opposite direction, which a plain linear scale would not — and the
+// explicit clamp keeps the result inside [0.85, 1.15] even for an extreme
+// ratio far from either bound.
+export function ageAdjustmentMultiplier(
+  ageFocus: "children" | "seniors" | null,
+  relevantRatio: number | null,
+): number {
+  if (ageFocus === null || relevantRatio === null || relevantRatio <= 0)
+    return 1;
+  const baseline =
+    ageFocus === "children" ? CHILDREN_BASELINE_RATIO : SENIOR_BASELINE_RATIO;
+  const relativeRepresentation = relevantRatio / baseline;
+  const raw = 1 + AGE_ADJUSTMENT_SPAN * Math.log2(relativeRepresentation);
+  return clamp(raw, AGE_ADJUSTMENT_MIN, AGE_ADJUSTMENT_MAX);
+}
+
+// Combines the raw-headcount tier, density tier, and age-relevance
+// multiplier into the final 0-40 population contribution to Demand —
+// mirrors incomeScoreFor's shape (compute sub-signals, combine, clamp, and
+// return the intermediates so demandReasons can cite them without
+// recomputing anything).
+export function populationScoreFor(input: {
+  population: number;
+  populationLevel: GeographyLevel | undefined;
+  areaLandSqMeters: number | null | undefined;
+  ageFocus: "children" | "seniors" | null;
+  ageRelevantSum: number | null;
+}): {
+  score: number;
+  headcountTier: number;
+  densityTier: number;
+  density: number | null;
+  ageMultiplier: number;
+  ageRatio: number | null;
+} {
+  const headcountTier = populationTierFor(
+    input.population,
+    input.populationLevel,
+  );
+  const density = densityFor(input.population, input.areaLandSqMeters);
+  const densityTier = populationDensityTierFor(density);
+  const ageRatio =
+    input.ageFocus !== null &&
+    input.ageRelevantSum !== null &&
+    input.population > 0
+      ? input.ageRelevantSum / input.population
+      : null;
+  const ageMultiplier = ageAdjustmentMultiplier(input.ageFocus, ageRatio);
+  const score = clamp(
+    Math.round(headcountTier * ageMultiplier) + densityTier,
+    0,
+    40,
+  );
+  return { score, headcountTier, densityTier, density, ageMultiplier, ageRatio };
+}
+
+// Establishment count as a Demand signal is deliberately non-monotonic: a
+// MODERATE employer-establishment count reads as the healthiest signal, not
+// the highest count. A very low count is ambiguous — it could mean untapped
+// opportunity, or it could mean the category structurally doesn't work in
+// this market — so it can't be scored as confidently as a proven middle. A
+// very high count more plausibly signals the market is already saturated
+// (crowded, thin margins, hard to gain share as a new entrant) than that
+// demand is limitless. The moderate/peak band reuses the old flat model's
+// existing "second and third tier" boundaries (75-300 county, 250-1000
+// state) as its edges, since that range was already understood to be a
+// solid, established-but-not-overrun count; two new boundaries (500 county /
+// 1700 state) are added past the old top tier to mark where the count is
+// high enough to read as saturation rather than opportunity. Worth up to 12
+// of Demand's 20 establishment-related points — see
+// nonemployerEstablishmentTierFor (4 points, the Nonemployer Statistics
+// solo-operator count) and the QCEW establishment-trend modifier in
+// buildCategories (4 points) for the rest.
 export function establishmentTierFor(
   establishments: number,
   level: GeographyLevel | undefined,
@@ -755,21 +946,52 @@ export function establishmentTierFor(
   // geography — see the geography-support table in the resolver comments),
   // so this only ever branches between county and state scale.
   if (level === "county") {
-    return establishments > 300
-      ? 20
-      : establishments > 75
-        ? 15
-        : establishments > 20
-          ? 10
-          : 5;
+    if (establishments > 500) return 4; // saturated
+    if (establishments > 300) return 8; // elevated, approaching saturation
+    if (establishments > 75) return 12; // moderate — the healthiest band
+    if (establishments > 20) return 9; // thin but growing
+    return 5; // very low — ambiguous (untapped, or a non-starter here)
   }
-  return establishments > 1000
-    ? 20
-    : establishments > 250
-      ? 15
-      : establishments > 50
-        ? 10
-        : 5;
+  if (establishments > 1700) return 4;
+  if (establishments > 1000) return 8;
+  if (establishments > 250) return 12;
+  if (establishments > 50) return 9;
+  return 5;
+}
+
+// Nonemployer (solo/no-employee) establishment counts run on a wildly
+// different scale than CBP's employer-only counts — often 10-50x higher,
+// since most licensed sole proprietors and gig/freelance operators never
+// hire — so this can't reuse establishmentTierFor's thresholds, and the two
+// counts are never summed (that would let whichever number happens to be
+// bigger silently dominate and break the employer-count tier calibration
+// above). This gets its own independent, jurisdiction-scaled curve instead,
+// worth up to 4 of Demand's 20 establishment-related points. It follows the
+// same "moderate is healthiest" shape as establishmentTierFor for the same
+// underlying reason — a huge count of solo operators plausibly signals a
+// low-barrier category already saturated with freelancers/solo shops rather
+// than limitless opportunity, while a very low count is ambiguous in the
+// same way a very low employer count is. Thresholds are calibrated against a
+// verified live sample (Denver County, NAICS 54, NESTAB=15,670), which lands
+// solidly in the "moderate" county band below rather than at either extreme
+// — a reasonable outcome for a large county in a common professional-
+// services category.
+export function nonemployerEstablishmentTierFor(
+  nonemployerEstablishments: number,
+  level: GeographyLevel | undefined,
+): number {
+  if (level === "county") {
+    if (nonemployerEstablishments > 60000) return 0; // saturated
+    if (nonemployerEstablishments > 20000) return 2; // elevated
+    if (nonemployerEstablishments > 3000) return 4; // moderate — peak
+    if (nonemployerEstablishments > 300) return 3; // thin but growing
+    return 1; // very low — ambiguous
+  }
+  if (nonemployerEstablishments > 200000) return 0;
+  if (nonemployerEstablishments > 70000) return 2;
+  if (nonemployerEstablishments > 10000) return 4;
+  if (nonemployerEstablishments > 1000) return 3;
+  return 1;
 }
 
 // Competition's fallback-mode proxy (used only when Google/Foursquare local
@@ -824,6 +1046,145 @@ export function receiptsTierFor(
         : 10;
 }
 
+// ── Income sub-buckets (Demand's income signal, 25 pts total) ─────────────
+// Income used to be a single flat lookup on nominal ACS median household
+// income. It's now split into two independently-sourced sub-signals that
+// still sum to the same 25-point budget:
+//   - Income level (max 20): nominal income deflated to "real"
+//     purchasing-power terms via BEA's Regional Price Parity index before
+//     being run through the same dollar breakpoints the old flat tier used
+//     (just scaled down from a 25-point max to a 20-point max). A $70k
+//     household in a low-cost-of-living area and a $70k household in an
+//     expensive metro don't have the same actual buying power.
+//   - Income distribution (max 5): ACS Gini index for the same geography —
+//     a lower Gini (income spread more evenly across households) generally
+//     means a broader, healthier addressable customer base for most small
+//     businesses than the same median income concentrated in a narrow
+//     high-earner segment.
+// The combined 25-point total is then nudged by a lightweight budget/
+// premium price-relevance multiplier read from the business's own pricing
+// hypothesis and target market text, then clamped back to [0, 25] so a
+// maxed-out premium case can't exceed the category's point budget.
+
+// Deflates nominal income into "real" purchasing-power terms using a BEA
+// Regional Price Parity index (100 = national average; e.g. 105 means 5%
+// more expensive than the national average, so $1 there buys less). Falls
+// back to the nominal figure unchanged — same defensive pattern as every
+// other source in this file — when RPP wasn't available (no BEA key, fetch
+// failure, or an implausible non-positive index).
+export function deflateIncomeForRpp(
+  nominalIncome: number,
+  rpp: number | null | undefined,
+): number {
+  if (rpp === null || rpp === undefined || rpp <= 0) return nominalIncome;
+  return nominalIncome / (rpp / 100);
+}
+
+// Same dollar breakpoints as the pre-existing flat income tier, just scaled
+// down proportionally from a 25-point max to a 20-point max now that income
+// distribution (below) claims the other 5 points of the category.
+export function incomeLevelTierFor(realIncome: number): number {
+  return realIncome > 90000
+    ? 20
+    : realIncome > 65000
+      ? 15
+      : realIncome > 45000
+        ? 10
+        : 6;
+}
+
+// ACS place-level Gini indexes in practice run roughly ~0.35-0.55 (0 is
+// perfect equality, 1 is a single household holding all income — neither
+// extreme shows up in real ACS place data), so breakpoints are set inside
+// that real range rather than the full 0-1 scale: under 0.40 is a broad,
+// evenly-distributed income base (top tier); 0.40-0.45 is roughly typical
+// for a mid-size U.S. city; 0.45-0.50 is noticeably concentrated; 0.50+ is
+// highly concentrated toward a narrow high-earning segment, which tends to
+// mean a smaller broad-market customer base even when the median looks
+// healthy. Unavailable data (no Gini fetched) scores as 0 rather than a
+// floor/midpoint — unlike income level, there's no pre-existing flat
+// behavior to preserve here, so "no signal" simply contributes nothing
+// rather than guessing.
+export function incomeEqualityTierFor(
+  gini: number | null | undefined,
+): number {
+  if (gini === null || gini === undefined) return 0;
+  return gini < 0.4 ? 5 : gini < 0.45 ? 3 : gini < 0.5 ? 1 : 0;
+}
+
+const BUDGET_PRICE_PATTERN =
+  /\b(budget|affordable|discount(?:ed)?|low-cost|low cost|value|cheap)\b/i;
+const PREMIUM_PRICE_PATTERN =
+  /\b(premium|luxury|high-end|high end|upscale|boutique|exclusive)\b/i;
+
+// Reads the business's own pricing hypothesis + target market free text
+// (already collected earlier in the wizard, see ResearchRequest) for
+// budget- vs. premium-oriented language and returns a multiplier applied to
+// the combined income sub-score. This isn't a judgment call on which
+// positioning is "better" — it's a relevance adjustment: a business
+// deliberately targeting price-sensitive customers doesn't benefit from a
+// high local income the way a premium-positioned one does, and vice versa.
+// Mixed signals (both patterns match) or no match at all fall back to
+// neutral (no adjustment) rather than guessing which one wins.
+export function priceRelevanceMultiplier(
+  pricingHypothesis: string,
+  targetMarket: string,
+): { multiplier: number; direction: "budget" | "premium" | "neutral" } {
+  const text = `${pricingHypothesis} ${targetMarket}`;
+  const isBudget = BUDGET_PRICE_PATTERN.test(text);
+  const isPremium = PREMIUM_PRICE_PATTERN.test(text);
+  if (isPremium && !isBudget)
+    return { multiplier: 1.15, direction: "premium" };
+  if (isBudget && !isPremium) return { multiplier: 0.85, direction: "budget" };
+  return { multiplier: 1, direction: "neutral" };
+}
+
+// Combines the two sub-buckets and the price-relevance multiplier into the
+// final 0-25 income contribution, and returns the intermediate values so
+// callers (demandReasons) can cite real/COL-adjusted income, the equality
+// note, and the price-relevance adjustment without recomputing anything.
+export function incomeScoreFor(input: {
+  nominalIncome: number;
+  rpp: number | null | undefined;
+  gini: number | null | undefined;
+  pricingHypothesis: string;
+  targetMarket: string;
+}): {
+  score: number;
+  realIncome: number;
+  levelTier: number;
+  equalityTier: number;
+  multiplier: number;
+  direction: "budget" | "premium" | "neutral";
+} {
+  const realIncome = deflateIncomeForRpp(input.nominalIncome, input.rpp);
+  const levelTier = incomeLevelTierFor(realIncome);
+  const equalityTier = incomeEqualityTierFor(input.gini);
+  const { multiplier, direction } = priceRelevanceMultiplier(
+    input.pricingHypothesis,
+    input.targetMarket,
+  );
+  const score = clamp(
+    Math.round((levelTier + equalityTier) * multiplier),
+    0,
+    25,
+  );
+  return { score, realIncome, levelTier, equalityTier, multiplier, direction };
+}
+
+// Growth's floor used to be flat: beaGrowth <= 1 always scored 0, so a mild
+// -0.5% dip and a severe -10% contraction scored identically. This adds one
+// extra floor tier so genuinely severe contraction (worse than -2%) still
+// bottoms out at 0, while a merely flat/mildly-declining region keeps a
+// small positive score instead of being treated the same as a collapse. The
+// max achievable score (15, beaGrowth > 4) and the existing >4 / >1
+// thresholds are unchanged. This is BEA state-level data only (no
+// county/city granularity) — a real data limitation, not something this
+// tier fixes.
+export function growthTierFor(beaGrowth: number): number {
+  return beaGrowth > 4 ? 15 : beaGrowth > 1 ? 8 : beaGrowth > -2 ? 3 : 0;
+}
+
 function buildCategories(
   input: {
     acs: MetricSet | null;
@@ -839,12 +1200,32 @@ function buildCategories(
     registry: MetricSet;
     guidance: MetricSet;
     planFields: MetricSet;
+    // BEA Regional Price Parity — separate from `bea` (personal income
+    // growth) because it comes from a different BEA table (SARPP vs.
+    // SQINC4) and can succeed/fail independently of it.
+    beaRpp: MetricSet | null;
+    // The already-fetched QCEW establishment-count trend (same TrendResult
+    // scoreOutlook() uses) — threaded in here so Demand's establishment
+    // scoring can react to whether the category's establishment count is
+    // growing or shrinking, not just its point-in-time level.
+    qcewTrend: TrendResult | null;
+    // Age-relevant population heuristic (see ageFocusFor/
+    // ageAdjustmentMultiplier/populationScoreFor) — ageFocus is derived once
+    // from the business idea/industry text in the route handler; acsAgeBracket
+    // is only fetched (and only non-null) when ageFocus matched a keyword, so
+    // the common no-match case never pays for the extra Census request.
+    ageFocus: "children" | "seniors" | null;
+    acsAgeBracket: { sum: number; geographyLevel: GeographyLevel } | null;
   },
   state: string,
   geo: { place: PlaceGeo | null; county: CountyGeo | null },
   allEvidence: EvidenceItem[],
   startupDifficulty: { score: number; rationale: string; reasons: string[] },
   outlook: { score: number; rationale: string; reasons: string[] },
+  // Raw free text from the wizard, used only for the income
+  // price-relevance heuristic (see priceRelevanceMultiplier) — not parsed
+  // anywhere else in buildCategories.
+  planText: { pricingHypothesis: string; targetMarket: string },
 ): CategoryResult[] {
   const stateName = STATE_NAMES[state] ?? state;
   const evidenceFor = (key: CategoryKey) =>
@@ -862,7 +1243,9 @@ function buildCategories(
 
   const population = input.acs?.values.population ?? 0;
   const populationLevel = input.acs?.geographyLevel;
-  const income = input.acs?.values.medianIncome ?? 0;
+  const nominalIncome = input.acs?.values.medianIncome ?? 0;
+  const regionalPriceParity = input.beaRpp?.values.regionalPriceParity ?? null;
+  const giniIndex = input.acs?.values.giniIndex ?? null;
   const establishments = input.cbp?.values.establishments ?? 0;
   const establishmentsLevel = input.cbp?.geographyLevel;
   // Google/Foursquare's text-search results are effectively capped at the
@@ -897,8 +1280,29 @@ function buildCategories(
     ? competitorSourceCounts.reduce((sum, n) => sum + n, 0) /
       competitorSourceCounts.length
     : 0;
-  const receipts = input.nonemployer?.values.receipts ?? 0;
+  // NRCPTOT (the underlying Census field) is the AGGREGATE total receipts
+  // across every non-employer establishment in this NAICS code and
+  // geography — not a per-business figure. receiptsTierFor's thresholds
+  // (e.g. >$300k county, >$1M state) were sized for a single business's
+  // receipts, so scoring the raw aggregate against them was a real bug: any
+  // real category's countywide/statewide total trivially clears both
+  // thresholds, which meant this sub-signal always maxed out regardless of
+  // actual conditions (confirmed live: a Colorado query returned "$5.5
+  // billion in receipts" scored as if it were one business's revenue).
+  // Dividing by the establishment count (already fetched in the same
+  // Census call, no new request) turns it into the true average receipts
+  // per business, which is what the tier thresholds were actually meant to
+  // represent.
+  const aggregateReceipts = input.nonemployer?.values.receipts ?? 0;
   const receiptsLevel = input.nonemployer?.geographyLevel;
+  // Same Nonemployer Statistics fetch/MetricSet that produces `receipts`
+  // above, so it shares `receiptsLevel`'s geography level.
+  const nonemployerEstablishments =
+    input.nonemployer?.values.nonemployerEstablishments ?? 0;
+  const receipts =
+    nonemployerEstablishments > 0
+      ? aggregateReceipts / nonemployerEstablishments
+      : 0;
   const wages = Math.max(
     input.qcew?.values.averageWeeklyWage ?? 0,
     input.oews?.values.meanWeeklyWage ?? 0,
@@ -907,32 +1311,150 @@ function buildCategories(
   const planCompleteness = input.planFields.values.planCompleteness ?? 0;
 
   // ── Demand: how big and how well-funded is the potential customer base ──
-  const populationTier = populationTierFor(population, populationLevel);
-  const incomeTier =
-    income > 90000 ? 25 : income > 65000 ? 19 : income > 45000 ? 13 : 7;
+  // Population's 40-point contribution is now three sub-signals combined by
+  // populationScoreFor: raw headcount (32, jurisdiction-scaled — see
+  // populationTierFor), density (8, from the same TIGERweb call that
+  // resolved place/county — see populationDensityTierFor), and an
+  // age-relevance multiplier applied to the headcount tier only, when the
+  // business idea reads as child/family- or senior-oriented (see
+  // ageFocusFor/ageAdjustmentMultiplier). Area land is pulled from whichever
+  // geography level population itself actually resolved at, so the two
+  // stay consistent (a place-level headcount is divided by place-level
+  // area, not county area, and vice versa) — state-level population has no
+  // matching area figure, so density simply contributes 0 there.
+  const areaLandSqMeters =
+    populationLevel === "place"
+      ? geo.place?.areaLandSqMeters
+      : populationLevel === "county"
+        ? geo.county?.areaLandSqMeters
+        : undefined;
+  const populationResult = populationScoreFor({
+    population,
+    populationLevel,
+    areaLandSqMeters,
+    ageFocus: input.ageFocus,
+    ageRelevantSum: input.acsAgeBracket?.sum ?? null,
+  });
+  const populationTier = populationResult.score;
+  const income = incomeScoreFor({
+    nominalIncome,
+    rpp: regionalPriceParity,
+    gini: giniIndex,
+    pricingHypothesis: planText.pricingHypothesis,
+    targetMarket: planText.targetMarket,
+  });
+  const incomeTier = income.score;
+  // Establishments contribute up to 20 Demand points total, split across
+  // three independent signals rather than one flat count: the CBP
+  // employer-establishment count read on a non-monotonic "moderate is
+  // healthiest" curve (up to 12 — see establishmentTierFor), the Nonemployer
+  // Statistics solo-operator count as its own small independent signal (up
+  // to 4 — see nonemployerEstablishmentTierFor, deliberately not summed with
+  // the employer count since the two run on very different scales), and a
+  // QCEW establishment-count trend modifier (up to 4, via the same
+  // trendPoints() helper scoreOutlook() uses, so a growing category scores
+  // above a shrinking one at the same point-in-time count).
   const establishmentTier = establishmentTierFor(
     establishments,
     establishmentsLevel,
   );
-  const growthTier = beaGrowth > 4 ? 15 : beaGrowth > 1 ? 8 : 0;
+  const nonemployerEstablishmentTier = nonemployerEstablishmentTierFor(
+    nonemployerEstablishments,
+    receiptsLevel,
+  );
+  const establishmentTrendTier = trendPoints(
+    input.qcewTrend?.trendPercent ?? null,
+    4,
+  );
+  const growthTier = growthTierFor(beaGrowth);
   const demandScore = clamp(
-    populationTier + incomeTier + establishmentTier + growthTier,
+    populationTier +
+      incomeTier +
+      establishmentTier +
+      nonemployerEstablishmentTier +
+      establishmentTrendTier +
+      growthTier,
     0,
     100,
   );
   const demandRationale = `${verdictWord(demandScore)} demand (${demandScore}/100).`;
+  // Text descriptors for the two "moderate is healthiest" establishment
+  // signals map deterministically to the tier score, since both
+  // establishmentTierFor and nonemployerEstablishmentTierFor were designed
+  // so every bucket (low, rising, peak, elevated, saturated) returns a
+  // distinct point value — there's no ambiguity about which band a given
+  // score came from.
+  const establishmentTierRead = (tier: number): string => {
+    if (tier >= 12) return "a moderate, healthy count for this category";
+    if (tier === 9) return "a still-thin but growing count";
+    if (tier === 8) return "an elevated count nearing market saturation";
+    if (tier === 5)
+      return "a very low count (either untapped opportunity, or a category that doesn't take hold here)";
+    return "a high count suggesting a saturated, crowded market";
+  };
+  const nonemployerEstablishmentRead = (tier: number): string => {
+    if (tier === 4) return "a moderate, healthy density of solo operators";
+    if (tier === 3) return "a still-thin but growing solo-operator presence";
+    if (tier === 2) return "an elevated density nearing solo-operator saturation";
+    if (tier === 1)
+      return "a very low density (either untapped opportunity, or a category solo operators rarely enter)";
+    return "a very high density suggesting the category is already saturated with solo/freelance operators";
+  };
+  const establishmentTrendText = input.qcewTrend
+    ? `Employer establishment counts in this category ${input.qcewTrend.trendPercent >= 0 ? "grew" : "shrank"} ${Math.abs(input.qcewTrend.trendPercent).toFixed(1)}% from ${input.qcewTrend.oldestLabel} to ${input.qcewTrend.newestLabel}.`
+    : "A multi-year establishment-count trend was unavailable for this category, so this contributed a neutral score.";
+  const incomeLevelText = regionalPriceParity
+    ? `Cost-of-living-adjusted median household income is ${money(income.realIncome)} (nominal ${money(nominalIncome)}, adjusted using a regional price parity index of ${regionalPriceParity.toFixed(1)}, where 100 is the national average).`
+    : `Median household income is ${money(nominalIncome)} (no regional price parity data available to adjust for cost of living).`;
+  const priceRelevanceNote =
+    income.direction === "neutral"
+      ? ""
+      : income.direction === "premium"
+        ? " This is scored up because the pricing/target market notes read as premium-oriented, where a higher-income area matters more."
+        : " This is scored down because the pricing/target market notes read as budget-oriented, where local income levels matter less to demand.";
+  const incomeEqualityText =
+    giniIndex !== null
+      ? `Household income is ${giniIndex < 0.4 ? "broadly and evenly distributed" : giniIndex < 0.45 ? "fairly evenly distributed" : giniIndex < 0.5 ? "somewhat concentrated" : "highly concentrated"} across the area (Gini index ${giniIndex.toFixed(3)}, where 0 is perfect equality).`
+      : `Income distribution (Gini index) data was not available for this geography.`;
+  // Only cite density when it actually contributed (land area unavailable
+  // means populationDensityTierFor already scored it 0 with no note needed
+  // — see the "don't penalize missing optional data" comment there).
+  const populationDensityNote =
+    populationResult.density !== null
+      ? ` Population density here is about ${Math.round(populationResult.density).toLocaleString()} people per square mile, ${populationResult.density > 5000 ? "a dense, walkable area that supports strong foot-traffic demand" : populationResult.density > 1000 ? "a typical car-dependent suburban density" : "spread thinly across a rural/exurban area"}.`
+      : "";
+  // Only cite the age-relevance heuristic when a keyword actually triggered
+  // it (input.ageFocus !== null) and the ACS age-bracket fetch succeeded —
+  // most business ideas serve a broad adult population and get no note (and
+  // no adjustment) at all.
+  const ageFocusNote =
+    input.ageFocus !== null && populationResult.ageRatio !== null
+      ? ` ${(populationResult.ageRatio * 100).toFixed(0)}% of ${geoNameFor(populationLevel)}'s population is ${input.ageFocus === "children" ? "under 18" : "65 or older"}, ${populationResult.ageMultiplier > 1 ? "a strong fit" : populationResult.ageMultiplier < 1 ? "a below-average fit" : "a roughly average fit"} for a${input.ageFocus === "children" ? " child/family-oriented" : " senior-oriented"} business.`
+      : "";
   const demandReasons = rankedReasons([
     {
-      text: `${geoNameFor(populationLevel)} has a population of ${population.toLocaleString() || "an unreported amount"} in the target area.`,
+      text: `${geoNameFor(populationLevel)} has a population of ${population.toLocaleString() || "an unreported amount"} in the target area.${populationDensityNote}${ageFocusNote}`,
       weight: populationTier,
     },
     {
-      text: `Median household income is ${money(income)}.`,
-      weight: incomeTier,
+      text: `${incomeLevelText}${priceRelevanceNote}`,
+      weight: income.levelTier,
     },
     {
-      text: `${establishments.toLocaleString()} existing establishments already operate in this category.`,
+      text: incomeEqualityText,
+      weight: income.equalityTier,
+    },
+    {
+      text: `${establishments.toLocaleString()} employer establishments already operate in this category in ${geoNameFor(establishmentsLevel)} — ${establishmentTierRead(establishmentTier)}.`,
       weight: establishmentTier,
+    },
+    {
+      text: `${nonemployerEstablishments.toLocaleString()} non-employer (solo-operator) establishments in this category in ${geoNameFor(receiptsLevel)} — ${nonemployerEstablishmentRead(nonemployerEstablishmentTier)}.`,
+      weight: nonemployerEstablishmentTier,
+    },
+    {
+      text: establishmentTrendText,
+      weight: establishmentTrendTier,
     },
     {
       text: `Recent regional personal income growth is ${beaGrowth.toFixed(1)}%.`,
@@ -981,7 +1503,11 @@ function buildCategories(
 
   // ── Revenue: how much cash is likely moving through this category ──
   const receiptsTier = receiptsTierFor(receipts, receiptsLevel);
-  const revenueIncomeTier = income > 75000 ? 25 : income > 50000 ? 17 : 9;
+  // Deliberately uses nominal (not COL-adjusted) income — Revenue's scoring
+  // is out of scope for this change and must stay byte-for-byte identical
+  // to its prior behavior.
+  const revenueIncomeTier =
+    nominalIncome > 75000 ? 25 : nominalIncome > 50000 ? 17 : 9;
   const wageTier =
     wages > 0 && wages < 1200 ? 20 : wages > 0 && wages < 1800 ? 14 : 8;
   const planTier = planCompleteness >= 3 ? 15 : planCompleteness >= 1 ? 8 : 0;
@@ -993,11 +1519,14 @@ function buildCategories(
   const revenueRationale = `${verdictWord(revenueScore)} revenue potential (${revenueScore}/100).`;
   const revenueReasons = rankedReasons([
     {
-      text: `Businesses without paid employees in this category average ${money(receipts)} in receipts in ${geoNameFor(receiptsLevel)}.`,
+      text:
+        nonemployerEstablishments > 0
+          ? `Businesses without paid employees in this category average ${money(receipts)} in receipts each in ${geoNameFor(receiptsLevel)} (${money(aggregateReceipts)} total across ${nonemployerEstablishments.toLocaleString()} such businesses).`
+          : `No non-employer establishment count was available in ${geoNameFor(receiptsLevel)} to compute an average receipts figure.`,
       weight: receiptsTier,
     },
     {
-      text: `Median household income of ${money(income)} supports category-wide spending power.`,
+      text: `Median household income of ${money(nominalIncome)} supports category-wide spending power.`,
       weight: revenueIncomeTier,
     },
     {
@@ -1243,8 +1772,22 @@ function rankRequirementReasons(
 // formation county/place, when Desk was able to resolve one — see
 // resolveGeography below. These let the fetchers below prefer city- or
 // county-level data over blunt statewide numbers.
-type CountyGeo = { fips: string; name: string; stateFips: string };
-type PlaceGeo = { fips: string; name: string; stateFips: string };
+// areaLandSqMeters (TIGERweb's AREALAND field) is optional/best-effort —
+// it rides along on the same place/county lookup query above, so it's only
+// absent if TIGERweb didn't return it for that feature. Used by the
+// population-density Demand sub-signal (see populationDensityTierFor).
+type CountyGeo = {
+  fips: string;
+  name: string;
+  stateFips: string;
+  areaLandSqMeters?: number;
+};
+type PlaceGeo = {
+  fips: string;
+  name: string;
+  stateFips: string;
+  areaLandSqMeters?: number;
+};
 
 // Which geography level a given metric's number actually came from —
 // carried per-metric (not as one global flag) because a single request can
@@ -1323,12 +1866,34 @@ function cleanCityNameForMatch(city: string): string {
   return city.replace(/,\s*[A-Za-z]{2}$/, "").trim();
 }
 
+// Shared by fetchPlaceGeo and fetchCountyForPoint: TIGERweb's AREALAND
+// field is declared esriFieldTypeString on both the Places and Counties
+// layers (confirmed live against each layer's `?f=json` field list), so it
+// always arrives as a numeric-looking JSON string (e.g. "396460168") rather
+// than a JSON number — this parses it defensively, returning null for
+// anything missing or non-numeric rather than propagating NaN into the
+// density calculation.
+function parseArealand(value: string | undefined): number | null {
+  if (!value) return null;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
 type ArcgisPlaceFeature = {
   attributes?: {
     NAME?: string;
     PLACE?: string;
     STATE?: string;
     BASENAME?: string;
+    // Land area in square meters — added so the population-density Demand
+    // sub-signal (see populationDensityTierFor) can reuse this same
+    // TIGERweb call instead of issuing a separate request just for area.
+    // TIGERweb declares this field as esriFieldTypeString (confirmed live:
+    // `Places_CouSub_ConCity_SubMCD/MapServer/4?f=json` lists it as a
+    // string field), so it comes back JSON-quoted (e.g. "396460168") even
+    // though it's numeric data — parsed with Number() below, not read as a
+    // number directly.
+    AREALAND?: string;
   };
   geometry?: { rings?: number[][][] };
 };
@@ -1342,7 +1907,12 @@ type ArcgisPlaceFeature = {
 async function fetchPlaceGeo(
   baseName: string,
   stateFips: string,
-): Promise<{ fips: string; name: string; rings: number[][][] | null } | null> {
+): Promise<{
+  fips: string;
+  name: string;
+  rings: number[][][] | null;
+  areaLandSqMeters: number | null;
+} | null> {
   if (!baseName) return null;
   const escaped = escapeForArcgisLike(baseName);
   const url = new URL(TIGERWEB_PLACES_URL);
@@ -1350,7 +1920,7 @@ async function fetchPlaceGeo(
     "where",
     `UPPER(BASENAME) LIKE UPPER('${escaped}%') AND STATE='${stateFips}'`,
   );
-  url.searchParams.set("outFields", "NAME,PLACE,STATE,BASENAME");
+  url.searchParams.set("outFields", "NAME,PLACE,STATE,BASENAME,AREALAND");
   url.searchParams.set("returnGeometry", "true");
   // Simplifies the returned polygon (in meters, matching the default
   // 102100/Web Mercator output SR) so it's light enough to compute a
@@ -1377,6 +1947,7 @@ async function fetchPlaceGeo(
       fips: placeFips,
       name: best.attributes?.NAME ?? baseName,
       rings: best.geometry?.rings ?? null,
+      areaLandSqMeters: parseArealand(best.attributes?.AREALAND),
     };
   } catch {
     return null;
@@ -1461,7 +2032,10 @@ async function fetchCountyForPoint(
   url.searchParams.set("geometryType", "esriGeometryPoint");
   url.searchParams.set("inSR", "102100");
   url.searchParams.set("spatialRel", "esriSpatialRelIntersects");
-  url.searchParams.set("outFields", "NAME,COUNTY,STATE");
+  // AREALAND (land area in square meters) feeds the population-density
+  // Demand sub-signal (see populationDensityTierFor) — added to this
+  // existing outFields list rather than issuing a separate request.
+  url.searchParams.set("outFields", "NAME,COUNTY,STATE,AREALAND");
   url.searchParams.set("returnGeometry", "false");
   url.searchParams.set("f", "json");
   try {
@@ -1471,7 +2045,14 @@ async function fetchCountyForPoint(
     if (!response.ok) return null;
     const data = (await response.json()) as {
       features?: Array<{
-        attributes?: { NAME?: string; COUNTY?: string; STATE?: string };
+        attributes?: {
+          NAME?: string;
+          COUNTY?: string;
+          STATE?: string;
+          // Same esriFieldTypeString caveat as ArcgisPlaceFeature.AREALAND
+          // above — parsed with parseArealand(), not read as a number.
+          AREALAND?: string;
+        };
       }>;
     };
     const feature = data.features?.[0];
@@ -1481,6 +2062,8 @@ async function fetchCountyForPoint(
       fips: countyFips,
       name: feature?.attributes?.NAME ?? "the formation county",
       stateFips,
+      areaLandSqMeters:
+        parseArealand(feature?.attributes?.AREALAND) ?? undefined,
     };
   } catch {
     return null;
@@ -1511,6 +2094,7 @@ export async function resolveGeography(
     fips: placeLookup.fips,
     name: placeLookup.name,
     stateFips,
+    areaLandSqMeters: placeLookup.areaLandSqMeters ?? undefined,
   };
   const centroidPoint = placeLookup.rings
     ? polygonCentroid(placeLookup.rings)
@@ -1562,12 +2146,35 @@ async function fetchAcsState(
     );
     const row = await fetchCensusRow(url);
     if (!row) continue;
+
+    // Gini (B19083_001E) isn't on the "profile" flat file queried above —
+    // that dataset only serves DP-prefixed data-profile variables. The
+    // Gini index lives in the Census "detailed tables" dataset (B-prefixed
+    // variables), which is a genuinely separate API endpoint, not just a
+    // different query param — so this is a real second request, fetched at
+    // the same geography level that just resolved above rather than as an
+    // independent top-level fetch, so it stays scoped to whichever level
+    // (place/county/state) actually had usable data.
+    const giniUrl = censusUrl(
+      "https://api.census.gov/data/2023/acs/acs5",
+      key,
+      { get: "B19083_001E", ...params },
+    );
+    const giniRow = await fetchCensusRow(giniUrl);
+    // Census uses sentinel negative values (e.g. -666666666) for
+    // suppressed/unavailable cells, and a real Gini index is always in
+    // (0, 1], so anything outside that range is treated as unavailable
+    // rather than plugged into scoring as a bogus number.
+    const giniRaw = giniRow ? num(giniRow.B19083_001E) : 0;
+    const giniIndex = giniRaw > 0 && giniRaw <= 1 ? giniRaw : null;
+
     return {
       values: {
         population: num(row.DP05_0001E),
         medianIncome: num(row.DP03_0062E),
         povertyRate: num(row.DP03_0119PE),
         unemploymentRate: num(row.DP03_0009PE),
+        ...(giniIndex !== null ? { giniIndex } : {}),
       },
       geographyLevel: level,
       evidence: [
@@ -1598,8 +2205,107 @@ async function fetchAcsState(
           "strong",
           "startupDifficulty",
         ),
+        ...(giniIndex !== null
+          ? [
+              item(
+                "Income distribution (Gini index)",
+                giniIndex.toFixed(3),
+                `${row.NAME} income Gini index from ACS 5-year detailed tables (0 = perfect equality, 1 = maximum inequality) — used alongside median income to gauge how evenly spending power is spread across the local customer base.`,
+                "U.S. Census ACS",
+                giniUrl,
+                "medium",
+                "demand",
+              ),
+            ]
+          : []),
       ],
     };
+  }
+  return null;
+}
+
+// ── Age-relevant population heuristic (Demand's population sub-signal) ────
+// See ageFocusFor/ageAdjustmentMultiplier near populationTierFor below for
+// the scoring side. These are the ACS B01001 ("sex by age") sub-population
+// sums the heuristic needs — verified against the authoritative variable
+// list at https://api.census.gov/data/2023/acs/acs5/groups/B01001.json:
+//   - Male under 18: B01001_003E (under 5), 004E (5-9), 005E (10-14),
+//     006E (15-17); Female under 18: 027E-030E (same age bands).
+//   - Male 65+: B01001_020E (65-66), 021E (67-69), 022E (70-74),
+//     023E (75-79), 024E (80-84), 025E (85+); Female 65+: 044E-049E (same
+//     age bands).
+// B01001 is a "detailed table" (like the Gini index above), not on the DP
+// profile flat file fetchAcsState queries, so this is a genuinely separate
+// request — only ever issued when ageFocusFor() actually matched a
+// child/family or senior keyword, to avoid a wasted call on the common
+// no-match case.
+const CHILDREN_AGE_VARIABLES = [
+  "B01001_003E",
+  "B01001_004E",
+  "B01001_005E",
+  "B01001_006E",
+  "B01001_027E",
+  "B01001_028E",
+  "B01001_029E",
+  "B01001_030E",
+];
+const SENIOR_AGE_VARIABLES = [
+  "B01001_020E",
+  "B01001_021E",
+  "B01001_022E",
+  "B01001_023E",
+  "B01001_024E",
+  "B01001_025E",
+  "B01001_044E",
+  "B01001_045E",
+  "B01001_046E",
+  "B01001_047E",
+  "B01001_048E",
+  "B01001_049E",
+];
+
+// Mirrors fetchAcsState's place -> county -> state cascade (stopping at the
+// first level with a usable row) so the sub-population sum this returns is
+// at least the same kind of geography fetchAcsState's total population
+// figure came from, even though it's fetched independently. Returns the
+// geography level it actually resolved at alongside the sum so callers can
+// reason about (or just accept) a level mismatch if one ever occurs — e.g.
+// place-level data suppressed for this table but not for the DP profile.
+async function fetchAcsAgeBracket(
+  stateFips: string | undefined,
+  key: string | undefined,
+  place: PlaceGeo | null,
+  county: CountyGeo | null,
+  ageFocus: "children" | "seniors" | null,
+): Promise<{ sum: number; geographyLevel: GeographyLevel } | null> {
+  if (!stateFips || !ageFocus) return null;
+  const variables =
+    ageFocus === "children" ? CHILDREN_AGE_VARIABLES : SENIOR_AGE_VARIABLES;
+  const levels: Array<{
+    level: GeographyLevel;
+    params: { for: string; in?: string };
+  }> = [];
+  if (place)
+    levels.push({
+      level: "place",
+      params: { for: `place:${place.fips}`, in: `state:${stateFips}` },
+    });
+  if (county)
+    levels.push({
+      level: "county",
+      params: { for: `county:${county.fips}`, in: `state:${stateFips}` },
+    });
+  levels.push({ level: "state", params: { for: `state:${stateFips}` } });
+
+  for (const { level, params } of levels) {
+    const url = censusUrl("https://api.census.gov/data/2023/acs/acs5", key, {
+      get: variables.join(","),
+      ...params,
+    });
+    const row = await fetchCensusRow(url);
+    if (!row) continue;
+    const sum = variables.reduce((total, variable) => total + num(row[variable]), 0);
+    return { sum, geographyLevel: level };
   }
   return null;
 }
@@ -1701,6 +2407,15 @@ async function fetchNonemployerForCode(
         "medium",
         "revenue",
       ),
+      item(
+        "Nonemployer establishments",
+        num(row.NESTAB).toLocaleString(),
+        `${row.NAICS2022_LABEL} solo/no-paid-employee establishments in ${row.NAME}, used as an independent Demand signal alongside (not summed with) the CBP employer-establishment count.`,
+        "Census Nonemployer Statistics",
+        url,
+        "medium",
+        "demand",
+      ),
     ],
   };
 }
@@ -1770,6 +2485,66 @@ async function fetchBeaRegionalState(
           "Regional personal income",
           money(latest * 1000),
           `${STATE_NAMES[state] ?? state} BEA regional personal income changed ${growth.toFixed(1)}% from ${oldest.TimePeriod ?? "the earliest available period"} to ${newest.TimePeriod ?? "the latest available period"}.`,
+          "BEA Regional",
+          url.toString(),
+          "medium",
+          "demand",
+        ),
+      ],
+    };
+  } catch {
+    return null;
+  }
+}
+
+// BEA Regional Price Parities (RPP) — a cost-of-living index where 100 is
+// the national average — used to deflate nominal ACS median household
+// income into "real" purchasing-power terms for the income sub-score (see
+// incomeScoreFor/deflateIncomeForRpp). State-level (TableName=SARPP,
+// LineCode=1 = "All items") rather than metro-level (MARPP): getting a
+// metro/CBSA code for the resolved place would need a separate lookup this
+// resolver doesn't already do, and state-level RPP is still a real
+// improvement over no cost-of-living adjustment at all. Reuses the same
+// fetch shape as fetchBeaRegionalState just above (same host, UserID,
+// method, Year=LAST5-then-take-newest pattern) since that shape is already
+// verified to work against this API — RPP is a level, not a trend, so only
+// the newest row is used rather than computing growth across the range.
+async function fetchBeaRegionalPriceParity(
+  state: string,
+  stateFips: string | undefined,
+  key: string | undefined,
+): Promise<MetricSet | null> {
+  if (!stateFips || !key) return null;
+  const geoFips = `${stateFips}000`;
+  const url = new URL("https://apps.bea.gov/api/data");
+  url.searchParams.set("UserID", key);
+  url.searchParams.set("method", "GetData");
+  url.searchParams.set("datasetname", "Regional");
+  url.searchParams.set("TableName", "SARPP");
+  url.searchParams.set("LineCode", "1");
+  url.searchParams.set("GeoFIPS", geoFips);
+  url.searchParams.set("Year", "LAST5");
+  url.searchParams.set("ResultFormat", "JSON");
+  try {
+    const response = await fetch(url.toString());
+    if (!response.ok) return null;
+    const data = (await response.json()) as {
+      BEAAPI?: {
+        Results?: { Data?: Array<Record<string, string>>; Error?: unknown };
+      };
+    };
+    const rows = data.BEAAPI?.Results?.Data ?? [];
+    if (rows.length === 0) return null;
+    const newest = rows[rows.length - 1];
+    const rpp = num(newest.DataValue);
+    if (rpp <= 0) return null;
+    return {
+      values: { regionalPriceParity: rpp },
+      evidence: [
+        item(
+          "Regional price parity",
+          rpp.toFixed(1),
+          `${STATE_NAMES[state] ?? state} overall regional price parity index (100 = U.S. national average) as of ${newest.TimePeriod ?? "the latest available period"}, used to adjust nominal median household income for cost-of-living differences before scoring demand.`,
           "BEA Regional",
           url.toString(),
           "medium",
@@ -2077,7 +2852,10 @@ function lausUnavailableItem(state: string): EvidenceItem {
 // contributes a neutral ~50% of its max rather than 0, so a business isn't
 // unfairly penalized just because an optional data source (BFS/BEA both
 // need free API keys) wasn't configured.
-function trendPoints(trendPercent: number | null, maxPoints: number): number {
+export function trendPoints(
+  trendPercent: number | null,
+  maxPoints: number,
+): number {
   if (trendPercent === null) return Math.round(maxPoints * 0.5);
   if (trendPercent > 8) return maxPoints;
   if (trendPercent > 3) return Math.round(maxPoints * 0.75);

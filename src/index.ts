@@ -18,6 +18,7 @@ import {
 } from "./api/routes/api-gateway.js";
 import { handleError } from "./api/middleware/errors.js";
 import { importOewsCacheIfStale } from "./domain/labor/oews-cache.js";
+import { refreshReferenceDistributionsIfStale } from "./domain/market/reference-distribution-batch.js";
 import type { AppConfig } from "./config.js";
 import type { DeskAuthService as AuthServiceType } from "./infrastructure/auth/auth-service.js";
 
@@ -154,12 +155,35 @@ export default {
       rowsImported: 0,
       message: error instanceof Error ? error.message : String(error),
     }));
+    // Runs on the same daily cron trigger as the OEWS import above, but
+    // internally gated to a 30-day staleness check (see
+    // refreshReferenceDistributionsIfStale's doc comment) since ACS/CBP/
+    // Nonemployer data only meaningfully changes annually — daily checks
+    // are cheap (one D1 read), the actual national fetch only runs monthly.
+    const referenceDistributions = await refreshReferenceDistributionsIfStale(env).catch(
+      (error) => ({
+        status: "failed" as const,
+        metricsProcessed: 0,
+        valuesStored: 0,
+        breakpointsComputed: 0,
+        errors: [error instanceof Error ? error.message : String(error)],
+        startedAt: new Date().toISOString(),
+        finishedAt: new Date().toISOString(),
+      }),
+    );
     console.log(
       JSON.stringify({
         level: "info",
         event: "cron_session_cleanup",
         ts: new Date().toISOString(),
         oewsImport,
+        referenceDistributions: {
+          status: referenceDistributions.status,
+          metricsProcessed: referenceDistributions.metricsProcessed,
+          valuesStored: referenceDistributions.valuesStored,
+          breakpointsComputed: referenceDistributions.breakpointsComputed,
+          errorCount: referenceDistributions.errors.length,
+        },
       }),
     );
   },
