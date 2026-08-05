@@ -5,6 +5,8 @@ import {
   incomeEqualityTierFor,
   priceRelevanceMultiplier,
   incomeScoreFor,
+  revenueIncomeTierFor,
+  revenueIncomeScoreFor,
 } from '../api/routes/integrations/market-research.js';
 
 describe('deflateIncomeForRpp', () => {
@@ -205,6 +207,84 @@ describe('incomeScoreFor', () => {
       nominalIncome: 0,
       rpp: null,
       gini: 0.6,
+      pricingHypothesis: 'cheap budget deals',
+      targetMarket: '',
+    });
+    expect(result.score).toBeGreaterThanOrEqual(0);
+  });
+});
+
+describe('revenueIncomeTierFor', () => {
+  // Revenue's income signal deliberately stays nominal — no RPP deflation —
+  // so it reuses the exact same dollar breakpoints the flat income tier has
+  // always used, unlike incomeLevelTierFor which was rescaled to a 20-point
+  // max when Demand's income score split into two sub-buckets.
+  it('scores flat nominal-income tiers, not COL-adjusted', () => {
+    expect(revenueIncomeTierFor(100000)).toBe(25);
+    expect(revenueIncomeTierFor(60000)).toBe(17);
+    expect(revenueIncomeTierFor(30000)).toBe(9);
+  });
+
+  it('never exceeds 25', () => {
+    expect(revenueIncomeTierFor(10_000_000)).toBe(25);
+  });
+});
+
+describe('revenueIncomeScoreFor', () => {
+  it('applies no adjustment for neutral pricing/target-market text', () => {
+    const result = revenueIncomeScoreFor({
+      nominalIncome: 100000,
+      pricingHypothesis: '',
+      targetMarket: '',
+    });
+    expect(result.baseTier).toBe(25);
+    expect(result.multiplier).toBe(1);
+    expect(result.direction).toBe('neutral');
+    expect(result.score).toBe(25);
+  });
+
+  it('reuses priceRelevanceMultiplier to score up for premium-oriented businesses', () => {
+    const result = revenueIncomeScoreFor({
+      nominalIncome: 60000,
+      pricingHypothesis: 'Premium, high-end pricing',
+      targetMarket: 'Luxury clientele',
+    });
+    expect(result.baseTier).toBe(17);
+    expect(result.multiplier).toBe(1.15);
+    expect(result.direction).toBe('premium');
+    // 17 * 1.15 = 19.55 -> rounds to 20
+    expect(result.score).toBe(20);
+  });
+
+  it('reuses priceRelevanceMultiplier to score down for budget-oriented businesses', () => {
+    const result = revenueIncomeScoreFor({
+      nominalIncome: 60000,
+      pricingHypothesis: 'Affordable, low-cost pricing',
+      targetMarket: 'Budget-conscious shoppers',
+    });
+    expect(result.baseTier).toBe(17);
+    expect(result.multiplier).toBe(0.85);
+    expect(result.direction).toBe('budget');
+    // 17 * 0.85 = 14.45 -> rounds to 14
+    expect(result.score).toBe(14);
+  });
+
+  it('clamps the score to 25 even when a maxed-out premium case would otherwise exceed it', () => {
+    // base = 25 (top nominal-income tier), premium multiplier 1.15 -> 28.75
+    // -> rounds to 29, which must be clamped back down to exactly 25.
+    const result = revenueIncomeScoreFor({
+      nominalIncome: 200000,
+      pricingHypothesis: 'Exclusive, premium boutique pricing',
+      targetMarket: 'Upscale, high-end luxury buyers',
+    });
+    expect(result.baseTier).toBe(25);
+    expect(result.multiplier).toBe(1.15);
+    expect(result.score).toBe(25);
+  });
+
+  it('never produces a negative score for a budget-oriented business with zero income', () => {
+    const result = revenueIncomeScoreFor({
+      nominalIncome: 0,
       pricingHypothesis: 'cheap budget deals',
       targetMarket: '',
     });

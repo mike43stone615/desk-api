@@ -729,14 +729,20 @@ export function scoreStartupDifficulty(input: {
   return { score, rationale, reasons };
 }
 
-// Population/establishment/receipts tiers are sized for state-scale
-// magnitudes by default. Once a metric actually resolves at city or county
-// level (see resolveGeography/fetchAcsState/fetchCbpState/etc.), a city or
-// county almost never reaches the state-scale thresholds even for a strong
-// local market — so each of these picks a threshold table sized for the
-// geography level the underlying number actually came from. Income is
-// deliberately excluded from this scaling: a small city can have just as
-// high a median income as a big state, so income tiers stay absolute.
+// Population/establishment tiers are sized for state-scale magnitudes by
+// default. Once a metric actually resolves at city or county level (see
+// resolveGeography/fetchAcsState/fetchCbpState/etc.), a city or county
+// almost never reaches the state-scale thresholds even for a strong local
+// market — so each of these picks a threshold table sized for the geography
+// level the underlying number actually came from. Income is deliberately
+// excluded from this scaling: a small city can have just as high a median
+// income as a big state, so income tiers stay absolute. Revenue's receipts
+// and payroll tiers (see receiptsTierFor/payrollTierFor below) are also
+// excluded — once those inputs became true per-business averages rather
+// than jurisdiction-wide aggregates, jurisdiction-scaled thresholds stopped
+// making sense for them too, for the same reason income was never scaled:
+// "average receipts of a business in this category" isn't inherently
+// larger in a bigger jurisdiction the way a raw headcount or aggregate is.
 //
 // This used to be the entire population signal (40 of Demand's 100 points).
 // It's now the raw-headcount sub-signal only, scaled down from a 40-point
@@ -1041,29 +1047,79 @@ export function competitionEstablishmentFallbackScore(
   );
 }
 
-export function receiptsTierFor(
-  receipts: number,
-  level: GeographyLevel | undefined,
-): number {
-  // Nonemployer receipts never resolve at place level either (see the
-  // geography-support table), so — like establishments — this only
-  // branches between county and state scale, proportioned the same way.
-  if (level === "county") {
-    return receipts > 300000
-      ? 40
-      : receipts > 75000
-        ? 30
-        : receipts > 15000
-          ? 20
-          : 10;
-  }
-  return receipts > 1000000
-    ? 40
-    : receipts > 250000
-      ? 30
-      : receipts > 50000
-        ? 20
-        : 10;
+// Worth up to 30 of Revenue's 100 points (dropped from 40 to make room for
+// payrollTierFor below — see the 30+10+25+20+15 breakdown on revenueScore).
+//
+// This used to branch on geography level (a county-scale table sized around
+// >$300k/$75k/$15k, a state-scale table sized around >$1M/$250k/$50k) back
+// when `receipts` was NRCPTOT's raw jurisdiction-wide aggregate — a real
+// county or state total genuinely scales with how many businesses are being
+// summed. Now that `receipts` is the true average receipts per non-employer
+// business (aggregate / establishment count, see the buildCategories
+// comment where it's computed), a single business's average receipts isn't
+// inherently bigger in a bigger jurisdiction, so a jurisdiction split no
+// longer has a conceptual basis — this collapses both tables into one, and
+// the level parameter is dropped entirely rather than kept unused.
+//
+// Thresholds are calibrated against live Census Nonemployer Statistics
+// samples across 9 different NAICS 2-digit categories (both Denver County
+// and statewide Colorado): real average nonemployer receipts per business
+// ranged from about $19,700 (educational services) up to $142,000 (real
+// estate), clustering mostly in the $35,000-$90,000 band (e.g. professional
+// services ~$65k, construction ~$88k, health care ~$44k, food services
+// ~$38k) — nowhere close to either of the old tables' thresholds, which
+// were sized for jurisdiction-wide totals, not one business's receipts. The
+// same NAICS code scored consistently across county vs. state geography
+// (e.g. real estate landed in the top tier at both scales; educational
+// services landed in the bottom tier at both scales), confirming a single
+// table is the right model once the input is a genuine per-business average.
+// Prefer QCEW (can resolve to county level, like the rest of this file's
+// "prefer local over state" convention) over OEWS (always state-level) when
+// QCEW actually has a value, instead of Math.max(qcew, oews) — taking
+// whichever number happens to be numerically larger has nothing to do with
+// which source is more locally accurate, and could silently let a
+// less-granular statewide figure override a real county one just because it
+// happened to be bigger.
+export function preferredWage(qcewWage: number, oewsWage: number): number {
+  return qcewWage > 0 ? qcewWage : oewsWage;
+}
+
+export function receiptsTierFor(receipts: number): number {
+  return receipts > 100000
+    ? 30
+    : receipts > 60000
+      ? 20
+      : receipts > 30000
+        ? 10
+        : 4;
+}
+
+// Worth up to 10 of Revenue's 100 points — a secondary, independent Revenue
+// signal alongside receiptsTierFor: average annual PAYROLL per EMPLOYER
+// establishment (CBP), vs. receiptsTierFor's average RECEIPTS per
+// NON-employer establishment (Nonemployer Statistics). These reflect two
+// different slices of economic activity in the category — solo/no-employee
+// operators vs. staffed businesses — so they're deliberately kept as
+// separate sub-signals rather than blended into one, the same way Demand
+// keeps establishmentTierFor and nonemployerEstablishmentTierFor separate.
+//
+// Thresholds are calibrated against live CBP samples across 9 NAICS 2-digit
+// categories (Denver County and statewide Colorado): average annual payroll
+// per employer establishment ranged from about $339,000 (other services,
+// statewide) up to $2,706,000 (finance/insurance, county), with
+// professional services, health care, and educational services all landing
+// well above $1.4M. As expected, this runs on a much higher dollar scale
+// than non-employer average receipts — an employer business large enough to
+// carry paid staff naturally generates more revenue-adjacent economic
+// activity than a solo operator.
+export function payrollTierFor(avgAnnualPayroll: number): number {
+  return avgAnnualPayroll > 1500000
+    ? 10
+    : avgAnnualPayroll > 900000
+      ? 7
+      : avgAnnualPayroll > 500000
+        ? 4
+        : 1;
 }
 
 // ── Income sub-buckets (Demand's income signal, 25 pts total) ─────────────
@@ -1192,6 +1248,52 @@ export function incomeScoreFor(input: {
   return { score, realIncome, levelTier, equalityTier, multiplier, direction };
 }
 
+// ── Revenue's income signal (25 of Revenue's 100 points) ──────────────────
+// Unlike Demand's income score above, this is deliberately built on NOMINAL
+// median household income only — never deflated by BEA Regional Price
+// Parity. Demand asks "how large and well-funded is the potential customer
+// base," a real-purchasing-power question where $70k goes further in a
+// cheap area than an expensive one. Revenue asks a different question: how
+// many actual nominal dollars a business here can expect to bank — real
+// dollars in, at face value, regardless of what they'd buy elsewhere. A
+// business operating in an expensive metro literally collects more nominal
+// revenue per transaction than an identical business in a cheap one, even
+// though those dollars buy less once collected — so COL-adjusting this
+// figure would be answering the wrong question. This was an explicit,
+// deliberate decision, not an oversight — don't add RPP deflation here.
+//
+// Same dollar breakpoints the flat income tier has used all along.
+export function revenueIncomeTierFor(nominalIncome: number): number {
+  return nominalIncome > 75000 ? 25 : nominalIncome > 50000 ? 17 : 9;
+}
+
+// Applies the same priceRelevanceMultiplier Demand's income score uses (see
+// above) to the nominal income tier, reusing its budget/premium keyword
+// detection directly rather than duplicating it — a premium-positioned
+// business captures more nominal revenue per transaction in a higher-income
+// area, so nominal income should count for more toward Revenue; a
+// budget-positioned business's revenue is less sensitive to local income
+// levels. Clamped back to 25 so a maxed-out premium case can't exceed
+// Revenue's income point budget, mirroring incomeScoreFor's clamp.
+export function revenueIncomeScoreFor(input: {
+  nominalIncome: number;
+  pricingHypothesis: string;
+  targetMarket: string;
+}): {
+  score: number;
+  baseTier: number;
+  multiplier: number;
+  direction: "budget" | "premium" | "neutral";
+} {
+  const baseTier = revenueIncomeTierFor(input.nominalIncome);
+  const { multiplier, direction } = priceRelevanceMultiplier(
+    input.pricingHypothesis,
+    input.targetMarket,
+  );
+  const score = clamp(Math.round(baseTier * multiplier), 0, 25);
+  return { score, baseTier, multiplier, direction };
+}
+
 // Growth's floor used to be flat: beaGrowth <= 1 always scored 0, so a mild
 // -0.5% dip and a severe -10% contraction scored identically. This adds one
 // extra floor tier so genuinely severe contraction (worse than -2%) still
@@ -1302,17 +1404,19 @@ function buildCategories(
     : 0;
   // NRCPTOT (the underlying Census field) is the AGGREGATE total receipts
   // across every non-employer establishment in this NAICS code and
-  // geography — not a per-business figure. receiptsTierFor's thresholds
-  // (e.g. >$300k county, >$1M state) were sized for a single business's
-  // receipts, so scoring the raw aggregate against them was a real bug: any
-  // real category's countywide/statewide total trivially clears both
-  // thresholds, which meant this sub-signal always maxed out regardless of
-  // actual conditions (confirmed live: a Colorado query returned "$5.5
-  // billion in receipts" scored as if it were one business's revenue).
-  // Dividing by the establishment count (already fetched in the same
-  // Census call, no new request) turns it into the true average receipts
-  // per business, which is what the tier thresholds were actually meant to
-  // represent.
+  // geography — not a per-business figure. receiptsTierFor's old thresholds
+  // were sized for a single business's receipts, so scoring the raw
+  // aggregate against them was a real bug: any real category's
+  // countywide/statewide total trivially clears them, which meant this
+  // sub-signal always maxed out regardless of actual conditions (confirmed
+  // live: a Colorado query returned "$5.5 billion in receipts" scored as if
+  // it were one business's revenue). Dividing by the establishment count
+  // (already fetched in the same Census call, no new request) turns it into
+  // the true average receipts per business, which is what the tier
+  // thresholds were actually meant to represent. Since that average no
+  // longer scales with jurisdiction size, receiptsTierFor's county/state
+  // threshold split was also removed — see its own comment for the
+  // unified table and the live data it's calibrated against.
   const aggregateReceipts = input.nonemployer?.values.receipts ?? 0;
   const receiptsLevel = input.nonemployer?.geographyLevel;
   // Same Nonemployer Statistics fetch/MetricSet that produces `receipts`
@@ -1323,7 +1427,7 @@ function buildCategories(
     nonemployerEstablishments > 0
       ? aggregateReceipts / nonemployerEstablishments
       : 0;
-  const wages = Math.max(
+  const wages = preferredWage(
     input.qcew?.values.averageWeeklyWage ?? 0,
     input.oews?.values.meanWeeklyWage ?? 0,
   );
@@ -1543,21 +1647,45 @@ function buildCategories(
   }
 
   // ── Revenue: how much cash is likely moving through this category ──
-  const receiptsTier = receiptsTierFor(receipts, receiptsLevel);
-  // Deliberately uses nominal (not COL-adjusted) income — Revenue's scoring
-  // is out of scope for this change and must stay byte-for-byte identical
-  // to its prior behavior.
-  const revenueIncomeTier =
-    nominalIncome > 75000 ? 25 : nominalIncome > 50000 ? 17 : 9;
+  // 30 (receipts) + 10 (payroll) + 25 (income) + 20 (wage) + 15 (plan) = 100.
+  const receiptsTier = receiptsTierFor(receipts);
+  // CBP's PAYANN is, like NRCPTOT above, an AGGREGATE — total annual payroll
+  // summed across every EMPLOYER establishment in this NAICS code and
+  // geography (already fetched via fetchCbpForCode/fetchCbpState's existing
+  // `get=...,PAYANN` param, no new request) — so it needs the same
+  // aggregate-to-average treatment the receipts fix above applies, dividing
+  // by CBP's own employer establishment count (`establishments`, already
+  // computed above for Demand/Competition). This is a genuinely different
+  // signal from non-employer receipts: it reflects staffed, employer-business
+  // economic activity, which Revenue previously had zero visibility into.
+  // Guards against a zero/missing establishment count the same defensive way
+  // every other divide-by-establishment-count signal in this file does —
+  // skip the sub-signal (contribute 0) rather than divide by zero.
+  const aggregateAnnualPayroll = input.cbp?.values.annualPayroll ?? 0;
+  const avgAnnualPayroll =
+    establishments > 0 ? aggregateAnnualPayroll / establishments : 0;
+  const payrollTier = establishments > 0 ? payrollTierFor(avgAnnualPayroll) : 0;
+  const revenueIncome = revenueIncomeScoreFor({
+    nominalIncome,
+    pricingHypothesis: planText.pricingHypothesis,
+    targetMarket: planText.targetMarket,
+  });
+  const revenueIncomeTier = revenueIncome.score;
   const wageTier =
     wages > 0 && wages < 1200 ? 20 : wages > 0 && wages < 1800 ? 14 : 8;
   const planTier = planCompleteness >= 3 ? 15 : planCompleteness >= 1 ? 8 : 0;
   const revenueScore = clamp(
-    receiptsTier + revenueIncomeTier + wageTier + planTier,
+    receiptsTier + payrollTier + revenueIncomeTier + wageTier + planTier,
     0,
     100,
   );
   const revenueRationale = `${verdictWord(revenueScore)} revenue potential (${revenueScore}/100).`;
+  const revenueIncomeNote =
+    revenueIncome.direction === "neutral"
+      ? ""
+      : revenueIncome.direction === "premium"
+        ? " This is scored up because the pricing/target market notes read as premium-oriented, where a business captures more nominal revenue per transaction in a higher-income area."
+        : " This is scored down because the pricing/target market notes read as budget-oriented, where nominal local income matters less to per-transaction revenue.";
   const revenueReasons = rankedReasons([
     {
       text:
@@ -1567,7 +1695,14 @@ function buildCategories(
       weight: receiptsTier,
     },
     {
-      text: `Median household income of ${money(nominalIncome)} supports category-wide spending power.`,
+      text:
+        establishments > 0
+          ? `Employer businesses in this category average ${money(avgAnnualPayroll)} in annual payroll each in ${geoNameFor(establishmentsLevel)} (${money(aggregateAnnualPayroll)} total across ${establishments.toLocaleString()} employer establishments).`
+          : `No employer establishment count was available in ${geoNameFor(establishmentsLevel)} to compute an average payroll figure.`,
+      weight: payrollTier,
+    },
+    {
+      text: `Median household income of ${money(nominalIncome)} supports category-wide spending power.${revenueIncomeNote}`,
       weight: revenueIncomeTier,
     },
     {
@@ -2369,7 +2504,13 @@ async function fetchCbpForCode(
     values: {
       establishments: num(row.ESTAB),
       employment: num(row.EMP),
-      annualPayroll: num(row.PAYANN),
+      // Like NRCPTOT (see fetchNonemployerForCode), PAYANN is reported in
+      // thousands of dollars — Census's standard convention for dollar
+      // fields — so it's scaled up to real dollars the same way, here at
+      // fetch time rather than at use time, since annualPayroll is a raw
+      // aggregate CBP field with no other consumer that would expect the
+      // unscaled thousands value.
+      annualPayroll: num(row.PAYANN) * 1000,
     },
     geographyLevel: county ? "county" : "state",
     evidence: [

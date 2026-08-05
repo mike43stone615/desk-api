@@ -4,10 +4,27 @@ import {
   establishmentTierFor,
   nonemployerEstablishmentTierFor,
   receiptsTierFor,
+  payrollTierFor,
+  revenueIncomeScoreFor,
   competitionEstablishmentFallbackScore,
   trendPoints,
   growthTierFor,
+  preferredWage,
 } from '../api/routes/integrations/market-research.js';
+
+describe('preferredWage', () => {
+  it('prefers QCEW when it has a value, even if OEWS is numerically larger', () => {
+    expect(preferredWage(1000, 2000)).toBe(1000);
+  });
+
+  it('falls back to OEWS when QCEW is unavailable (zero)', () => {
+    expect(preferredWage(0, 1500)).toBe(1500);
+  });
+
+  it('returns 0 when neither source has data', () => {
+    expect(preferredWage(0, 0)).toBe(0);
+  });
+});
 
 describe('populationTierFor', () => {
   // populationTierFor's max was rescaled from 40 to 32 when population
@@ -213,20 +230,97 @@ describe('establishment-related Demand points cap at exactly 20 when every signa
 });
 
 describe('receiptsTierFor', () => {
-  it('uses the county-scale table when the level is "county"', () => {
-    expect(receiptsTierFor(350000, 'county')).toBe(40);
-    expect(receiptsTierFor(100000, 'county')).toBe(30);
-    expect(receiptsTierFor(20000, 'county')).toBe(20);
-    expect(receiptsTierFor(1000, 'county')).toBe(10);
+  // receiptsTierFor used to branch on geography level (separate county-scale
+  // and state-scale threshold tables) back when its input was NRCPTOT's raw
+  // jurisdiction-wide aggregate. Now that the input is the true average
+  // receipts per non-employer business (see buildCategories, where
+  // aggregateReceipts / nonemployerEstablishments is computed), the
+  // jurisdiction split no longer has a conceptual basis and was removed —
+  // the function now takes only the receipts figure, and scores identically
+  // regardless of what geography level that average happened to come from.
+  it('scores the same average-receipts figure identically regardless of any notion of geography level (no level parameter anymore)', () => {
+    expect(receiptsTierFor(150000)).toBe(30);
+    expect(receiptsTierFor(75000)).toBe(20);
+    expect(receiptsTierFor(45000)).toBe(10);
+    expect(receiptsTierFor(10000)).toBe(4);
   });
 
-  it('uses the state-scale table when the level is "state" or unknown (no regression)', () => {
-    for (const level of ['state', undefined] as const) {
-      expect(receiptsTierFor(1200000, level)).toBe(40);
-      expect(receiptsTierFor(300000, level)).toBe(30);
-      expect(receiptsTierFor(60000, level)).toBe(20);
-      expect(receiptsTierFor(1000, level)).toBe(10);
+  it('uses the unified threshold table calibrated against live per-business Nonemployer Statistics averages', () => {
+    expect(receiptsTierFor(100001)).toBe(30);
+    expect(receiptsTierFor(100000)).toBe(20); // exactly at the boundary, not above it
+    expect(receiptsTierFor(60001)).toBe(20);
+    expect(receiptsTierFor(30001)).toBe(10);
+    expect(receiptsTierFor(30000)).toBe(4);
+    expect(receiptsTierFor(0)).toBe(4);
+  });
+
+  it('never returns more than 30 points (receiptsTierFor is worth up to 30 of Revenue\'s 100 points, down from 40 now that payrollTierFor claims 10)', () => {
+    for (const receipts of [0, 10000, 50000, 100000, 500000, 5000000]) {
+      expect(receiptsTierFor(receipts)).toBeLessThanOrEqual(30);
     }
+  });
+});
+
+describe('payrollTierFor', () => {
+  // A secondary, independent Revenue signal alongside receiptsTierFor: the
+  // average annual payroll per EMPLOYER establishment (CBP), as opposed to
+  // receiptsTierFor's average receipts per NON-employer establishment
+  // (Nonemployer Statistics). Thresholds are calibrated against live CBP
+  // samples and run on a much higher dollar scale than the receipts
+  // thresholds, since an employer business large enough to carry paid staff
+  // generates more revenue-adjacent activity than a solo operator.
+  it('uses the calibrated threshold table', () => {
+    expect(payrollTierFor(2000000)).toBe(10);
+    expect(payrollTierFor(1000000)).toBe(7);
+    expect(payrollTierFor(600000)).toBe(4);
+    expect(payrollTierFor(200000)).toBe(1);
+  });
+
+  it('lands a verified live sample in the expected band', () => {
+    // Verified live sample: Denver County NAICS 54 CBP data (ESTAB=5,579,
+    // PAYANN=$8,036,050,000) implies an average annual payroll per employer
+    // establishment of roughly $1.44M for this category — well above the
+    // ~$65k average non-employer receipts the same category and county
+    // showed in Nonemployer Statistics, confirming payroll genuinely runs
+    // on a much higher dollar scale than receipts.
+    const avgPayroll = 1_440_516;
+    expect(payrollTierFor(avgPayroll)).toBe(7);
+  });
+
+  it('never returns more than 10 points (the payroll signal is worth up to 10 of Revenue\'s 100 points)', () => {
+    for (const payroll of [0, 100000, 500000, 900000, 1500000, 10000000]) {
+      expect(payrollTierFor(payroll)).toBeLessThanOrEqual(10);
+    }
+  });
+});
+
+describe('Revenue category maxes out at exactly 100 (30 receipts + 10 payroll + 25 income + 20 wage + 15 plan)', () => {
+  it('sums to exactly 100 when every sub-signal peaks', () => {
+    const peakReceiptsTier = receiptsTierFor(150000); // 30
+    const peakPayrollTier = payrollTierFor(2_000_000); // 10
+    const peakIncomeTier = revenueIncomeScoreFor({
+      nominalIncome: 100000,
+      pricingHypothesis: '',
+      targetMarket: '',
+    }).score; // 25
+    // wageTier and planTier are simple inline expressions in buildCategories
+    // (not standalone exported functions), so their known peak values —
+    // documented at the revenueScore computation in buildCategories — are
+    // asserted directly here: wageTier peaks at 20 when wages are reported
+    // and below $1,200/week, planTier peaks at 15 when planCompleteness>=3.
+    const peakWageTier = 20;
+    const peakPlanTier = 15;
+
+    expect(peakReceiptsTier).toBe(30);
+    expect(peakPayrollTier).toBe(10);
+    expect(peakIncomeTier).toBe(25);
+    expect(
+      peakReceiptsTier +
+        peakPayrollTier +
+        peakIncomeTier +
+        peakWageTier +
+        peakPlanTier,
+    ).toBe(100);
   });
 });
 
