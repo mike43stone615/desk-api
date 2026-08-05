@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
+  advanceReferenceDistributionBatch,
   refreshReferenceDistributionsIfStale,
   runReferenceDistributionBatch,
 } from "../domain/market/reference-distribution-batch.js";
@@ -9,6 +10,13 @@ import type { AppEnv } from "../config.js";
  * Minimal D1-shaped test double covering the query shapes the reference
  * distribution cache + batch job issue, plus oews_wage_rows (read by
  * fetchWagesFromOewsCache via the real lookupCachedOewsState).
+ *
+ * market_reference_batch_runs now carries shard-plan/cursor columns
+ * (shard_plan, next_shard_index, total_shards — see migrations/008) so the
+ * job can be resumed across many small ticks instead of completing in one
+ * call. This double persists all of that on the FakeD1 instance itself, so
+ * reusing one `fake` across multiple advanceReferenceDistributionBatch(env)
+ * calls in a test simulates what happens across real cron invocations.
  */
 class FakeD1 {
   values = new Map<
@@ -24,6 +32,9 @@ class FakeD1 {
     {
       id: string;
       status: string;
+      shard_plan: string;
+      next_shard_index: number;
+      total_shards: number;
       metrics_processed: number;
       values_stored: number;
       breakpoints_computed: number;
@@ -65,6 +76,24 @@ class FakeStatement {
         .sort((a, b) => (a.finished_at ?? "").localeCompare(b.finished_at ?? ""))
         .reverse();
       return completed[0] ? ({ finished_at: completed[0].finished_at } as unknown as T) : null;
+    }
+    if (sql.includes("SELECT id, started_at, shard_plan, next_shard_index")) {
+      const running = [...this.db.batchRuns.values()]
+        .filter((run) => run.status === "running")
+        .sort((a, b) => a.started_at.localeCompare(b.started_at))
+        .reverse();
+      const run = running[0];
+      return run
+        ? ({
+            id: run.id,
+            started_at: run.started_at,
+            shard_plan: run.shard_plan,
+            next_shard_index: run.next_shard_index,
+            values_stored: run.values_stored,
+            breakpoints_computed: run.breakpoints_computed,
+            errors: run.errors,
+          } as unknown as T)
+        : null;
     }
     if (sql.includes("FROM oews_wage_rows")) {
       // No OEWS rows are seeded in these tests; wages metric intentionally
@@ -120,10 +149,13 @@ class FakeStatement {
       return { meta: { changes: 1 } };
     }
     if (sql.startsWith("INSERT INTO market_reference_batch_runs")) {
-      const [id, startedAt] = this.args as [string, string];
+      const [id, startedAt, shardPlan, totalShards] = this.args as [string, string, string, number];
       this.db.batchRuns.set(id, {
         id,
         status: "running",
+        shard_plan: shardPlan,
+        next_shard_index: 0,
+        total_shards: totalShards,
         metrics_processed: 0,
         values_stored: 0,
         breakpoints_computed: 0,
@@ -134,16 +166,47 @@ class FakeStatement {
       return { meta: { changes: 1 } };
     }
     if (sql.startsWith("UPDATE market_reference_batch_runs")) {
-      const [status, metricsProcessed, valuesStored, breakpointsComputed, errors, finishedAt, id] =
-        this.args as [string, number, number, number, string, string, string];
+      if (sql.includes("status = 'failed'")) {
+        const [errors, finishedAt, id] = this.args as [string, string, string];
+        const row = this.db.batchRuns.get(id);
+        if (row) {
+          row.status = "failed";
+          row.errors = errors;
+          row.finished_at = finishedAt;
+        }
+        return { meta: { changes: row ? 1 : 0 } };
+      }
+      if (sql.includes("SET status = ?")) {
+        const [status, nextShardIndex, metricsProcessed, valuesStored, breakpointsComputed, errors, finishedAt, id] =
+          this.args as [string, number, number, number, number, string, string, string];
+        const row = this.db.batchRuns.get(id);
+        if (row) {
+          row.status = status;
+          row.next_shard_index = nextShardIndex;
+          row.metrics_processed = metricsProcessed;
+          row.values_stored = valuesStored;
+          row.breakpoints_computed = breakpointsComputed;
+          row.errors = errors;
+          row.finished_at = finishedAt;
+        }
+        return { meta: { changes: row ? 1 : 0 } };
+      }
+      // Plain per-shard progress update (no status/finished_at columns).
+      const [nextShardIndex, metricsProcessed, valuesStored, breakpointsComputed, errors, id] = this.args as [
+        number,
+        number,
+        number,
+        number,
+        string,
+        string,
+      ];
       const row = this.db.batchRuns.get(id);
       if (row) {
-        row.status = status;
+        row.next_shard_index = nextShardIndex;
         row.metrics_processed = metricsProcessed;
         row.values_stored = valuesStored;
         row.breakpoints_computed = breakpointsComputed;
         row.errors = errors;
-        row.finished_at = finishedAt;
       }
       return { meta: { changes: row ? 1 : 0 } };
     }
@@ -231,6 +294,9 @@ describe("runReferenceDistributionBatch", () => {
     expect(run.status).toBe("completed");
     expect(run.values_stored).toBe(55);
     expect(run.breakpoints_computed).toBeGreaterThanOrEqual(1);
+    // The full plan (all state/source shards + the final breakpoints
+    // shard) must have been drained in this one call.
+    expect(run.next_shard_index).toBe(run.total_shards);
   });
 
   it("never throws even when every source is unavailable", async () => {
@@ -257,6 +323,9 @@ describe("refreshReferenceDistributionsIfStale", () => {
     fake.batchRuns.set("run-1", {
       id: "run-1",
       status: "completed",
+      shard_plan: "[]",
+      next_shard_index: 0,
+      total_shards: 0,
       metrics_processed: 1,
       values_stored: 55,
       breakpoints_computed: 1,
@@ -279,6 +348,9 @@ describe("refreshReferenceDistributionsIfStale", () => {
     fake.batchRuns.set("run-1", {
       id: "run-1",
       status: "completed",
+      shard_plan: "[]",
+      next_shard_index: 0,
+      total_shards: 0,
       metrics_processed: 1,
       values_stored: 1,
       breakpoints_computed: 1,
@@ -291,5 +363,73 @@ describe("refreshReferenceDistributionsIfStale", () => {
     const result = await refreshReferenceDistributionsIfStale(env, 30);
 
     expect(result.status).toBe("completed");
+  });
+});
+
+describe("advanceReferenceDistributionBatch", () => {
+  it("skips (no network calls) when a recent completed run exists", async () => {
+    const fetchMock = installMockFetch();
+    const fake = new FakeD1();
+    const now = new Date().toISOString();
+    fake.batchRuns.set("run-1", {
+      id: "run-1",
+      status: "completed",
+      shard_plan: "[]",
+      next_shard_index: 0,
+      total_shards: 0,
+      metrics_processed: 1,
+      values_stored: 55,
+      breakpoints_computed: 1,
+      errors: "",
+      started_at: now,
+      finished_at: now,
+    });
+    const env = makeEnv(fake);
+
+    const result = await advanceReferenceDistributionBatch(env, 30);
+
+    expect(result.status).toBe("skipped");
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("processes only a bounded number of shards per tick, resumes across calls on the same run, and reaches the same totals a full drain would", async () => {
+    installMockFetch();
+    const fake = new FakeD1();
+    const env = makeEnv(fake);
+
+    let previousProcessed = 0;
+    let result = await advanceReferenceDistributionBatch(env);
+    expect(result.status).toBe("running");
+    expect(result.shardsProcessed).toBeGreaterThan(0);
+    // Bounded per-tick progress (SHARDS_PER_TICK): this run's shard plan
+    // has ~230 entries, so a single tick must not drain it all at once —
+    // that would just reproduce the original single-invocation bug.
+    expect(result.shardsProcessed).toBeLessThanOrEqual(10);
+    previousProcessed = result.shardsProcessed;
+
+    // Exactly one "running" batch run must exist in D1 between ticks (this
+    // is what lets a second cron invocation find and resume it).
+    expect([...fake.batchRuns.values()].filter((r) => r.status === "running").length).toBe(1);
+
+    let ticks = 1;
+    while (result.status === "running") {
+      result = await advanceReferenceDistributionBatch(env);
+      expect(result.shardsProcessed - previousProcessed).toBeLessThanOrEqual(10);
+      expect(result.shardsProcessed - previousProcessed).toBeGreaterThan(0);
+      previousProcessed = result.shardsProcessed;
+      ticks += 1;
+      expect(ticks).toBeLessThan(500); // guard against a runaway/infinite loop
+    }
+
+    expect(result.status).toBe("completed");
+    expect(result.shardsRemaining).toBe(0);
+    expect(ticks).toBeGreaterThan(1); // proves it actually took multiple ticks
+    expect(result.valuesStored).toBe(55); // same bfs-only total as the full-drain test
+    expect([...fake.batchRuns.values()].filter((r) => r.status === "running").length).toBe(0);
+
+    const bfsRows = [...fake.values.values()].filter(
+      (row) => row.metric === "bfs_trend" && row.jurisdiction_level === "state",
+    );
+    expect(bfsRows.length).toBe(55);
   });
 });

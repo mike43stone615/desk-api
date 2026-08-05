@@ -60,9 +60,15 @@ REGISTRY_API_URL = "https://registry-api.deskbusiness.co"
 ENVIRONMENT = "local"
 
 # -- Scheduled triggers --------------------------------------------------------
-# Runs deleteExpiredSessions() daily at 02:00 UTC.
+# "0 2 * * *"    — daily at 02:00 UTC: deleteExpiredSessions() + OEWS import.
+# "*/5 * * * *"  — every 5 minutes: advanceReferenceDistributionBatch(), which
+#                  processes a few shards of the national reference-distribution
+#                  refresh per tick (staleness-gated to ~monthly) instead of one
+#                  giant single-invocation pull. See
+#                  src/domain/market/reference-distribution-batch.ts's header
+#                  comment for why this is sharded across many cron ticks.
 [triggers]
-crons = ["0 2 * * *"]
+crons = ["0 2 * * *", "*/5 * * * *"]
 
 # -- Cloudflare Pages integration ----------------------------------------------
 # To serve the Flutter web app from Cloudflare Pages with this Worker as the

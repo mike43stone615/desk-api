@@ -4,11 +4,36 @@
 // market_reference_values / market_reference_breakpoints tables defined in
 // migrations/007_market_reference_distributions.sql.
 //
-// This is invoked from src/index.ts's scheduled() handler, alongside (not
-// instead of) the existing session cleanup and OEWS import. Nothing here
-// is a static snapshot: every run re-fetches live from Census/BLS/BEA and
-// recomputes breakpoints from what was just fetched, the same way
-// importOewsCacheIfStale re-imports BLS data on a staleness gate.
+// ── Why this is sharded, not one big fetch (see migrations/008) ──────────
+// The first version of this job fetched and stored the entire national
+// dataset inside a single Worker invocation. In production that hit
+// Cloudflare Workers' hard per-invocation subrequest ceiling ("Too many
+// subrequests by single Worker invocation") partway through — most of the
+// cost isn't the ~360-410 outbound HTTP calls (see the per-metric volume
+// notes below, still accurate for what a *single state* now costs), it's
+// the D1 upsert traffic: a full national place-level pull is ~30,000 Census
+// places, and upsertReferenceValues' chunked D1 .batch() calls scale with
+// row count, not request count. The run silently truncated: place/county
+// level never completed for any metric, and the five trend metrics (last
+// in fetch order) never got breakpoints computed at all.
+//
+// The fix: split the job into ~230 small, independent "shards" — one U.S.
+// state for a given source/level, or a final breakpoints pass — via
+// buildShardPlan(). A shard's own worst-case cost (its own HTTP calls plus
+// its own D1 upsert batches) stays comfortably under any per-invocation
+// subrequest ceiling. Two entry points consume the same shard plan:
+//   * runReferenceDistributionBatch  — drains the whole plan in one call.
+//     Safe for tests (no real Workers subrequest limit in vitest) and for
+//     manual/local one-shot runs, but must NOT be wired into the
+//     production cron directly — that reintroduces the exact bug above.
+//   * advanceReferenceDistributionBatch — processes at most SHARDS_PER_TICK
+//     shards, persists the cursor (next_shard_index) to
+//     market_reference_batch_runs, and returns. This is the production
+//     entry point, invoked by a frequent cron trigger (see index.ts's
+//     scheduled() and wrangler.toml's second cron pattern) so the full
+//     national refresh completes over many small ticks instead of one
+//     invocation. A crash mid-tick only re-does the last few shards (all
+//     upserts are idempotent via ON CONFLICT), never restarts from zero.
 //
 // ── Scope decision: establishments/receipts as one "all industries" series ──
 // Task said: fetch establishments/receipts distributions, using per-broad-
@@ -37,17 +62,18 @@
 // regression. If a later phase wants per-sector precision, this is the
 // place to add `establishments_{2-digit-naics}` series alongside this one.
 //
-// ── Request volume per metric/level (see runReferenceDistributionBatch) ──
+// ── Request volume per metric/level (unchanged from the original design) ──
 //   population, median_income, unemployment_rate (ACS, one combined fetch):
 //     state:    1 call  (for=state:* covers every state in one request)
-//     place:    51 calls (for=place:*&in=state:{fips}, one per state)
-//     county:   51 calls (for=county:*&in=state:{fips}, one per state)
+//     place:    51 calls (for=place:*&in=state:{fips}, one per state — now
+//               one shard per state, "acs:place:{code}")
+//     county:   51 calls (one shard per state, "acs:county:{code}")
 //   establishments_all (CBP, NAICS2017=00):
 //     state:    1 call attempted (state:*), falls back to 51 if empty
-//     county:   51 calls
+//     county:   51 calls (one shard per state, "cbp:county:{code}")
 //   receipts (Nonemployer, NAICS2022=00):
 //     state:    1 call attempted (state:*), falls back to 51 if empty
-//     county:   51 calls
+//     county:   51 calls (one shard per state, "nonemp:county:{code}")
 //   wages (state only): 0 external calls — reads the existing
 //     oews_wage_rows D1 cache via lookupCachedOewsState (51 D1 reads).
 //   bfs_trend (state only): 51 calls (Census BFS timeseries, per-state;
@@ -61,7 +87,8 @@
 //     newest and oldest vintage, joined by state FIPS).
 //   unemployment_trend (state only, LAUS): 51 calls (BLS v2 timeseries API
 //     is single-series-per-request in the form this codebase already uses).
-//   Grand total: roughly 360-410 HTTP requests per full refresh.
+//   Grand total: roughly 360-410 HTTP requests across the whole refresh —
+//   now spread across ~230 shards/ticks instead of one invocation.
 
 import type { AppEnv } from "../../config.js";
 import { parseConfig } from "../../config.js";
@@ -76,8 +103,9 @@ import {
 } from "./reference-distribution-cache.js";
 
 export type ReferenceDistributionBatchSummary = {
-  status: "completed" | "failed" | "skipped";
-  metricsProcessed: number;
+  status: "completed" | "failed" | "skipped" | "running";
+  /** Shards processed in this call (a shard is one state/source/level unit, or the final breakpoints pass — see buildShardPlan). */
+  shardsProcessed: number;
   valuesStored: number;
   breakpointsComputed: number;
   errors: string[];
@@ -123,16 +151,157 @@ const LAUS_UNEMPLOYMENT_RATE_SUFFIX = "0000000000003";
 
 type BlsTimeSeriesPoint = { year: string; period: string; value: string };
 
+// ── Per-sector-NAICS establishments/receipts (state level only) ──────────
+// Adds real per-industry percentile bands alongside the all-industries
+// aggregate (see reference-distribution-cache.ts's MarketReferenceMetric
+// doc comment) for a curated, bounded list of broad NAICS 2017 sectors —
+// county-level per-sector shards were deliberately left out of this pass
+// to keep the total shard count (see buildShardPlan) proportionate;
+// state-level is where most real lookups already resolve when place/county
+// data is unavailable or suppressed anyway.
+const SECTOR_NAICS_CODES = ["44-45", "72", "54", "62", "23", "81", "56", "71"];
+// Retail Trade; Accommodation & Food Services; Professional, Scientific &
+// Technical Services; Health Care & Social Assistance; Construction; Other
+// Services (except Public Administration); Administrative & Support
+// Services; Arts, Entertainment & Recreation — the broad NAICS 2017
+// sectors most small-business ideas in this app's industry library
+// (desk_business's business_classification_library.dart) are likely to
+// fall under. "44-45" and other combined-range codes are Census's own
+// literal NAICS2017 values for sectors officially defined as a combined
+// range (Retail Trade has no independent 2-digit "44" or "45" sector).
+
+// Every (metric, jurisdictionLevel) pair this cache ever populates. Static
+// rather than derived from in-memory fetched rows (the old design's
+// groupByMetricLevel) because computeAndStoreBreakpointsForMetric re-reads
+// from market_reference_values by metric/level anyway — it doesn't need
+// the rows in memory, so the final "breakpoints:all" shard can run
+// standalone, independent of which earlier shards actually stored data.
+const BREAKPOINT_METRIC_LEVELS: Array<[MarketReferenceMetric, JurisdictionLevel]> = [
+  ["population", "place"], ["population", "county"], ["population", "state"],
+  ["median_income", "place"], ["median_income", "county"], ["median_income", "state"],
+  ["unemployment_rate", "place"], ["unemployment_rate", "county"], ["unemployment_rate", "state"],
+  ["establishments_all", "county"], ["establishments_all", "state"],
+  ["receipts", "county"], ["receipts", "state"],
+  ["wages", "state"],
+  ["bfs_trend", "state"],
+  ["qcew_establishment_trend", "state"],
+  ["bea_income_growth", "state"],
+  ["population_trend", "state"],
+  ["unemployment_trend", "state"],
+  // Per-sector-NAICS establishments/receipts (state only) — see
+  // SECTOR_NAICS_CODES/fetchCbpEstablishmentsStateForNaics.
+  ...SECTOR_NAICS_CODES.flatMap(
+    (naics): Array<[MarketReferenceMetric, JurisdictionLevel]> => [
+      [`establishments_naics_${naics}`, "state"],
+      [`receipts_naics_${naics}`, "state"],
+    ],
+  ),
+];
+
+// Shards processed per advanceReferenceDistributionBatch tick. Worst-case
+// per-shard cost is one of the 51-56-call metrics (bfs/bea/unemptrend) or
+// wages' 51 D1 reads; a large state's acs:place shard is far cheaper
+// (~1,500 rows / VALUES_UPSERT_CHUNK_SIZE D1 batches + 1 fetch). 5 shards
+// per tick keeps worst-case cost per invocation around 5 x 56 = 280
+// subrequests — well under Cloudflare's per-invocation ceiling — while
+// finishing a full ~230-shard refresh in well under a day on a 5-minute
+// cron (see wrangler.toml's second [triggers] cron entry).
+const SHARDS_PER_TICK = 5;
+
+// If a run has been "running" for longer than this, something is wrong
+// (e.g. a deploy changed buildShardPlan mid-run, or a bug loops without
+// advancing the cursor) — treat it as failed so the next tick can start a
+// fresh run instead of being wedged forever. A full refresh is expected to
+// take hours, not days, at SHARDS_PER_TICK=5 on a 5-minute cron.
+const STUCK_RUN_MAX_AGE_DAYS = 3;
+
+// ── Shard plan ────────────────────────────────────────────────────────────
+
+/**
+ * The full, deterministic list of shard keys a national refresh consists
+ * of. Order matters only in that it's stable across calls (so a persisted
+ * next_shard_index continues to mean the same thing) — there's no
+ * dependency between shards. See the file header for why each shard's own
+ * cost stays small.
+ */
+export function buildShardPlan(): string[] {
+  const codes = Object.keys(STATE_FIPS);
+  const plan: string[] = ["acs:state"];
+  for (const code of codes) plan.push(`acs:place:${code}`);
+  for (const code of codes) plan.push(`acs:county:${code}`);
+  plan.push("cbp:state");
+  for (const code of codes) plan.push(`cbp:county:${code}`);
+  plan.push("nonemp:state");
+  for (const code of codes) plan.push(`nonemp:county:${code}`);
+  plan.push("wages:state", "bfs:state", "qcew:state", "bea:state", "poptrend:state", "unemptrend:state");
+  // Per-sector-NAICS establishments/receipts (state level only) — see
+  // SECTOR_NAICS_CODES's comment for why this curated list and not
+  // per-detailed-NAICS or every top-level sector.
+  for (const naics of SECTOR_NAICS_CODES) {
+    for (const code of codes) plan.push(`cbp-naics:${naics}:${code}`);
+  }
+  for (const naics of SECTOR_NAICS_CODES) {
+    for (const code of codes) plan.push(`nonemp-naics:${naics}:${code}`);
+  }
+  plan.push("breakpoints:all");
+  return plan;
+}
+
 // ── Public entry points ──────────────────────────────────────────────────
 
 /**
- * Runs the batch job only if the last completed run is older than
- * maxAgeDays, mirroring importOewsCacheIfStale's staleness gate. Default
- * is 30 days: ACS 5-year estimates and annual CBP/Nonemployer releases
- * only meaningfully change on an annual cadence, so checking daily (via
- * the existing cron) but only doing real work monthly is deliberately
- * cheap — this one D1 read is the only cost on the 29 days out of 30 the
- * job skips.
+ * One-shot, full-drain entry point: builds a shard plan and runs every
+ * shard to completion before returning. Fine for tests (no real Workers
+ * subrequest ceiling in vitest) and manual/local runs — do NOT wire this
+ * into the production cron; use advanceReferenceDistributionBatch there
+ * instead, or this reintroduces the single-invocation subrequest problem
+ * this file's header describes.
+ */
+export async function runReferenceDistributionBatch(
+  env: AppEnv,
+): Promise<ReferenceDistributionBatchSummary> {
+  const runId = crypto.randomUUID();
+  const startedAt = nowIso();
+  const plan = buildShardPlan();
+  await insertBatchRun(env.DB, runId, startedAt, plan);
+
+  const config = parseConfig(env);
+  const errors: string[] = [];
+  let valuesStored = 0;
+  let breakpointsComputed = 0;
+
+  for (let index = 0; index < plan.length; index += 1) {
+    const result = await processShard(env, config, plan[index], errors);
+    valuesStored += result.valuesStored;
+    breakpointsComputed += result.breakpointsComputed;
+    await updateBatchRunProgress(env.DB, runId, index + 1, valuesStored, breakpointsComputed, errors);
+  }
+
+  const finishedAt = nowIso();
+  const status = valuesStored > 0 ? "completed" : "failed";
+  await finalizeBatchRun(env.DB, runId, status, plan.length, valuesStored, breakpointsComputed, errors, finishedAt);
+
+  console.log(
+    JSON.stringify({
+      level: "info",
+      event: "reference_distribution_batch_finished",
+      runId,
+      status,
+      shardsProcessed: plan.length,
+      valuesStored,
+      breakpointsComputed,
+      errorCount: errors.length,
+    }),
+  );
+
+  return { status, shardsProcessed: plan.length, valuesStored, breakpointsComputed, errors, startedAt, finishedAt };
+}
+
+/**
+ * Manual/local staleness-gated full drain — mirrors
+ * advanceReferenceDistributionBatch's staleness check, but (like
+ * runReferenceDistributionBatch above) completes the whole refresh in one
+ * call. Not used by the production cron for the same reason.
  */
 export async function refreshReferenceDistributionsIfStale(
   env: AppEnv,
@@ -143,7 +312,7 @@ export async function refreshReferenceDistributionsIfStale(
     const now = nowIso();
     return {
       status: "skipped",
-      metricsProcessed: 0,
+      shardsProcessed: 0,
       valuesStored: 0,
       breakpointsComputed: 0,
       errors: [],
@@ -155,131 +324,190 @@ export async function refreshReferenceDistributionsIfStale(
 }
 
 /**
- * Fetches every metric/jurisdiction-level series live, stores raw values,
- * and recomputes decile breakpoints for whatever came back. Never throws —
- * a failure fetching one metric (or one state within a metric) is recorded
- * in the returned `errors` array and the rest of the batch still runs, the
- * same partial-failure posture as importOewsCache's flat-file fallback and
- * every per-request fetch* function in market-research.ts.
+ * Production entry point, invoked by the frequent cron tick (see
+ * index.ts's scheduled() and wrangler.toml's every-5-minutes cron trigger).
+ * Processes at most SHARDS_PER_TICK shards of whichever run is in
+ * progress — starting a new one (subject to the maxAgeDays staleness gate)
+ * if none is — persists progress after every shard, and returns without
+ * ever draining the full ~230-shard plan in one invocation.
  */
-export async function runReferenceDistributionBatch(
+export async function advanceReferenceDistributionBatch(
   env: AppEnv,
-): Promise<ReferenceDistributionBatchSummary> {
-  const runId = crypto.randomUUID();
-  const startedAt = nowIso();
-  await env.DB.prepare(
-    `INSERT INTO market_reference_batch_runs (id, status, started_at) VALUES (?, 'running', ?)`,
-  )
-    .bind(runId, startedAt)
-    .run();
-
-  const errors: string[] = [];
+  maxAgeDays = 30,
+): Promise<ReferenceDistributionBatchSummary & { shardsRemaining: number }> {
   const config = parseConfig(env);
 
-  const [
-    acsValues,
-    cbpValues,
-    nonemployerValues,
-    wageValues,
-    bfsValues,
-    qcewValues,
-    beaValues,
-    populationTrendValues,
-    unemploymentTrendValues,
-  ] = await Promise.all([
-    fetchAcsMetricsBulk(config.censusApiKey, errors),
-    fetchCbpEstablishmentsBulk(config.censusApiKey, errors),
-    fetchNonemployerReceiptsBulk(config.censusApiKey, errors),
-    fetchWagesFromOewsCache(env, errors),
-    fetchBfsTrendBulk(errors),
-    fetchQcewEstablishmentTrendBulk(errors),
-    fetchBeaIncomeGrowthBulk(config.beaApiKey, errors),
-    fetchPopulationTrendBulk(config.censusApiKey, errors),
-    fetchUnemploymentTrendBulk(errors),
-  ]);
-
-  const allValues = [
-    ...acsValues,
-    ...cbpValues,
-    ...nonemployerValues,
-    ...wageValues,
-    ...bfsValues,
-    ...qcewValues,
-    ...beaValues,
-    ...populationTrendValues,
-    ...unemploymentTrendValues,
-  ];
-
-  let valuesStored = 0;
-  let breakpointsComputed = 0;
-  let metricsProcessed = 0;
-
-  const grouped = groupByMetricLevel(allValues);
-  for (const [key, rows] of grouped) {
-    metricsProcessed += 1;
-    const [metric, jurisdictionLevel] = splitKey(key);
-    try {
-      valuesStored += await upsertReferenceValues(env.DB, rows);
-      const computed = await computeAndStoreBreakpointsForMetric(
-        env.DB,
-        metric,
-        jurisdictionLevel,
-      );
-      if (computed) {
-        breakpointsComputed += 1;
-      } else {
-        errors.push(
-          `${key}: sample size ${rows.length} below minimum, breakpoints not stored.`,
-        );
-      }
-    } catch (error) {
-      errors.push(
-        `${key} store/compute failed: ${error instanceof Error ? error.message : String(error)}`,
-      );
-    }
+  let run = await currentRunningBatchRun(env.DB);
+  if (run && daysSince(run.started_at) > STUCK_RUN_MAX_AGE_DAYS) {
+    await markBatchRunFailed(
+      env.DB,
+      run.id,
+      `abandoned: exceeded ${STUCK_RUN_MAX_AGE_DAYS}-day stuck-run threshold`,
+    );
+    run = null;
   }
 
-  const finishedAt = nowIso();
-  const status = allValues.length > 0 ? "completed" : "failed";
-  await env.DB.prepare(
-    `UPDATE market_reference_batch_runs
-        SET status = ?, metrics_processed = ?, values_stored = ?, breakpoints_computed = ?,
-            errors = ?, finished_at = ?
-      WHERE id = ?`,
-  )
-    .bind(
-      status,
-      metricsProcessed,
-      valuesStored,
-      breakpointsComputed,
-      errors.join("; ").slice(0, 4000),
-      finishedAt,
-      runId,
-    )
-    .run();
+  if (!run) {
+    const latest = await latestSuccessfulBatchRun(env.DB);
+    if (latest?.finished_at && daysSince(latest.finished_at) < maxAgeDays) {
+      const now = nowIso();
+      return {
+        status: "skipped",
+        shardsProcessed: 0,
+        valuesStored: 0,
+        breakpointsComputed: 0,
+        errors: [],
+        startedAt: now,
+        finishedAt: now,
+        shardsRemaining: 0,
+      };
+    }
+    const runId = crypto.randomUUID();
+    const startedAt = nowIso();
+    const plan = buildShardPlan();
+    await insertBatchRun(env.DB, runId, startedAt, plan);
+    run = {
+      id: runId,
+      started_at: startedAt,
+      shard_plan: JSON.stringify(plan),
+      next_shard_index: 0,
+      values_stored: 0,
+      breakpoints_computed: 0,
+      errors: "",
+    };
+  }
 
-  console.log(
-    JSON.stringify({
-      level: "info",
-      event: "reference_distribution_batch_finished",
-      runId,
+  const plan: string[] = JSON.parse(run.shard_plan);
+  const errors = run.errors ? run.errors.split("; ").filter(Boolean) : [];
+  let valuesStored = run.values_stored;
+  let breakpointsComputed = run.breakpoints_computed;
+  let index = run.next_shard_index;
+  const tickEnd = Math.min(plan.length, index + SHARDS_PER_TICK);
+
+  while (index < tickEnd) {
+    const result = await processShard(env, config, plan[index], errors);
+    valuesStored += result.valuesStored;
+    breakpointsComputed += result.breakpointsComputed;
+    index += 1;
+    await updateBatchRunProgress(env.DB, run.id, index, valuesStored, breakpointsComputed, errors);
+  }
+
+  if (index >= plan.length) {
+    const finishedAt = nowIso();
+    const status = valuesStored > 0 ? "completed" : "failed";
+    await finalizeBatchRun(env.DB, run.id, status, index, valuesStored, breakpointsComputed, errors, finishedAt);
+    console.log(
+      JSON.stringify({
+        level: "info",
+        event: "reference_distribution_batch_finished",
+        runId: run.id,
+        status,
+        shardsProcessed: index,
+        valuesStored,
+        breakpointsComputed,
+        errorCount: errors.length,
+      }),
+    );
+    return {
       status,
-      metricsProcessed,
+      shardsProcessed: index,
       valuesStored,
       breakpointsComputed,
-      errorCount: errors.length,
-    }),
-  );
+      errors,
+      startedAt: run.started_at,
+      finishedAt,
+      shardsRemaining: 0,
+    };
+  }
 
   return {
-    status,
-    metricsProcessed,
+    status: "running",
+    shardsProcessed: index,
     valuesStored,
     breakpointsComputed,
     errors,
-    startedAt,
-    finishedAt,
+    startedAt: run.started_at,
+    finishedAt: null,
+    shardsRemaining: plan.length - index,
   };
+}
+
+// ── Shard execution ───────────────────────────────────────────────────────
+
+async function processShard(
+  env: AppEnv,
+  config: ReturnType<typeof parseConfig>,
+  shardKey: string,
+  errors: string[],
+): Promise<{ valuesStored: number; breakpointsComputed: number }> {
+  if (shardKey === "breakpoints:all") {
+    let breakpointsComputed = 0;
+    for (const [metric, level] of BREAKPOINT_METRIC_LEVELS) {
+      try {
+        const computed = await computeAndStoreBreakpointsForMetric(env.DB, metric, level);
+        if (computed) {
+          breakpointsComputed += 1;
+        } else {
+          errors.push(`${metric}::${level}: sample size below minimum, breakpoints not stored.`);
+        }
+      } catch (error) {
+        errors.push(`${metric}::${level} breakpoints failed: ${errorMessage(error)}`);
+      }
+    }
+    return { valuesStored: 0, breakpointsComputed };
+  }
+
+  const rows = await fetchShardRows(env, config, shardKey, errors);
+  if (rows.length === 0) return { valuesStored: 0, breakpointsComputed: 0 };
+  try {
+    const stored = await upsertReferenceValues(env.DB, rows);
+    return { valuesStored: stored, breakpointsComputed: 0 };
+  } catch (error) {
+    errors.push(`${shardKey} store failed: ${errorMessage(error)}`);
+    return { valuesStored: 0, breakpointsComputed: 0 };
+  }
+}
+
+async function fetchShardRows(
+  env: AppEnv,
+  config: ReturnType<typeof parseConfig>,
+  shardKey: string,
+  errors: string[],
+): Promise<ReferenceValueRow[]> {
+  const [kind, sub, code] = shardKey.split(":");
+  switch (kind) {
+    case "acs":
+      if (sub === "state") return fetchAcsLevel(config.censusApiKey, "state", "state:*", undefined, errors);
+      if (sub === "place") return fetchAcsLevel(config.censusApiKey, "place", "place:*", `state:${STATE_FIPS[code]}`, errors);
+      if (sub === "county") return fetchAcsLevel(config.censusApiKey, "county", "county:*", `state:${STATE_FIPS[code]}`, errors);
+      return [];
+    case "cbp":
+      return sub === "state"
+        ? fetchCbpEstablishmentsState(config.censusApiKey, errors)
+        : fetchCbpEstablishmentsCountyForState(config.censusApiKey, code, errors);
+    case "nonemp":
+      return sub === "state"
+        ? fetchNonemployerReceiptsState(config.censusApiKey, errors)
+        : fetchNonemployerReceiptsCountyForState(config.censusApiKey, code, errors);
+    case "cbp-naics":
+      return fetchCbpEstablishmentsStateForNaics(config.censusApiKey, sub, code, errors);
+    case "nonemp-naics":
+      return fetchNonemployerReceiptsStateForNaics(config.censusApiKey, sub, code, errors);
+    case "wages":
+      return fetchWagesFromOewsCache(env, errors);
+    case "bfs":
+      return fetchBfsTrendBulk(errors);
+    case "qcew":
+      return fetchQcewEstablishmentTrendBulk(errors);
+    case "bea":
+      return fetchBeaIncomeGrowthBulk(config.beaApiKey, errors);
+    case "poptrend":
+      return fetchPopulationTrendBulk(config.censusApiKey, errors);
+    case "unemptrend":
+      return fetchUnemploymentTrendBulk(errors);
+    default:
+      return [];
+  }
 }
 
 // ── ACS: population, median_income, unemployment_rate ───────────────────
@@ -288,26 +516,6 @@ export async function runReferenceDistributionBatch(
 // uses in market-research.ts.
 
 const ACS_GET_FIELDS = "NAME,DP05_0001E,DP03_0062E,DP03_0009PE";
-
-async function fetchAcsMetricsBulk(
-  key: string | undefined,
-  errors: string[],
-): Promise<ReferenceValueRow[]> {
-  const all: ReferenceValueRow[] = [];
-
-  const stateLevel = await fetchAcsLevel(key, "state", "state:*", undefined, errors);
-  all.push(...stateLevel);
-
-  const perStateLevels = await Promise.all(
-    Object.values(STATE_FIPS).flatMap((stateFips) => [
-      fetchAcsLevel(key, "place", "place:*", `state:${stateFips}`, errors),
-      fetchAcsLevel(key, "county", "county:*", `state:${stateFips}`, errors),
-    ]),
-  );
-  for (const rows of perStateLevels) all.push(...rows);
-
-  return all;
-}
 
 async function fetchAcsLevel(
   key: string | undefined,
@@ -366,14 +574,15 @@ async function fetchAcsLevel(
 
 // ── CBP establishments / Nonemployer receipts (NAICS "00" = all sectors) ──
 // See the file-header comment for why this uses the all-sectors aggregate
-// instead of per-detailed-NAICS or per-broad-sector series.
+// instead of per-detailed-NAICS or per-broad-sector series. Split into a
+// state-level function (bulk state:* with a per-state fallback, unchanged
+// from the original design) and a per-state county function, so each can
+// be its own shard.
 
-async function fetchCbpEstablishmentsBulk(
+async function fetchCbpEstablishmentsState(
   key: string | undefined,
   errors: string[],
 ): Promise<ReferenceValueRow[]> {
-  const all: ReferenceValueRow[] = [];
-
   const bulkState = await safeFetch("CBP state:* NAICS2017=00", errors, () =>
     fetchCensusJsonRows(
       censusUrl("https://api.census.gov/data/2023/cbp", key, {
@@ -384,49 +593,50 @@ async function fetchCbpEstablishmentsBulk(
     ),
   );
   if (bulkState && bulkState.length > 1) {
-    all.push(...rowsToValues(bulkState, "establishments_all", "state", "ESTAB"));
-  } else {
-    const perState = await Promise.all(
-      Object.values(STATE_FIPS).map((stateFips) =>
-        safeFetch(`CBP state ${stateFips} NAICS2017=00`, errors, () =>
-          fetchCensusJsonRows(
-            censusUrl("https://api.census.gov/data/2023/cbp", key, {
-              get: "NAME,ESTAB",
-              for: `state:${stateFips}`,
-              NAICS2017: "00",
-            }),
-          ),
-        ),
-      ),
-    );
-    for (const rows of perState) if (rows) all.push(...rowsToValues(rows, "establishments_all", "state", "ESTAB"));
+    return rowsToValues(bulkState, "establishments_all", "state", "ESTAB");
   }
-
-  const perCounty = await Promise.all(
+  const perState = await Promise.all(
     Object.values(STATE_FIPS).map((stateFips) =>
-      safeFetch(`CBP county ${stateFips} NAICS2017=00`, errors, () =>
+      safeFetch(`CBP state ${stateFips} NAICS2017=00`, errors, () =>
         fetchCensusJsonRows(
           censusUrl("https://api.census.gov/data/2023/cbp", key, {
             get: "NAME,ESTAB",
-            for: "county:*",
-            in: `state:${stateFips}`,
+            for: `state:${stateFips}`,
             NAICS2017: "00",
           }),
         ),
       ),
     ),
   );
-  for (const rows of perCounty) if (rows) all.push(...rowsToValues(rows, "establishments_all", "county", "ESTAB"));
-
-  return all;
+  const out: ReferenceValueRow[] = [];
+  for (const rows of perState) if (rows) out.push(...rowsToValues(rows, "establishments_all", "state", "ESTAB"));
+  return out;
 }
 
-async function fetchNonemployerReceiptsBulk(
+async function fetchCbpEstablishmentsCountyForState(
+  key: string | undefined,
+  stateCode: string,
+  errors: string[],
+): Promise<ReferenceValueRow[]> {
+  const stateFips = STATE_FIPS[stateCode];
+  if (!stateFips) return [];
+  const rows = await safeFetch(`CBP county ${stateFips} NAICS2017=00`, errors, () =>
+    fetchCensusJsonRows(
+      censusUrl("https://api.census.gov/data/2023/cbp", key, {
+        get: "NAME,ESTAB",
+        for: "county:*",
+        in: `state:${stateFips}`,
+        NAICS2017: "00",
+      }),
+    ),
+  );
+  return rows ? rowsToValues(rows, "establishments_all", "county", "ESTAB") : [];
+}
+
+async function fetchNonemployerReceiptsState(
   key: string | undefined,
   errors: string[],
 ): Promise<ReferenceValueRow[]> {
-  const all: ReferenceValueRow[] = [];
-
   const bulkState = await safeFetch("Nonemployer state:* NAICS2022=00", errors, () =>
     fetchCensusJsonRows(
       censusUrl("https://api.census.gov/data/2023/nonemp", key, {
@@ -437,41 +647,84 @@ async function fetchNonemployerReceiptsBulk(
     ),
   );
   if (bulkState && bulkState.length > 1) {
-    all.push(...rowsToValues(bulkState, "receipts", "state", "NRCPTOT", 1000));
-  } else {
-    const perState = await Promise.all(
-      Object.values(STATE_FIPS).map((stateFips) =>
-        safeFetch(`Nonemployer state ${stateFips} NAICS2022=00`, errors, () =>
-          fetchCensusJsonRows(
-            censusUrl("https://api.census.gov/data/2023/nonemp", key, {
-              get: "NAME,NRCPTOT",
-              for: `state:${stateFips}`,
-              NAICS2022: "00",
-            }),
-          ),
-        ),
-      ),
-    );
-    for (const rows of perState) if (rows) all.push(...rowsToValues(rows, "receipts", "state", "NRCPTOT", 1000));
+    return rowsToValues(bulkState, "receipts", "state", "NRCPTOT", 1000);
   }
-
-  const perCounty = await Promise.all(
+  const perState = await Promise.all(
     Object.values(STATE_FIPS).map((stateFips) =>
-      safeFetch(`Nonemployer county ${stateFips} NAICS2022=00`, errors, () =>
+      safeFetch(`Nonemployer state ${stateFips} NAICS2022=00`, errors, () =>
         fetchCensusJsonRows(
           censusUrl("https://api.census.gov/data/2023/nonemp", key, {
             get: "NAME,NRCPTOT",
-            for: "county:*",
-            in: `state:${stateFips}`,
+            for: `state:${stateFips}`,
             NAICS2022: "00",
           }),
         ),
       ),
     ),
   );
-  for (const rows of perCounty) if (rows) all.push(...rowsToValues(rows, "receipts", "county", "NRCPTOT", 1000));
+  const out: ReferenceValueRow[] = [];
+  for (const rows of perState) if (rows) out.push(...rowsToValues(rows, "receipts", "state", "NRCPTOT", 1000));
+  return out;
+}
 
-  return all;
+async function fetchCbpEstablishmentsStateForNaics(
+  key: string | undefined,
+  naics: string,
+  stateCode: string,
+  errors: string[],
+): Promise<ReferenceValueRow[]> {
+  const stateFips = STATE_FIPS[stateCode];
+  if (!stateFips) return [];
+  const rows = await safeFetch(`CBP state ${stateFips} NAICS2017=${naics}`, errors, () =>
+    fetchCensusJsonRows(
+      censusUrl("https://api.census.gov/data/2023/cbp", key, {
+        get: "NAME,ESTAB",
+        for: `state:${stateFips}`,
+        NAICS2017: naics,
+      }),
+    ),
+  );
+  return rows ? rowsToValues(rows, `establishments_naics_${naics}`, "state", "ESTAB") : [];
+}
+
+async function fetchNonemployerReceiptsStateForNaics(
+  key: string | undefined,
+  naics: string,
+  stateCode: string,
+  errors: string[],
+): Promise<ReferenceValueRow[]> {
+  const stateFips = STATE_FIPS[stateCode];
+  if (!stateFips) return [];
+  const rows = await safeFetch(`Nonemployer state ${stateFips} NAICS2022=${naics}`, errors, () =>
+    fetchCensusJsonRows(
+      censusUrl("https://api.census.gov/data/2023/nonemp", key, {
+        get: "NAME,NRCPTOT",
+        for: `state:${stateFips}`,
+        NAICS2022: naics,
+      }),
+    ),
+  );
+  return rows ? rowsToValues(rows, `receipts_naics_${naics}`, "state", "NRCPTOT", 1000) : [];
+}
+
+async function fetchNonemployerReceiptsCountyForState(
+  key: string | undefined,
+  stateCode: string,
+  errors: string[],
+): Promise<ReferenceValueRow[]> {
+  const stateFips = STATE_FIPS[stateCode];
+  if (!stateFips) return [];
+  const rows = await safeFetch(`Nonemployer county ${stateFips} NAICS2022=00`, errors, () =>
+    fetchCensusJsonRows(
+      censusUrl("https://api.census.gov/data/2023/nonemp", key, {
+        get: "NAME,NRCPTOT",
+        for: "county:*",
+        in: `state:${stateFips}`,
+        NAICS2022: "00",
+      }),
+    ),
+  );
+  return rows ? rowsToValues(rows, "receipts", "county", "NRCPTOT", 1000) : [];
 }
 
 function rowsToValues(
@@ -533,7 +786,7 @@ async function fetchWagesFromOewsCache(
           value: wage,
         };
       } catch (error) {
-        errors.push(`OEWS wage lookup ${code}: ${error instanceof Error ? error.message : String(error)}`);
+        errors.push(`OEWS wage lookup ${code}: ${errorMessage(error)}`);
         return null;
       }
     }),
@@ -809,7 +1062,7 @@ async function safeFetch<T>(
   try {
     return await fn();
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
+    const message = errorMessage(error);
     errors.push(`${label}: ${message}`);
     console.error(
       JSON.stringify({
@@ -821,6 +1074,10 @@ async function safeFetch<T>(
     );
     return null;
   }
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }
 
 function censusUrl(base: string, key: string | undefined, params: Record<string, string>): string {
@@ -874,20 +1131,102 @@ function parseCsvLine(line: string): string[] {
   return values;
 }
 
-function groupByMetricLevel(rows: ReferenceValueRow[]): Map<string, ReferenceValueRow[]> {
-  const map = new Map<string, ReferenceValueRow[]>();
-  for (const row of rows) {
-    const key = `${row.metric}::${row.jurisdictionLevel}`;
-    const bucket = map.get(key);
-    if (bucket) bucket.push(row);
-    else map.set(key, [row]);
-  }
-  return map;
+// ── Batch run persistence (market_reference_batch_runs) ──────────────────
+
+type RunningBatchRun = {
+  id: string;
+  started_at: string;
+  shard_plan: string;
+  next_shard_index: number;
+  values_stored: number;
+  breakpoints_computed: number;
+  errors: string;
+};
+
+async function currentRunningBatchRun(db: D1Database): Promise<RunningBatchRun | null> {
+  return db
+    .prepare(
+      `SELECT id, started_at, shard_plan, next_shard_index, values_stored, breakpoints_computed, errors
+         FROM market_reference_batch_runs
+        WHERE status = 'running'
+        ORDER BY started_at DESC
+        LIMIT 1`,
+    )
+    .first<RunningBatchRun>();
 }
 
-function splitKey(key: string): [MarketReferenceMetric, JurisdictionLevel] {
-  const [metric, level] = key.split("::");
-  return [metric as MarketReferenceMetric, level as JurisdictionLevel];
+async function insertBatchRun(
+  db: D1Database,
+  runId: string,
+  startedAt: string,
+  plan: string[],
+): Promise<void> {
+  await db
+    .prepare(
+      `INSERT INTO market_reference_batch_runs
+         (id, status, started_at, shard_plan, next_shard_index, total_shards)
+       VALUES (?, 'running', ?, ?, 0, ?)`,
+    )
+    .bind(runId, startedAt, JSON.stringify(plan), plan.length)
+    .run();
+}
+
+// next_shard_index doubles as this run's "shards processed so far" count —
+// stored in the metrics_processed column (a holdover name from before this
+// job was sharded; it now counts shards, not metric/level groups).
+async function updateBatchRunProgress(
+  db: D1Database,
+  runId: string,
+  nextShardIndex: number,
+  valuesStored: number,
+  breakpointsComputed: number,
+  errors: string[],
+): Promise<void> {
+  await db
+    .prepare(
+      `UPDATE market_reference_batch_runs
+          SET next_shard_index = ?, metrics_processed = ?, values_stored = ?,
+              breakpoints_computed = ?, errors = ?
+        WHERE id = ?`,
+    )
+    .bind(nextShardIndex, nextShardIndex, valuesStored, breakpointsComputed, joinErrors(errors), runId)
+    .run();
+}
+
+async function finalizeBatchRun(
+  db: D1Database,
+  runId: string,
+  status: string,
+  shardsProcessed: number,
+  valuesStored: number,
+  breakpointsComputed: number,
+  errors: string[],
+  finishedAt: string,
+): Promise<void> {
+  await db
+    .prepare(
+      `UPDATE market_reference_batch_runs
+          SET status = ?, next_shard_index = ?, metrics_processed = ?, values_stored = ?,
+              breakpoints_computed = ?, errors = ?, finished_at = ?
+        WHERE id = ?`,
+    )
+    .bind(status, shardsProcessed, shardsProcessed, valuesStored, breakpointsComputed, joinErrors(errors), finishedAt, runId)
+    .run();
+}
+
+async function markBatchRunFailed(db: D1Database, runId: string, reason: string): Promise<void> {
+  await db
+    .prepare(
+      `UPDATE market_reference_batch_runs
+          SET status = 'failed', errors = ?, finished_at = ?
+        WHERE id = ?`,
+    )
+    .bind(reason, nowIso(), runId)
+    .run();
+}
+
+function joinErrors(errors: string[]): string {
+  return errors.join("; ").slice(0, 4000);
 }
 
 async function latestSuccessfulBatchRun(

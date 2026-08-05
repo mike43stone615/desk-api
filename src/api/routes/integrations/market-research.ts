@@ -3,6 +3,8 @@ import type { AppConfig, AppEnv } from "../../../config.js";
 import { ApiError } from "../../middleware/errors.js";
 import { lookupCachedOewsState } from "../../../domain/labor/oews-cache.js";
 import { lookupPercentileRank } from "../../../domain/market/reference-distribution-cache.js";
+import { lookupCommuterJobs } from "../../../domain/market/commuter-density-batch.js";
+import { lookupSbaLendingActivity } from "../../../domain/market/sba-lending-batch.js";
 
 type Env = { Bindings: AppEnv; Variables: { config: AppConfig } };
 
@@ -31,7 +33,18 @@ type CategoryKey =
   | "revenue"
   | "startupDifficulty"
   | "regulatoryFriction"
-  | "outlook";
+  | "outlook"
+  // Only produced when the business idea's geographicScope is "National"
+  // (see buildCategories) — a local coffee cart has no meaningful "national
+  // addressable market", so this category is omitted from the response
+  // entirely rather than shown with a misleading score for local ideas.
+  | "nationalReach"
+  // Only produced when the SBA lending batch job (sba-lending-batch.ts) has
+  // populated at least one loan record for this state/NAICS pair — see
+  // lookupSbaLendingActivity. Omitted (not shown at 0) when unavailable,
+  // same "don't show a misleading score for missing data" rule as
+  // nationalReach.
+  | "accessToCapital";
 
 const CATEGORY_LABELS: Record<CategoryKey, string> = {
   demand: "Demand",
@@ -40,6 +53,8 @@ const CATEGORY_LABELS: Record<CategoryKey, string> = {
   startupDifficulty: "Startup Difficulty",
   regulatoryFriction: "Regulatory Friction",
   outlook: "Outlook",
+  nationalReach: "National Reach",
+  accessToCapital: "Access to Capital",
 };
 
 type EvidenceItem = {
@@ -221,6 +236,8 @@ router.post("/analyze", async (c) => {
   // conditional ACS age-bracket fetch (see fetchAcsAgeBracket) only fires
   // when it actually matters — see ageFocusFor for the keyword rules.
   const ageFocus = ageFocusFor(industry, businessIdea);
+  const geographicScopeNormalized = clean(body.geographicScope).toLowerCase();
+  const isNationalScope = geographicScopeNormalized === "national";
 
   const [
     acs,
@@ -242,6 +259,14 @@ router.post("/analyze", async (c) => {
     populationTrend,
     lausTrend,
     acsAgeBracket,
+    cbpNational,
+    nonemployerNational,
+    nationalPopulation,
+    bfsNationalTrend,
+    beaConsumerSpending,
+    ppiTrend,
+    commuterJobs,
+    sbaLending,
   ] = await Promise.all([
     fetchAcsState(stateFips, config.censusApiKey, place, county),
     fetchCbpState(stateFips, naicsCodes, config.censusApiKey, county),
@@ -274,6 +299,31 @@ router.post("/analyze", async (c) => {
     fetchPopulationTrend(stateFips, config.censusApiKey, place, county),
     fetchLausTrend(stateFips),
     fetchAcsAgeBracket(stateFips, config.censusApiKey, place, county, ageFocus),
+    // Location Quotient (see locationQuotientFor) needs national
+    // establishments/population on every request, regardless of scope.
+    fetchCbpNational(naicsCodes, config.censusApiKey),
+    // National Reach's receipts/formation-trend signals only matter for a
+    // National-scope idea — skip the extra calls otherwise.
+    isNationalScope
+      ? fetchNonemployerNational(naicsCodes, config.censusApiKey)
+      : Promise.resolve(null),
+    fetchAcsNationalPopulation(config.censusApiKey),
+    isNationalScope ? fetchBfsNationalTrend() : Promise.resolve(null),
+    fetchBeaConsumerSpending(state, stateFips, config.beaApiKey),
+    // Supply-chain/input-cost trend (BLS PPI) — scoped to the primary
+    // matched NAICS code only (naicsCodes[0]), not blended across every
+    // matched code the way CBP/Nonemployer are, to keep this to one extra
+    // call regardless of how many codes a compound idea matched.
+    naicsCodes.length > 0 ? fetchPpiTrend(naicsCodes[0]) : Promise.resolve(null),
+    // Commuter-shed / workplace-density — see commuter-density-batch.ts.
+    // Only meaningful when a county actually resolved (LODES is a
+    // block/county-level dataset with no state-level rollup this route
+    // would otherwise use).
+    county ? lookupCommuterJobs(c.env.DB, `${stateFips}${county.fips}`) : Promise.resolve(null),
+    // Access to Capital (SBA lending) — see sba-lending-batch.ts.
+    stateFips && naicsCodes.length > 0
+      ? lookupSbaLendingActivity(c.env.DB, stateFips, naicsCodes[0].slice(0, 2))
+      : Promise.resolve(null),
   ]);
 
   const evidence: EvidenceItem[] = [];
@@ -287,6 +337,12 @@ router.post("/analyze", async (c) => {
   // actually contributed a value, so a missing key doesn't produce two
   // redundant "BEA API key: Not configured" entries.
   if (beaRpp) evidence.push(...beaRpp.evidence);
+  // Consumer Spending Power (SAEXP) shares the same BEA_API_KEY
+  // "not configured" state as `bea`/`beaRpp` above — same reasoning as
+  // beaRpp's own comment, no separate "not configured" item needed here.
+  if (beaConsumerSpending) evidence.push(...beaConsumerSpending.evidence);
+  if (cbpNational) evidence.push(...cbpNational.evidence);
+  if (nonemployerNational) evidence.push(...nonemployerNational.evidence);
   if (!config.censusApiKey) {
     evidence.push(
       item(
@@ -396,6 +452,48 @@ router.post("/analyze", async (c) => {
     );
   } else {
     evidence.push(lausUnavailableItem(state));
+  }
+  // Supply-chain/input-cost trend (BLS PPI) — evidence-only, does not feed
+  // any category's numeric score (see fetchPpiTrend's comment): a rising
+  // PPI series ID is a mechanical construction from the NAICS code that
+  // hasn't been spot-checked against a live response the way e.g.
+  // fetchLausTrend's series ID has been, so this stays informational rather
+  // than shifting a calibrated score.
+  if (ppiTrend) {
+    evidence.push(
+      item(
+        "Input cost trend (PPI)",
+        `${ppiTrend.trendPercent >= 0 ? "+" : ""}${ppiTrend.trendPercent.toFixed(1)}%`,
+        `The BLS Producer Price Index for this category's industry changed ${ppiTrend.trendPercent.toFixed(1)}% from ${ppiTrend.oldestLabel} to ${ppiTrend.newestLabel} — a rising PPI means the inputs this business likely buys (materials, wholesale goods, industry services) are getting more expensive, a margin-pressure signal distinct from the wage benchmark above.`,
+        "BLS Producer Price Index",
+        "https://www.bls.gov/ppi/",
+        "limited",
+        "revenue",
+      ),
+    );
+  }
+  // Commuter-shed / workplace density (Census LEHD LODES) — see
+  // commuter-density-batch.ts. A real "how many jobs are actually
+  // performed here" figure, distinct from resident population (ACS) — a
+  // commercial/downtown county can have far more workplace jobs than
+  // residents, which matters for a business serving the daytime working
+  // population rather than (or in addition to) people who live nearby.
+  if (commuterJobs !== null) {
+    const residentPopulation = acs?.values.population ?? 0;
+    const ratio = residentPopulation > 0 ? commuterJobs / residentPopulation : null;
+    evidence.push(
+      item(
+        "Workplace jobs (commuter shed)",
+        commuterJobs.toLocaleString(),
+        county
+          ? `An estimated ${commuterJobs.toLocaleString()} jobs are physically performed in ${county.name} on a typical day (Census LEHD LODES workplace data)${ratio !== null ? `, ${ratio >= 1.2 ? "notably more than its resident population — a net inflow of commuters" : ratio <= 0.8 ? "notably fewer than its resident population — a net outflow of commuters to jobs elsewhere" : "roughly matching its resident population"}` : ""}.`
+          : "Commuter-shed data was resolved without a specific county.",
+        "Census LEHD LODES",
+        "https://lehd.ces.census.gov/data/",
+        "medium",
+        "demand",
+      ),
+    );
   }
 
   if (naicsCodes.length > 1) {
@@ -649,6 +747,12 @@ router.post("/analyze", async (c) => {
       qcewPercentileBucket,
       ageFocus,
       acsAgeBracket,
+      cbpNational,
+      nonemployerNational,
+      nationalPopulation,
+      bfsNationalTrend,
+      beaConsumerSpending,
+      sbaLending,
     },
     state,
     { place, county },
@@ -658,6 +762,8 @@ router.post("/analyze", async (c) => {
     {
       pricingHypothesis: clean(body.pricingHypothesis),
       targetMarket: clean(body.targetMarket),
+      customerType: clean(body.customerType),
+      geographicScope: clean(body.geographicScope),
     },
   );
   const overallAverage = Math.round(
@@ -1780,6 +1886,60 @@ export function ageFocusFor(
   return null;
 }
 
+// Same "extend the keyword-detector, feed a real ACS bracket back into
+// scoring" pattern as ageFocusFor/ageAdjustmentMultiplier above, applied to
+// the wizard's free-text targetMarket field instead of the business
+// idea/industry text. Only "highIncome" and "budget" are implemented (ACS's
+// DP03 household-income-bracket fields — see fetchAcsState's added GET
+// fields — are ones this codebase already fetches elsewhere with verified
+// field codes); a "students"/"families" reading would need ACS's Subject
+// Tables (school-enrollment fields live on a different dataset/field-code
+// family this route doesn't otherwise touch) and isn't included here rather
+// than guessing at unverified variable codes.
+const HIGH_INCOME_TARGET_PATTERN =
+  /\b(affluent|high-income|high income|luxury|premium|wealthy|upscale|upper-income)\b/i;
+const BUDGET_TARGET_PATTERN =
+  /\b(budget|low-income|low income|affordable|value-conscious|discount|cost-conscious)\b/i;
+
+export function targetMarketFocusFor(
+  targetMarket: string,
+): "highIncome" | "budget" | null {
+  const text = targetMarket.toLowerCase();
+  const isHighIncome = HIGH_INCOME_TARGET_PATTERN.test(text);
+  const isBudget = BUDGET_TARGET_PATTERN.test(text);
+  // Same mixed-signal-defaults-to-neutral rule ageFocusFor uses.
+  if (isHighIncome && !isBudget) return "highIncome";
+  if (isBudget && !isHighIncome) return "budget";
+  return null;
+}
+
+// Mirrors ageAdjustmentMultiplier's shape (a local share compared against a
+// baseline, log2-scaled so over/under-shooting the baseline is symmetric)
+// but against national ACS baselines for each income bracket rather than
+// age brackets: nationally, roughly 24% of households earn $100,000+ and
+// roughly 22% earn under $25,000 (ACS 2023 5-year household income
+// distribution, DP03).
+const HIGH_INCOME_BASELINE_RATIO = 0.24;
+const BUDGET_BASELINE_RATIO = 0.22;
+const TARGET_MARKET_ADJUSTMENT_SPAN = 0.15;
+
+export function targetMarketAdjustmentMultiplier(
+  focus: "highIncome" | "budget" | null,
+  highIncomeSharePercent: number,
+  budgetSharePercent: number,
+): number {
+  if (focus === null) return 1;
+  const localRatio =
+    focus === "highIncome"
+      ? highIncomeSharePercent / 100
+      : budgetSharePercent / 100;
+  const baseline =
+    focus === "highIncome" ? HIGH_INCOME_BASELINE_RATIO : BUDGET_BASELINE_RATIO;
+  if (localRatio <= 0 || baseline <= 0) return 1;
+  const log2Ratio = Math.log2(localRatio / baseline);
+  return clamp(1 + log2Ratio * TARGET_MARKET_ADJUSTMENT_SPAN, 0.7, 1.3);
+}
+
 // National ACS baselines this heuristic compares a local area's
 // relevant-age-bracket share against: roughly 25% of the U.S. population is
 // under 18, and roughly 16% is 65+. An area sitting exactly at the baseline
@@ -2296,17 +2456,70 @@ function buildCategories(
     // the common no-match case never pays for the extra Census request.
     ageFocus: "children" | "seniors" | null;
     acsAgeBracket: { sum: number; geographyLevel: GeographyLevel } | null;
+    // National establishment/population totals for the matched NAICS
+    // code(s) — see fetchCbpNational/fetchNonemployerNational/
+    // fetchAcsNationalPopulation. Used for Location Quotient (always) and
+    // for the National Reach category (only when geographicScope is
+    // "National" — see below).
+    cbpNational: MetricSet | null;
+    nonemployerNational: MetricSet | null;
+    nationalPopulation: number | null;
+    bfsNationalTrend: TrendResult | null;
+    // Consumer Spending Power — BEA Regional's SAEXP table, see
+    // fetchBeaConsumerSpending.
+    beaConsumerSpending: MetricSet | null;
+    // Access to Capital — see sba-lending-batch.ts/lookupSbaLendingActivity.
+    // null whenever the batch job hasn't populated this state/sector pair
+    // yet (including before it has ever run) — the accessToCapital
+    // category is omitted entirely in that case, same "don't show a
+    // misleading score for missing data" rule nationalReach follows.
+    sbaLending: { loanCount: number; totalGrossApproval: number } | null;
   },
   state: string,
   geo: { place: PlaceGeo | null; county: CountyGeo | null },
   allEvidence: EvidenceItem[],
   startupDifficulty: { score: number; rationale: string; reasons: string[] },
   outlook: { score: number; rationale: string; reasons: string[] },
-  // Raw free text from the wizard, used only for the income
-  // price-relevance heuristic (see priceRelevanceMultiplier) — not parsed
-  // anywhere else in buildCategories.
-  planText: { pricingHypothesis: string; targetMarket: string },
+  // Raw free text from the wizard, used for the income price-relevance
+  // heuristic (see priceRelevanceMultiplier) and, since this phase, the
+  // targetMarket income-bracket adjustment (see targetMarketFocusFor) —
+  // customerType/geographicScope drive the fit multipliers just below.
+  planText: {
+    pricingHypothesis: string;
+    targetMarket: string;
+    customerType: string;
+    geographicScope: string;
+  },
 ): CategoryResult[] {
+  // ── Customer type / geographic scope fit multipliers ────────────────────
+  // Applied as a final adjustment on top of each category's existing
+  // formula (not woven into individual sub-signals) so every sub-signal's
+  // own calibration and test coverage stays untouched — this only nudges
+  // the aggregate score toward how well LOCAL data actually represents the
+  // kind of business being scored, and always shows up as its own visible
+  // reason bullet rather than a silent multiplier.
+  const customerType = planText.customerType.trim().toUpperCase();
+  const geographicScope = planText.geographicScope.trim().toLowerCase();
+  // A B2B business's real demand signal is the density of OTHER local
+  // businesses (its customers) more than resident population, and a dense
+  // local business community reads as addressable market — not
+  // competition — for a seller who sells to businesses, not consumers. A
+  // B2C business is the mirror image: population/consumer density is a
+  // stronger demand signal, and nearby similar businesses are more likely
+  // to be real competitors for the same individual customers.
+  const demandFitMultiplier =
+    customerType === "B2B" ? 1.1 : customerType === "B2C" ? 0.95 : 1;
+  const competitionFitMultiplier =
+    customerType === "B2B" ? 0.9 : customerType === "B2C" ? 1.1 : 1;
+  // A National-scope idea's local competitor count is a smaller share of
+  // the real competitive picture than it is for a Local idea (its real
+  // addressable market and competition span the whole country — see the
+  // National Reach category below) — soften local Competition's weight
+  // slightly rather than let one city's competitor count carry the same
+  // implied importance it would for a business that only ever serves that
+  // one city.
+  const geographicScopeCompetitionMultiplier =
+    geographicScope === "national" ? 0.85 : 1;
   const stateName = STATE_NAMES[state] ?? state;
   const evidenceFor = (key: CategoryKey) =>
     allEvidence.filter((entry) => entry.category === key);
@@ -2389,6 +2602,36 @@ function buildCategories(
     input.qcew?.values.averageWeeklyWage ?? 0,
     input.oews?.values.meanWeeklyWage ?? 0,
   );
+  // Workforce availability — evidence-only (does not change
+  // startupDifficultyScore, which is computed by scoreStartupDifficulty
+  // before this function runs), reusing the same unemployment rate and
+  // wage benchmark already fetched for Startup Difficulty's laborPoints and
+  // Revenue's wage tier, rather than a new external source. A tight local
+  // labor market (low unemployment) combined with an already-high going
+  // wage rate is a real, if approximate, "harder to hire, and hiring costs
+  // more" signal.
+  const localUnemploymentRate = input.acs?.values.unemploymentRate;
+  if (localUnemploymentRate !== undefined && wages > 0) {
+    const tight = localUnemploymentRate < 4;
+    const highWage = wages >= 1200;
+    allEvidence.push(
+      item(
+        "Workforce availability",
+        tight && highWage
+          ? "Tight and costly"
+          : tight
+            ? "Tight"
+            : highWage
+              ? "Costly"
+              : "Available",
+        `${geoNameFor(populationLevel)}'s unemployment rate is ${localUnemploymentRate}% and the going wage benchmark for this category is ${money(wages)}/week — ${tight ? "a tight local labor market" : "a looser local labor market"}${tight && highWage ? ", combined with an already-elevated wage rate, " : tight ? " " : highWage ? ", though the wage rate itself is already elevated, " : " "}${tight || highWage ? "can make hiring slower or more expensive than the headline unemployment rate alone would suggest" : "suggests hiring should be comparatively straightforward for this category"}.`,
+        "U.S. Census ACS / BLS OEWS-QCEW",
+        "https://www.bls.gov/oes/tables.htm",
+        "limited",
+        "startupDifficulty",
+      ),
+    );
+  }
   const beaGrowth = input.bea?.values.personalIncomeGrowth ?? 0;
   const planCompleteness = input.planFields.values.planCompleteness ?? 0;
   const priceSignals = input.planFields.values.priceSignals ?? 0;
@@ -2426,7 +2669,22 @@ function buildCategories(
     pricingHypothesis: planText.pricingHypothesis,
     targetMarket: planText.targetMarket,
   });
-  const incomeTier = income.score;
+  // Applied as a final multiplier on income.score's own output (not woven
+  // into incomeScoreFor's internals) so incomeScoreFor's existing
+  // calibration and test suite stay untouched — see
+  // targetMarketAdjustmentMultiplier's comment for the ACS baseline this
+  // compares against.
+  const targetMarketFocus = targetMarketFocusFor(planText.targetMarket);
+  const targetMarketMultiplier = targetMarketAdjustmentMultiplier(
+    targetMarketFocus,
+    input.acs?.values.highIncomeShare ?? 0,
+    input.acs?.values.budgetShare ?? 0,
+  );
+  const incomeTier = clamp(
+    Math.round(income.score * targetMarketMultiplier),
+    0,
+    100,
+  );
   // Establishments contribute up to 20 Demand points total, split across
   // three independent signals rather than one flat count: the CBP
   // employer-establishment count read on a non-monotonic "moderate is
@@ -2451,13 +2709,48 @@ function buildCategories(
     input.qcewPercentileBucket,
   );
   const growthTier = growthTierFor(beaGrowth);
-  const demandScore = clamp(
+  // Location Quotient — see locationQuotientFor/locationQuotientTier's
+  // comments. Uses the national CBP/ACS totals fetched alongside everything
+  // else (see fetchCbpNational/fetchAcsNationalPopulation), summed across
+  // the same matched NAICS code(s) `establishments` already uses.
+  const locationQuotient = locationQuotientFor(
+    establishments,
+    population,
+    input.cbpNational?.values.establishments ?? 0,
+    input.nationalPopulation ?? 0,
+  );
+  const locationQuotientPoints = locationQuotientTier(locationQuotient);
+  // Consumer Spending Power — see fetchBeaConsumerSpending. A small,
+  // additive, evidence-backed signal (its own EvidenceItem is already
+  // pushed by the fetch function) rather than a full new sub-tier ladder:
+  // 0-5 points on whether statewide consumer spending grew over the same
+  // multi-year window bea_income_growth already looks at.
+  const consumerSpendingGrowth =
+    input.beaConsumerSpending?.values.consumerSpendingGrowth;
+  const consumerSpendingPoints =
+    consumerSpendingGrowth === undefined
+      ? 0
+      : consumerSpendingGrowth >= 3
+        ? 5
+        : consumerSpendingGrowth >= 0
+          ? 3
+          : 0;
+  const demandScoreBeforeFit = clamp(
     populationTier +
       incomeTier +
       establishmentTier +
       nonemployerEstablishmentTier +
       establishmentTrendTier +
-      growthTier,
+      growthTier +
+      locationQuotientPoints +
+      consumerSpendingPoints,
+    0,
+    100,
+  );
+  // customerType fit multiplier — see its definition above buildCategories'
+  // body for the B2B/B2C reasoning.
+  const demandScore = clamp(
+    Math.round(demandScoreBeforeFit * demandFitMultiplier),
     0,
     100,
   );
@@ -2544,10 +2837,40 @@ function buildCategories(
       text: `Recent regional personal income growth is ${beaGrowth.toFixed(1)}%.`,
       weight: growthTier,
     },
+    {
+      text:
+        locationQuotient !== null
+          ? `This category's Location Quotient here is ${locationQuotient.toFixed(2)} (establishments per resident, relative to the national rate — 1.0 is average) — ${locationQuotient >= 0.7 && locationQuotient <= 1.4 ? "a typical concentration, neither an unusual cluster nor a clear gap" : locationQuotient > 1.4 ? "an unusually dense concentration of this category here, which can mean either a strong local ecosystem or a more crowded market" : "a thinner concentration than the national rate, which can mean either an underserved area or a category that doesn't take hold here"}.`
+          : "A Location Quotient (how concentrated this category is here vs. nationally) could not be computed — national establishment or population totals were unavailable.",
+      weight: locationQuotientPoints,
+    },
+    {
+      text:
+        consumerSpendingGrowth !== undefined
+          ? `Statewide consumer spending power (BEA personal consumption expenditures) ${consumerSpendingGrowth >= 0 ? "grew" : "shrank"} ${Math.abs(consumerSpendingGrowth).toFixed(1)}% over the same multi-year window.`
+          : "Statewide consumer spending power (BEA) was unavailable — configure BEA_API_KEY to include it.",
+      weight: consumerSpendingPoints,
+    },
+    ...(targetMarketFocus !== null
+      ? [
+          {
+            text: `Your target market notes read as ${targetMarketFocus === "highIncome" ? "premium/high-income-oriented" : "budget/value-oriented"}, and ${geoNameFor(populationLevel)}'s ${targetMarketFocus === "highIncome" ? `share of $100,000+ households is ${(input.acs?.values.highIncomeShare ?? 0).toFixed(0)}%` : `share of households earning under $25,000 is ${(input.acs?.values.budgetShare ?? 0).toFixed(0)}%`} — ${targetMarketMultiplier > 1 ? "above the national baseline, scored up to match" : targetMarketMultiplier < 1 ? "below the national baseline, scored down to match" : "roughly at the national baseline"}.`,
+            weight: Math.round(Math.abs(targetMarketMultiplier - 1) * 100),
+          },
+        ]
+      : []),
+    ...(customerType === "B2B" || customerType === "B2C"
+      ? [
+          {
+            text: `Demand is scored ${demandFitMultiplier > 1 ? "up" : "down"} ${Math.abs(Math.round((demandFitMultiplier - 1) * 100))}% because this is a ${customerType} business — ${customerType === "B2B" ? "local business density is a stronger demand signal than resident population for a business that sells to other businesses" : "resident population and spending power are the more direct demand signal for a business that sells to individual consumers"}.`,
+            weight: Math.round(Math.abs(demandFitMultiplier - 1) * 100),
+          },
+        ]
+      : []),
   ]);
 
   // ── Competition: how crowded is the category near the formation city ──
-  const competitionScore = clamp(
+  const competitionScoreBeforeFit = clamp(
     hasLocalCompetitorData
       ? localCompetitors > 15
         ? 35
@@ -2560,6 +2883,15 @@ function buildCategories(
           establishments,
           establishmentsLevel,
         ),
+    0,
+    100,
+  );
+  // customerType/geographicScope fit multipliers — see their definitions
+  // above buildCategories' body.
+  const competitionFitTotalMultiplier =
+    competitionFitMultiplier * geographicScopeCompetitionMultiplier;
+  const competitionScore = clamp(
+    Math.round(competitionScoreBeforeFit * competitionFitTotalMultiplier),
     0,
     100,
   );
@@ -2584,6 +2916,22 @@ function buildCategories(
     : [
         `Local place-search data was unavailable, so this score is derived from ${establishments.toLocaleString()} ${establishmentsLevel === "county" ? "county-level" : "statewide"} employer establishments in this category — specifically, from the same "moderate is healthiest" establishment curve Demand's establishment sub-score uses (see establishmentTierFor), inverted: a moderate count that reads as Demand's healthiest signal reads as this category's most crowded, while a very-low or very-high count reads as this category's least crowded, since neither extreme is strong evidence of real local competition either way.`,
       ];
+  if (competitionFitTotalMultiplier !== 1) {
+    const parts: string[] = [];
+    if (customerType === "B2B" || customerType === "B2C") {
+      parts.push(
+        `scored ${competitionFitMultiplier > 1 ? "up" : "down"} because this is a ${customerType} business`,
+      );
+    }
+    if (geographicScope === "national") {
+      parts.push(
+        "scored down because a nationally-reachable business isn't limited to competing only in this one city",
+      );
+    }
+    competitionReasons.push(
+      `Local competitive pressure is ${parts.join(", and ")}.`,
+    );
+  }
   // Explicit confidence marker for the fallback path itself — the
   // per-source "unavailable"/"not configured" evidence items already note
   // that Google/Foursquare individually came up empty, but nothing
@@ -2701,7 +3049,137 @@ function buildCategories(
   const outlookRationale = outlook.rationale;
   const outlookReasons = outlook.reasons;
 
-  return [
+  // ── National Reach: only produced for geographicScope === "National" ──
+  // A local coffee cart's real addressable market is one city; a
+  // nationally-reachable business (software, e-commerce, remote
+  // consulting) should be benchmarked against the whole country's
+  // establishment/receipts/formation totals for this category instead —
+  // this category carries that, using the national CBP/Nonemployer/BFS
+  // totals fetched alongside everything else (see fetchCbpNational et al).
+  // Tier thresholds here are a reasonable-but-not-independently-calibrated
+  // first pass (unlike e.g. establishmentTierFor, which has its own
+  // documented live-data calibration) — flagged honestly rather than
+  // presented as equally precise.
+  const nationalReachCategory: CategoryResult | null =
+    geographicScope === "national" &&
+    (input.cbpNational !== null || input.nonemployerNational !== null)
+      ? (() => {
+          const nationalEstablishments =
+            input.cbpNational?.values.establishments ?? 0;
+          const nationalReceipts = input.nonemployerNational?.values.receipts ?? 0;
+          const nationalEstablishmentPoints =
+            nationalEstablishments >= 50_000
+              ? 40
+              : nationalEstablishments >= 10_000
+                ? 32
+                : nationalEstablishments >= 2_000
+                  ? 24
+                  : nationalEstablishments >= 500
+                    ? 16
+                    : nationalEstablishments > 0
+                      ? 8
+                      : 0;
+          const nationalReceiptsPoints =
+            nationalReceipts >= 50_000_000_000
+              ? 30
+              : nationalReceipts >= 10_000_000_000
+                ? 24
+                : nationalReceipts >= 1_000_000_000
+                  ? 16
+                  : nationalReceipts > 0
+                    ? 8
+                    : 0;
+          const nationalTrendPoints = trendPoints(
+            input.bfsNationalTrend?.trendPercent ?? null,
+            30,
+            null,
+          );
+          const nationalScore = clamp(
+            nationalEstablishmentPoints +
+              nationalReceiptsPoints +
+              nationalTrendPoints,
+            0,
+            100,
+          );
+          const nationalReasons = rankedReasons([
+            {
+              text: `An estimated ${nationalEstablishments.toLocaleString()} employer establishments operate in this category nationwide (Census County Business Patterns).`,
+              weight: nationalEstablishmentPoints,
+            },
+            {
+              text:
+                nationalReceipts > 0
+                  ? `Non-employer businesses in this category generate an estimated ${money(nationalReceipts)} in receipts nationwide (Census Nonemployer Statistics).`
+                  : "National non-employer receipts were unavailable for this category.",
+              weight: nationalReceiptsPoints,
+            },
+            {
+              text: input.bfsNationalTrend
+                ? `Nationwide new-business formation activity ${input.bfsNationalTrend.trendPercent >= 0 ? "grew" : "shrank"} ${Math.abs(input.bfsNationalTrend.trendPercent).toFixed(1)}% from ${input.bfsNationalTrend.oldestLabel} to ${input.bfsNationalTrend.newestLabel} (Census Business Formation Statistics, all categories — BFS doesn't reliably break out every NAICS code).`
+                : "A national business-formation trend was unavailable.",
+              weight: nationalTrendPoints,
+            },
+          ]);
+          return {
+            key: "nationalReach" as const,
+            label: CATEGORY_LABELS.nationalReach,
+            score: nationalScore,
+            rationale: `${verdictWord(nationalScore)} national market reach (${nationalScore}/100) — shown because this business's geographic scope is National, so its real addressable market is the whole country, not just ${stateName}.`,
+            reasons: nationalReasons,
+            primarySource: {
+              name: "U.S. Census County Business Patterns (national)",
+              url: "https://www.census.gov/programs-surveys/cbp.html",
+            },
+            evidence: evidenceFor("nationalReach"),
+          };
+        })()
+      : null;
+
+  // ── Access to Capital: SBA-backed lending activity for this state/sector ──
+  // See sba-lending-batch.ts's header for the size-capped-sample caveat
+  // this rationale text names explicitly rather than presenting the score
+  // as if it reflected the complete SBA lending history.
+  const accessToCapitalCategory: CategoryResult | null = input.sbaLending
+    ? (() => {
+        const { loanCount, totalGrossApproval } = input.sbaLending as {
+          loanCount: number;
+          totalGrossApproval: number;
+        };
+        const loanCountPoints =
+          loanCount >= 200 ? 50 : loanCount >= 50 ? 38 : loanCount >= 10 ? 25 : loanCount > 0 ? 12 : 0;
+        const avgLoanSize = loanCount > 0 ? totalGrossApproval / loanCount : 0;
+        const avgLoanSizePoints =
+          avgLoanSize >= 500_000 ? 50 : avgLoanSize >= 200_000 ? 40 : avgLoanSize >= 50_000 ? 25 : avgLoanSize > 0 ? 10 : 0;
+        const accessScore = clamp(loanCountPoints + avgLoanSizePoints, 0, 100);
+        const accessReasons = rankedReasons([
+          {
+            text: `${loanCount.toLocaleString()} SBA 7(a) loan${loanCount === 1 ? "" : "s"} matching this category and state ${loanCount === 1 ? "was" : "were"} found in Desk's most recent (size-capped) sample of SBA's public lending data.`,
+            weight: loanCountPoints,
+          },
+          {
+            text:
+              loanCount > 0
+                ? `The average SBA-guaranteed loan size in this sample is ${money(avgLoanSize)}.`
+                : "No matching loans were found in this sample to compute an average size.",
+            weight: avgLoanSizePoints,
+          },
+        ]);
+        return {
+          key: "accessToCapital" as const,
+          label: CATEGORY_LABELS.accessToCapital,
+          score: accessScore,
+          rationale: `${verdictWord(accessScore)} SBA lending activity (${accessScore}/100) for this category and state, based on a size-capped sample of SBA's public 7(a) loan data (see the data source note below) rather than the complete historical dataset — treat this as directional.`,
+          reasons: accessReasons,
+          primarySource: {
+            name: "U.S. Small Business Administration (7(a) FOIA data)",
+            url: "https://data.sba.gov/en/dataset/7-a-504-foia",
+          },
+          evidence: evidenceFor("accessToCapital"),
+        };
+      })()
+    : null;
+
+  const categories: CategoryResult[] = [
     {
       key: "demand",
       label: CATEGORY_LABELS.demand,
@@ -2790,6 +3268,9 @@ function buildCategories(
       evidence: evidenceFor("outlook"),
     },
   ];
+  if (nationalReachCategory) categories.push(nationalReachCategory);
+  if (accessToCapitalCategory) categories.push(accessToCapitalCategory);
+  return categories;
 }
 
 function verdictWord(score: number): string {
@@ -3310,7 +3791,15 @@ async function fetchAcsState(
       "https://api.census.gov/data/2023/acs/acs5/profile",
       key,
       {
-        get: "NAME,DP05_0001E,DP03_0062E,DP03_0119PE,DP03_0009PE",
+        // DP03_0059PE/0060PE/0061PE ($100-149,999/$150-199,999/$200,000+)
+        // and DP03_0052PE/0053PE/0054PE (<$10,000/$10-14,999/$15-24,999) are
+        // ACS's standard household-income-bracket percentage fields (Data
+        // Profile DP03, the same "profile" flat file the other DP03/DP05
+        // fields here already come from) — added so targetMarketFocusFor's
+        // "highIncome"/"budget" reads (see below) can compare against a
+        // real local income-distribution share instead of only the single
+        // median-income figure.
+        get: "NAME,DP05_0001E,DP03_0062E,DP03_0119PE,DP03_0009PE,DP03_0059PE,DP03_0060PE,DP03_0061PE,DP03_0052PE,DP03_0053PE,DP03_0054PE",
         ...params,
       },
     );
@@ -3338,12 +3827,18 @@ async function fetchAcsState(
     const giniRaw = giniRow ? num(giniRow.B19083_001E) : 0;
     const giniIndex = giniRaw > 0 && giniRaw <= 1 ? giniRaw : null;
 
+    const highIncomeShare =
+      num(row.DP03_0059PE) + num(row.DP03_0060PE) + num(row.DP03_0061PE);
+    const budgetShare =
+      num(row.DP03_0052PE) + num(row.DP03_0053PE) + num(row.DP03_0054PE);
     return {
       values: {
         population: num(row.DP05_0001E),
         medianIncome: num(row.DP03_0062E),
         povertyRate: num(row.DP03_0119PE),
         unemploymentRate: num(row.DP03_0009PE),
+        highIncomeShare,
+        budgetShare,
         ...(giniIndex !== null ? { giniIndex } : {}),
       },
       geographyLevel: level,
@@ -3619,6 +4114,142 @@ async function fetchNonemployerState(
   }));
 }
 
+// ── National totals: Location Quotient + National Reach (geographicScope
+// === "National") ────────────────────────────────────────────────────────
+// Reuses the exact same CBP/Nonemployer "2023/cbp" and "2023/nonemp"
+// datasets fetchCbpForCode/fetchNonemployerForCode already query, just with
+// Census's `for=us:*` national-total geography instead of state/county —
+// same free source, one extra call per NAICS code.
+
+async function fetchCbpNational(
+  naicsCodes: string[],
+  key: string | undefined,
+): Promise<MetricSet | null> {
+  const results = await Promise.all(
+    naicsCodes.map(async (naics) => {
+      const url = censusUrl("https://api.census.gov/data/2023/cbp", key, {
+        get: "NAME,ESTAB,EMP,PAYANN,NAICS2017_LABEL",
+        for: "us:*",
+        NAICS2017: naics,
+      });
+      const row = await fetchCensusRow(url);
+      if (!row) return null;
+      const set: MetricSet = {
+        values: {
+          establishments: num(row.ESTAB),
+          employment: num(row.EMP),
+          annualPayroll: num(row.PAYANN) * 1000,
+        },
+        evidence: [],
+      };
+      return set;
+    }),
+  );
+  return mergeMetricSets(results, (sets) => ({
+    establishments: sum(sets, (s) => s.values.establishments),
+    employment: sum(sets, (s) => s.values.employment),
+    annualPayroll: sum(sets, (s) => s.values.annualPayroll),
+  }));
+}
+
+async function fetchNonemployerNational(
+  naicsCodes: string[],
+  key: string | undefined,
+): Promise<MetricSet | null> {
+  const results = await Promise.all(
+    naicsCodes.map(async (naics) => {
+      const url = censusUrl("https://api.census.gov/data/2023/nonemp", key, {
+        get: "NAME,NESTAB,NRCPTOT",
+        for: "us:*",
+        NAICS2022: naics,
+      });
+      const row = await fetchCensusRow(url);
+      if (!row) return null;
+      const set: MetricSet = {
+        values: {
+          nonemployerEstablishments: num(row.NESTAB),
+          receipts: num(row.NRCPTOT) * 1000,
+        },
+        evidence: [],
+      };
+      return set;
+    }),
+  );
+  return mergeMetricSets(results, (sets) => ({
+    nonemployerEstablishments: sum(
+      sets,
+      (s) => s.values.nonemployerEstablishments,
+    ),
+    receipts: sum(sets, (s) => s.values.receipts),
+  }));
+}
+
+// National population, used only as Location Quotient's denominator-side
+// normalizer (see locationQuotientFor) — a single `for=us:*` ACS call, not
+// per-state, so it's cheap regardless of how many requests hit this route.
+async function fetchAcsNationalPopulation(
+  key: string | undefined,
+): Promise<number | null> {
+  const url = censusUrl(
+    "https://api.census.gov/data/2023/acs/acs5/profile",
+    key,
+    { get: "NAME,DP05_0001E", for: "us:*" },
+  );
+  const row = await fetchCensusRow(url);
+  if (!row) return null;
+  const population = num(row.DP05_0001E);
+  return population > 0 ? population : null;
+}
+
+/**
+ * Location Quotient, computed as a per-capita establishment-concentration
+ * index rather than the textbook employment-share formula (which needs an
+ * "all industries" denominator this route doesn't otherwise fetch — adding
+ * it would be 2 more Census calls purely for this one ratio):
+ *
+ *   LQ = (local establishments in this NAICS / local population)
+ *      / (national establishments in this NAICS / national population)
+ *
+ * LQ > 1 means this area has a denser concentration of this industry per
+ * resident than the nation as a whole (either a real cluster/ecosystem, or
+ * a more crowded market — buildCategories' evidence text names both
+ * readings rather than picking one). LQ < 1 means a thinner concentration
+ * (either underserved, or a category that doesn't take hold here). Returns
+ * null when any input is missing/zero rather than dividing by zero or
+ * returning a misleading 0.
+ */
+export function locationQuotientFor(
+  localEstablishments: number,
+  localPopulation: number,
+  nationalEstablishments: number,
+  nationalPopulation: number,
+): number | null {
+  if (
+    localPopulation <= 0 ||
+    nationalEstablishments <= 0 ||
+    nationalPopulation <= 0
+  ) {
+    return null;
+  }
+  const localDensity = localEstablishments / localPopulation;
+  const nationalDensity = nationalEstablishments / nationalPopulation;
+  return nationalDensity > 0 ? localDensity / nationalDensity : null;
+}
+
+// 0-6 points, folded into Demand as an additive term (see buildCategories) —
+// small relative to the existing ~100-point budget so it sharpens the score
+// without needing to renormalize every other Demand sub-signal's cap. LQ
+// near 1.0 (a typical concentration) scores highest, matching the same
+// "moderate is healthiest" shape establishmentTierFor already uses for the
+// raw establishment count — an extreme cluster or an extreme absence are
+// both read as less certain territory than an unremarkable, average one.
+export function locationQuotientTier(lq: number | null): number {
+  if (lq === null) return 3; // neutral midpoint when unavailable
+  if (lq >= 0.7 && lq <= 1.4) return 6;
+  if (lq >= 0.4 && lq <= 2.2) return 4;
+  return 2;
+}
+
 async function fetchBeaRegionalState(
   state: string,
   stateFips: string | undefined,
@@ -3733,6 +4364,68 @@ async function fetchBeaRegionalPriceParity(
   }
 }
 
+// Consumer Spending Power: BEA Regional's SAEXP table (Personal Consumption
+// Expenditures by State), the same free BEA Regional API/dataset already
+// used for SQINC4 (personal income) and SARPP (price parity) above — same
+// UserID key, same GetData method, just a different TableName. LineCode
+// "1" is SAEXP's aggregate/total line, following the same convention SARPP
+// above already uses for its own "overall" line; unlike SQINC4/SARPP this
+// hasn't been separately spot-checked against a live response, so a
+// malformed/unexpected shape is treated as "unavailable" (return null)
+// rather than risking a silently wrong number.
+async function fetchBeaConsumerSpending(
+  state: string,
+  stateFips: string | undefined,
+  key: string | undefined,
+): Promise<MetricSet | null> {
+  if (!stateFips || !key) return null;
+  const geoFips = `${stateFips}000`;
+  const url = new URL("https://apps.bea.gov/api/data");
+  url.searchParams.set("UserID", key);
+  url.searchParams.set("method", "GetData");
+  url.searchParams.set("datasetname", "Regional");
+  url.searchParams.set("TableName", "SAEXP");
+  url.searchParams.set("LineCode", "1");
+  url.searchParams.set("GeoFIPS", geoFips);
+  url.searchParams.set("Year", "LAST5");
+  url.searchParams.set("ResultFormat", "JSON");
+  try {
+    const response = await fetch(url.toString());
+    if (!response.ok) return null;
+    const data = (await response.json()) as {
+      BEAAPI?: {
+        Results?: { Data?: Array<Record<string, string>>; Error?: unknown };
+      };
+    };
+    const rows = data.BEAAPI?.Results?.Data ?? [];
+    if (rows.length === 0) return null;
+    const newest = rows[rows.length - 1];
+    const oldest = rows[0];
+    // SAEXP dollar values are reported in millions, BEA's standard
+    // convention for this table family.
+    const latest = num(newest.DataValue) * 1_000_000;
+    const earliest = num(oldest.DataValue) * 1_000_000;
+    if (latest <= 0) return null;
+    const growth = earliest > 0 ? ((latest - earliest) / earliest) * 100 : 0;
+    return {
+      values: { consumerSpending: latest, consumerSpendingGrowth: growth },
+      evidence: [
+        item(
+          "Consumer spending power",
+          money(latest),
+          `Total personal consumption expenditures across all of ${STATE_NAMES[state] ?? state} were ${money(latest)} as of ${newest.TimePeriod ?? "the latest available period"} (${growth >= 0 ? "+" : ""}${growth.toFixed(1)}% since ${oldest.TimePeriod ?? "the earliest available period"}) — a statewide aggregate spending-power signal distinct from median household income, which only reflects one typical household rather than total market-wide demand.`,
+          "BEA Regional",
+          url.toString(),
+          "medium",
+          "demand",
+        ),
+      ],
+    };
+  } catch {
+    return null;
+  }
+}
+
 function beaNotConfiguredItem(): EvidenceItem {
   return item(
     "BEA API key",
@@ -3773,6 +4466,50 @@ async function fetchBfsTrend(
   const url = new URL("https://api.census.gov/data/timeseries/eits/bfs");
   url.searchParams.set("get", "cell_value,time_slot_id");
   url.searchParams.set("for", `state:${stateFips}`);
+  url.searchParams.set("time", `from ${fromYear}`);
+  url.searchParams.set("data_type_code", "BA_BA");
+  url.searchParams.set("seasonally_adj", "yes");
+  url.searchParams.set("category_code", "TOTAL");
+  try {
+    const response = await fetch(url.toString(), {
+      signal: AbortSignal.timeout(6000),
+    });
+    if (!response.ok) return null;
+    const rows = (await response.json()) as unknown;
+    if (!Array.isArray(rows) || rows.length < 3) return null;
+    const header = rows[0] as string[];
+    const valueIndex = header.indexOf("cell_value");
+    const timeIndex = header.indexOf("time_slot_id");
+    if (valueIndex === -1) return null;
+    const dataRows = (rows.slice(1) as string[][])
+      .filter((row) => row[valueIndex] != null)
+      .sort((a, b) => (a[timeIndex] ?? "").localeCompare(b[timeIndex] ?? ""));
+    if (dataRows.length < 2) return null;
+    const oldest = num(dataRows[0][valueIndex]);
+    const newest = num(dataRows[dataRows.length - 1][valueIndex]);
+    if (oldest <= 0) return null;
+    return {
+      trendPercent: ((newest - oldest) / oldest) * 100,
+      oldestLabel:
+        dataRows[0][timeIndex] ?? `~${OUTLOOK_TREND_YEARS} years ago`,
+      newestLabel:
+        dataRows[dataRows.length - 1][timeIndex] ?? "the latest period",
+    };
+  } catch {
+    return null;
+  }
+}
+
+// National counterpart to fetchBfsTrend above, for the National Reach
+// category (only requested when geographicScope is "National" — see the
+// route handler's Promise.all). Same endpoint/fields, `for=us:*` instead of
+// `for=state:X`, matching the same national-total convention Census APIs
+// use elsewhere in this codebase (e.g. fetchCbpNational).
+async function fetchBfsNationalTrend(): Promise<TrendResult | null> {
+  const fromYear = new Date().getFullYear() - OUTLOOK_TREND_YEARS;
+  const url = new URL("https://api.census.gov/data/timeseries/eits/bfs");
+  url.searchParams.set("get", "cell_value,time_slot_id");
+  url.searchParams.set("for", "us:*");
   url.searchParams.set("time", `from ${fromYear}`);
   url.searchParams.set("data_type_code", "BA_BA");
   url.searchParams.set("seasonally_adj", "yes");
@@ -3963,6 +4700,64 @@ type BlsTimeSeriesPoint = {
   periodName?: string;
   value: string;
 };
+
+// Supply-chain/input-cost trend: BLS Producer Price Index, industry-level
+// series. Series IDs follow BLS's documented PCU format — "PCU" + the
+// NAICS industry code, hyphen-padded to 6 characters, repeated for the
+// "product code" portion to request the industry's own aggregate/all-
+// products line (BLS's own worked example: NAICS 2211 -> "PCU2211--2211--"
+// — see the PPI industry series ID retrieval guide). This is a mechanical
+// construction from the NAICS code itself, not a per-industry lookup table
+// that could silently go stale.
+export function ppiSeriesIdForNaics(naics: string): string {
+  const padded = naics.padEnd(6, "-");
+  return `PCU${padded}${padded}`;
+}
+
+async function fetchPpiTrend(naics: string): Promise<TrendResult | null> {
+  const seriesId = ppiSeriesIdForNaics(naics);
+  const newestYear = new Date().getFullYear() - 1;
+  const oldestYear = newestYear - OUTLOOK_TREND_YEARS + 1;
+  const url = new URL(
+    `https://api.bls.gov/publicAPI/v2/timeseries/data/${seriesId}`,
+  );
+  url.searchParams.set("startyear", String(oldestYear));
+  url.searchParams.set("endyear", String(newestYear));
+  try {
+    const response = await fetch(url.toString(), {
+      signal: AbortSignal.timeout(7000),
+    });
+    if (!response.ok) return null;
+    const data = (await response.json()) as {
+      status?: string;
+      Results?: { series?: Array<{ data?: BlsTimeSeriesPoint[] }> };
+    };
+    if (data.status !== "REQUEST_SUCCEEDED") return null;
+    const points = data.Results?.series?.[0]?.data ?? [];
+    const annual = points
+      .filter((p) => p.period === "M13" || /^Q05$/.test(p.period))
+      .sort((a, b) => a.year.localeCompare(b.year));
+    // PPI industry series are typically published monthly (M01-M12), not
+    // annual — fall back to sorting all monthly points if no M13/Q05
+    // annual-average rows came back, same "use whatever periodicity this
+    // series actually has" tolerance fetchQcewEstablishmentsForYear-style
+    // helpers already apply elsewhere in this file.
+    const sorted = annual.length >= 2
+      ? annual
+      : [...points].sort((a, b) => `${a.year}${a.period}`.localeCompare(`${b.year}${b.period}`));
+    if (sorted.length < 2) return null;
+    const oldest = num(sorted[0].value);
+    const newest = num(sorted[sorted.length - 1].value);
+    if (oldest <= 0) return null;
+    return {
+      trendPercent: ((newest - oldest) / oldest) * 100,
+      oldestLabel: `${sorted[0].periodName ?? sorted[0].period} ${sorted[0].year}`,
+      newestLabel: `${sorted[sorted.length - 1].periodName ?? sorted[sorted.length - 1].period} ${sorted[sorted.length - 1].year}`,
+    };
+  } catch {
+    return null;
+  }
+}
 
 async function fetchLausTrend(
   stateFips: string | undefined,
@@ -4838,6 +5633,59 @@ export async function fetchOverpassCompetition(
   }
 }
 
+// Regulatory trajectory: how many requirement changes have hit this state in
+// the last 12 months, via Compliance-OS's existing changelog endpoint (see
+// GET /requirements/changelog — cursor-paginated, since/stateCode/category
+// filters, already built for admin/changelog UIs elsewhere in Compliance-OS)
+// — no new external data source, just a second read against data
+// Compliance-OS's own 575 RSS/API-monitored sources already track. A high
+// volume of recent changes reads as added friction/uncertainty (the
+// regulatory picture is actively shifting), independent of how many
+// requirements exist today or how severe each one is.
+async function fetchRegulatoryTrend(
+  config: AppConfig,
+  state: string,
+): Promise<{
+  pointsAdjustment: number;
+  note: string;
+  evidenceItem: EvidenceItem | null;
+}> {
+  if (!config.complianceOsUrl) {
+    return { pointsAdjustment: 0, note: "", evidenceItem: null };
+  }
+  const since = new Date();
+  since.setMonth(since.getMonth() - 12);
+  const url = `${config.complianceOsUrl.replace(/\/$/, "")}/requirements/changelog?stateCode=${encodeURIComponent(state)}&since=${since.toISOString()}&limit=500`;
+  try {
+    const headers: HeadersInit = {};
+    if (config.complianceOsApiKey) headers["x-api-key"] = config.complianceOsApiKey;
+    const response = await fetch(url, { headers });
+    if (!response.ok) return { pointsAdjustment: 0, note: "", evidenceItem: null };
+    const data = (await response.json()) as { items?: unknown[] };
+    const changeCount = data.items?.length ?? 0;
+    const pointsAdjustment = changeCount >= 10 ? -8 : changeCount >= 3 ? -4 : 0;
+    const note =
+      changeCount > 0
+        ? `${changeCount} requirement change${changeCount === 1 ? "" : "s"} for this state ${changeCount === 1 ? "has" : "have"} been logged by Compliance-OS in the last 12 months`
+        : "No requirement changes for this state have been logged by Compliance-OS in the last 12 months";
+    return {
+      pointsAdjustment,
+      note,
+      evidenceItem: item(
+        "Regulatory trajectory",
+        changeCount > 0 ? `${changeCount} recent change${changeCount === 1 ? "" : "s"}` : "Stable",
+        `${note}, based on Compliance-OS's own RSS/API-monitored source tracking — a rapidly-changing regulatory picture adds friction/uncertainty beyond the static requirement count above, even before any single change is individually severe.`,
+        "Compliance-OS",
+        url,
+        "medium",
+        "regulatoryFriction",
+      ),
+    };
+  } catch {
+    return { pointsAdjustment: 0, note: "", evidenceItem: null };
+  }
+}
+
 async function fetchComplianceSignals(
   config: AppConfig,
   state: string,
@@ -4885,10 +5733,12 @@ async function fetchComplianceSignals(
         const licenseCount = items.filter(
           (i) => i.category === "LICENSE",
         ).length;
+        const trend = await fetchRegulatoryTrend(config, state);
+        const reasons = rankRequirementReasons(items);
         return {
           requirementCount: items.length,
-          frictionScore,
-          reasons: rankRequirementReasons(items),
+          frictionScore: clamp(frictionScore + trend.pointsAdjustment, 0, 100),
+          reasons: trend.note ? [...reasons, trend.note] : reasons,
           bondOrInsuranceCount,
           licenseOrRegistrationCount,
           licenseCount,
@@ -4904,6 +5754,7 @@ async function fetchComplianceSignals(
               items.length > 0 ? "strong" : "limited",
               "regulatoryFriction",
             ),
+            ...(trend.evidenceItem ? [trend.evidenceItem] : []),
           ],
         };
       }

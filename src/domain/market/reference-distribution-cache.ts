@@ -23,6 +23,13 @@ export type JurisdictionLevel = "place" | "county" | "state";
 // The full set of metric keys this cache tracks distributions for. See
 // reference-distribution-batch.ts for exactly which source/jurisdiction
 // levels populate each one.
+// `establishments_naics_${code}` / `receipts_naics_${code}` (added
+// alongside the existing all-industries "establishments_all"/"receipts"
+// aggregate) are per-broad-sector-NAICS variants — see
+// reference-distribution-batch.ts's SECTOR_NAICS_CODES and buildShardPlan
+// for exactly which sector codes are populated. A template-literal type
+// (rather than one literal union member per sector) so adding/removing a
+// sector from that curated list never requires a matching edit here.
 export type MarketReferenceMetric =
   | "population"
   | "median_income"
@@ -34,7 +41,9 @@ export type MarketReferenceMetric =
   | "qcew_establishment_trend"
   | "bea_income_growth"
   | "population_trend"
-  | "unemployment_trend";
+  | "unemployment_trend"
+  | `establishments_naics_${string}`
+  | `receipts_naics_${string}`;
 
 export type ReferenceValueRow = {
   metric: MarketReferenceMetric;
@@ -72,7 +81,13 @@ export type StoredBreakpoints = DecileBreakpoints & {
 // writing a low-confidence row.
 export const MIN_SAMPLE_SIZE = 10;
 
-const VALUES_UPSERT_CHUNK_SIZE = 50;
+// 200 rather than a smaller number because upsertReferenceValues is now
+// called per-shard (one state at a time — see
+// reference-distribution-batch.ts's buildShardPlan), so even the largest
+// shard (e.g. California's ~1,500 places x 3 ACS metrics) only needs a
+// handful of these batch() calls, each comfortably within D1's per-batch
+// statement ceiling.
+const VALUES_UPSERT_CHUNK_SIZE = 200;
 
 /**
  * Looks up which decile bucket a raw metric value falls into, relative to
@@ -234,8 +249,10 @@ export function computeDecileBreakpoints(
 /**
  * Upserts raw fetched values into market_reference_values. Chunked into
  * batches (D1 `.batch()` calls) to stay well under D1's per-batch
- * statement ceiling — a national place-level pull can be several thousand
- * rows (e.g. ~30,000 Census places), so this is not optional.
+ * statement ceiling. Called once per shard (see
+ * reference-distribution-batch.ts) rather than once for the whole national
+ * pull, so `rows` here is at most one state's worth, not all ~30,000
+ * Census places at once.
  */
 export async function upsertReferenceValues(
   db: D1Database,

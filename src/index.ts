@@ -18,7 +18,9 @@ import {
 } from "./api/routes/api-gateway.js";
 import { handleError } from "./api/middleware/errors.js";
 import { importOewsCacheIfStale } from "./domain/labor/oews-cache.js";
-import { refreshReferenceDistributionsIfStale } from "./domain/market/reference-distribution-batch.js";
+import { advanceReferenceDistributionBatch } from "./domain/market/reference-distribution-batch.js";
+import { advanceCommuterDensityBatch } from "./domain/market/commuter-density-batch.js";
+import { advanceSbaLendingBatch } from "./domain/market/sba-lending-batch.js";
 import type { AppConfig } from "./config.js";
 import type { DeskAuthService as AuthServiceType } from "./infrastructure/auth/auth-service.js";
 
@@ -140,12 +142,96 @@ app.notFound((c) => c.env.ASSETS.fetch(c.req.raw));
 export default {
   fetch: app.fetch.bind(app),
 
-  // Cron trigger: runs deleteExpiredSessions() at 02:00 UTC daily.
-  // Configured in wrangler.toml [triggers].
+  // Two cron patterns configured in wrangler.toml [triggers], distinguished
+  // by controller.cron:
+  //   "0 2 * * *"   — daily session cleanup + OEWS import (unchanged).
+  //   "*/5 * * * *" — advances the national reference-distribution refresh
+  //                   a few shards at a time. Deliberately NOT bundled into
+  //                   the daily cron — a full national pull in one
+  //                   invocation is what caused the original "Too many
+  //                   subrequests by single Worker invocation" truncation.
+  //                   See reference-distribution-batch.ts's header comment.
   async scheduled(
-    _controller: ScheduledController,
+    controller: ScheduledController,
     env: AppEnv,
   ): Promise<void> {
+    if (controller.cron === "*/5 * * * *") {
+      const progress = await advanceReferenceDistributionBatch(env).catch((error) => ({
+        status: "failed" as const,
+        shardsProcessed: 0,
+        valuesStored: 0,
+        breakpointsComputed: 0,
+        errors: [error instanceof Error ? error.message : String(error)],
+        startedAt: new Date().toISOString(),
+        finishedAt: new Date().toISOString(),
+        shardsRemaining: 0,
+      }));
+      console.log(
+        JSON.stringify({
+          level: "info",
+          event: "cron_reference_distribution_tick",
+          ts: new Date().toISOString(),
+          status: progress.status,
+          shardsProcessed: progress.shardsProcessed,
+          shardsRemaining: progress.shardsRemaining,
+          valuesStored: progress.valuesStored,
+          breakpointsComputed: progress.breakpointsComputed,
+          errorCount: progress.errors.length,
+        }),
+      );
+
+      // Same 5-minute tick also advances the two smaller, independent
+      // batch jobs added alongside the reference-distribution cache —
+      // each is its own sharded/resumable job with its own run-tracking
+      // table (see commuter-density-batch.ts / sba-lending-batch.ts), so a
+      // failure in either one is caught and logged without affecting the
+      // reference-distribution tick above or each other.
+      const commuterProgress = await advanceCommuterDensityBatch(env).catch((error) => ({
+        status: "failed" as const,
+        statesProcessed: 0,
+        countiesStored: 0,
+        errors: [error instanceof Error ? error.message : String(error)],
+        startedAt: new Date().toISOString(),
+        finishedAt: new Date().toISOString(),
+        statesRemaining: 0,
+      }));
+      console.log(
+        JSON.stringify({
+          level: "info",
+          event: "cron_commuter_density_tick",
+          ts: new Date().toISOString(),
+          status: commuterProgress.status,
+          statesProcessed: commuterProgress.statesProcessed,
+          statesRemaining: commuterProgress.statesRemaining,
+          countiesStored: commuterProgress.countiesStored,
+          errorCount: commuterProgress.errors.length,
+        }),
+      );
+
+      const sbaProgress = await advanceSbaLendingBatch(env).catch((error) => ({
+        status: "failed" as const,
+        shardsProcessed: 0,
+        loansStored: 0,
+        errors: [error instanceof Error ? error.message : String(error)],
+        startedAt: new Date().toISOString(),
+        finishedAt: new Date().toISOString(),
+        shardsRemaining: 0,
+      }));
+      console.log(
+        JSON.stringify({
+          level: "info",
+          event: "cron_sba_lending_tick",
+          ts: new Date().toISOString(),
+          status: sbaProgress.status,
+          shardsProcessed: sbaProgress.shardsProcessed,
+          shardsRemaining: sbaProgress.shardsRemaining,
+          loansStored: sbaProgress.loansStored,
+          errorCount: sbaProgress.errors.length,
+        }),
+      );
+      return;
+    }
+
     const db = new D1DatabaseAdapter(env.DB);
     await db.deleteExpiredSessions();
     const oewsImport = await importOewsCacheIfStale(env).catch((error) => ({
@@ -155,35 +241,12 @@ export default {
       rowsImported: 0,
       message: error instanceof Error ? error.message : String(error),
     }));
-    // Runs on the same daily cron trigger as the OEWS import above, but
-    // internally gated to a 30-day staleness check (see
-    // refreshReferenceDistributionsIfStale's doc comment) since ACS/CBP/
-    // Nonemployer data only meaningfully changes annually — daily checks
-    // are cheap (one D1 read), the actual national fetch only runs monthly.
-    const referenceDistributions = await refreshReferenceDistributionsIfStale(env).catch(
-      (error) => ({
-        status: "failed" as const,
-        metricsProcessed: 0,
-        valuesStored: 0,
-        breakpointsComputed: 0,
-        errors: [error instanceof Error ? error.message : String(error)],
-        startedAt: new Date().toISOString(),
-        finishedAt: new Date().toISOString(),
-      }),
-    );
     console.log(
       JSON.stringify({
         level: "info",
         event: "cron_session_cleanup",
         ts: new Date().toISOString(),
         oewsImport,
-        referenceDistributions: {
-          status: referenceDistributions.status,
-          metricsProcessed: referenceDistributions.metricsProcessed,
-          valuesStored: referenceDistributions.valuesStored,
-          breakpointsComputed: referenceDistributions.breakpointsComputed,
-          errorCount: referenceDistributions.errors.length,
-        },
       }),
     );
   },
