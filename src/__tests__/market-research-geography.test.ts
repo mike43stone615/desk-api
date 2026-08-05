@@ -42,6 +42,7 @@ describe('resolveGeography', () => {
           },
         ]),
       )
+      .mockResolvedValueOnce(placesResponse([]))
       .mockResolvedValueOnce(
         countiesResponse([
           { attributes: { NAME: 'Denver County', COUNTY: '031', STATE: '08' } },
@@ -58,7 +59,7 @@ describe('resolveGeography', () => {
     // same math a real city polygon would go through.
     expect(result.centroid?.lat).toBeCloseTo(0.00044916, 6);
     expect(result.centroid?.lon).toBeCloseTo(0.00044916, 6);
-    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock).toHaveBeenCalledTimes(3);
 
     const placeUrl = new URL(fetchMock.mock.calls[0][0] as string);
     expect(placeUrl.pathname).toContain('Places_CouSub_ConCity_SubMCD/MapServer/4/query');
@@ -66,13 +67,36 @@ describe('resolveGeography', () => {
       "UPPER(BASENAME) LIKE UPPER('Denver%') AND STATE='08'",
     );
 
-    const countyUrl = new URL(fetchMock.mock.calls[1][0] as string);
+    const cdpUrl = new URL(fetchMock.mock.calls[1][0] as string);
+    expect(cdpUrl.pathname).toContain('Places_CouSub_ConCity_SubMCD/MapServer/5/query');
+    expect(cdpUrl.searchParams.get('where')).toBe(
+      "UPPER(BASENAME) LIKE UPPER('Denver%') AND STATE='08'",
+    );
+
+    const countyUrl = new URL(fetchMock.mock.calls[2][0] as string);
     expect(countyUrl.pathname).toContain('State_County/MapServer/1/query');
     expect(countyUrl.searchParams.get('geometryType')).toBe('esriGeometryPoint');
     expect(countyUrl.searchParams.get('geometry')).toBe('50,50');
   });
 
-  it('prefers an exact BASENAME match over a prefix match', async () => {
+  it('resolves a Census Designated Place when it only exists on the CDP layer', async () => {
+    fetchMock
+      .mockResolvedValueOnce(placesResponse([]))
+      .mockResolvedValueOnce(
+        placesResponse([
+          {
+            attributes: { NAME: 'Paradise CDP', PLACE: '55240', STATE: '32', BASENAME: 'Paradise' },
+            geometry: { rings: [SQUARE_RING] },
+          },
+        ]),
+      )
+      .mockResolvedValueOnce(countiesResponse([]));
+
+    const result = await resolveGeography('Paradise', '32');
+    expect(result.place).toEqual({ fips: '55240', name: 'Paradise CDP', stateFips: '32' });
+  });
+
+  it('prefers an exact BASENAME match over a prefix match, across both layers', async () => {
     fetchMock
       .mockResolvedValueOnce(
         placesResponse([
@@ -80,6 +104,10 @@ describe('resolveGeography', () => {
             attributes: { NAME: 'Denver Junction CDP', PLACE: '99999', STATE: '08', BASENAME: 'Denver Junction' },
             geometry: { rings: [SQUARE_RING] },
           },
+        ]),
+      )
+      .mockResolvedValueOnce(
+        placesResponse([
           {
             attributes: { NAME: 'Denver city', PLACE: '20000', STATE: '08', BASENAME: 'Denver' },
             geometry: { rings: [SQUARE_RING] },
@@ -103,6 +131,7 @@ describe('resolveGeography', () => {
           },
         ]),
       )
+      .mockResolvedValueOnce(placesResponse([]))
       .mockResolvedValueOnce(countiesResponse([]));
 
     await resolveGeography("O'Fallon", '29');
@@ -122,6 +151,7 @@ describe('resolveGeography', () => {
           },
         ]),
       )
+      .mockResolvedValueOnce(placesResponse([]))
       .mockResolvedValueOnce(countiesResponse([]));
 
     await resolveGeography('Denver, CO', '08');
@@ -132,19 +162,21 @@ describe('resolveGeography', () => {
   });
 
   it('returns place with a null county when the place has no usable geometry to spatially resolve a county from', async () => {
-    fetchMock.mockResolvedValueOnce(
-      placesResponse([
-        {
-          attributes: { NAME: 'Denver city', PLACE: '20000', STATE: '08', BASENAME: 'Denver' },
-          // no geometry field at all
-        },
-      ]),
-    );
+    fetchMock
+      .mockResolvedValueOnce(
+        placesResponse([
+          {
+            attributes: { NAME: 'Denver city', PLACE: '20000', STATE: '08', BASENAME: 'Denver' },
+            // no geometry field at all
+          },
+        ]),
+      )
+      .mockResolvedValueOnce(placesResponse([]));
 
     const result = await resolveGeography('Denver', '08');
     expect(result.place).toEqual({ fips: '20000', name: 'Denver city', stateFips: '08' });
     expect(result.county).toBeNull();
-    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
   it('returns place with a null county when the spatial county lookup finds nothing', async () => {
@@ -157,6 +189,7 @@ describe('resolveGeography', () => {
           },
         ]),
       )
+      .mockResolvedValueOnce(placesResponse([]))
       .mockResolvedValueOnce(countiesResponse([]));
 
     const result = await resolveGeography('Denver', '08');
@@ -164,11 +197,11 @@ describe('resolveGeography', () => {
     expect(result.county).toBeNull();
   });
 
-  it('returns null for both when TIGERweb returns no matching place (empty features)', async () => {
-    fetchMock.mockResolvedValueOnce(placesResponse([]));
+  it('returns null for both when TIGERweb returns no matching place on either layer (empty features)', async () => {
+    fetchMock.mockResolvedValueOnce(placesResponse([])).mockResolvedValueOnce(placesResponse([]));
     const result = await resolveGeography('Zzzznotarealtown', '08');
     expect(result).toEqual({ place: null, county: null, centroid: null });
-    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
   it('returns null for both when the place fetch itself throws', async () => {
@@ -205,6 +238,7 @@ describe('resolveGeography', () => {
           },
         ]),
       )
+      .mockResolvedValueOnce(placesResponse([]))
       .mockRejectedValueOnce(new Error('county service down'));
 
     const result = await resolveGeography('Denver', '08');

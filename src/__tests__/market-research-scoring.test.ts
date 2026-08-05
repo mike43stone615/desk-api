@@ -317,6 +317,68 @@ describe('scoreStartupDifficulty', () => {
     );
     expect(barrierReason?.toLowerCase()).toContain('based on the business description');
   });
+
+  describe('subSignals', () => {
+    it('returns one structured sub-signal per underlying sub-computation, summing to the total score', () => {
+      const result = scoreStartupDifficulty({
+        industry: 'Concrete Contractor',
+        businessIdea: 'concrete contractor serving commercial developers',
+        naicsCodes: ['23'],
+        customerType: 'B2B',
+        unemploymentRate: 4,
+        requirementCount: 6,
+        bondOrInsuranceCount: 2,
+        licenseOrRegistrationCount: 3,
+        licenseCount: 2,
+      });
+      const labels = result.subSignals.map((s) => s.label);
+      expect(labels).toEqual([
+        'Capital requirements',
+        'Barrier to entry',
+        'Product/build complexity',
+        'Labor market tightness',
+        'Knowledge intensity',
+        'Licensing complexity',
+      ]);
+      const maxScores = result.subSignals.map((s) => s.maxScore);
+      expect(maxScores).toEqual([25, 15, 20, 20, 10, 10]);
+      expect(maxScores.reduce((a, b) => a + b, 0)).toBe(100);
+      const totalSubSignalScore = result.subSignals.reduce((a, s) => a + s.score, 0);
+      expect(totalSubSignalScore).toBe(result.score);
+      for (const sub of result.subSignals) {
+        expect(sub.score).toBeGreaterThanOrEqual(0);
+        expect(sub.score).toBeLessThanOrEqual(sub.maxScore);
+        expect(sub.rawValue.length).toBeGreaterThan(0);
+        expect(sub.meaning.length).toBeGreaterThan(0);
+        expect(sub.computation.length).toBeGreaterThan(0);
+        expect(sub.source.length).toBeGreaterThan(0);
+        expect(['strong', 'medium', 'limited']).toContain(sub.quality);
+      }
+    });
+
+    it('marks Compliance-OS-backed sub-signals as strong quality only when real data is present', () => {
+      const withData = scoreStartupDifficulty({
+        industry: 'Consulting',
+        businessIdea: 'general business consulting',
+        naicsCodes: ['54'],
+        customerType: 'B2C',
+        unemploymentRate: 5,
+        bondOrInsuranceCount: 0,
+        licenseOrRegistrationCount: 0,
+      });
+      const withoutData = scoreStartupDifficulty({
+        industry: 'Consulting',
+        businessIdea: 'general business consulting',
+        naicsCodes: ['54'],
+        customerType: 'B2C',
+        unemploymentRate: 5,
+      });
+      const capitalWith = withData.subSignals.find((s) => s.label === 'Capital requirements');
+      const capitalWithout = withoutData.subSignals.find((s) => s.label === 'Capital requirements');
+      expect(capitalWith?.quality).toBe('strong');
+      expect(capitalWithout?.quality).toBe('limited');
+    });
+  });
 });
 
 describe('barrierPointsFor', () => {

@@ -69,6 +69,33 @@ type EvidenceItem = {
 
 type CategorySource = { name: string; url: string };
 
+// One structured, individually-sourced sub-computation behind a category's
+// overall 0-100 score (e.g. "Population" or "Establishment trend" within
+// Demand) — the detail view shows one of these per row instead of the old
+// flat reasons/evidence lists, so a user can see exactly what number came
+// in, what it means, how it turned into points, where it came from, and how
+// much of the category's budget it actually claimed.
+type CategorySubSignal = {
+  label: string;
+  // The raw resulting number/measurement, already formatted for display
+  // (e.g. "70,000" or "$45,200/yr" or "3.2%") — never the point value.
+  rawValue: string;
+  // What the raw value proxies for / why it matters to this category.
+  meaning: string;
+  // How the raw value maps to the score below (the tier/formula actually
+  // used), so the score is never presented as an unexplained number.
+  computation: string;
+  source: string;
+  sourceUrl: string;
+  quality: "strong" | "medium" | "limited";
+  score: number;
+  maxScore: number;
+};
+
+function subSignal(input: CategorySubSignal): CategorySubSignal {
+  return input;
+}
+
 type CategoryResult = {
   key: CategoryKey;
   label: string;
@@ -80,6 +107,14 @@ type CategoryResult = {
   reasons: string[];
   primarySource: CategorySource;
   evidence: EvidenceItem[];
+  // Structured per-sub-computation breakdown for the detail view — see
+  // CategorySubSignal. Always populated whenever the category itself is
+  // (every category has at least one underlying sub-computation), which is
+  // also what the Flutter card's "has detail to show" check keys off now,
+  // instead of the old evidence/reasons-length heuristic that left
+  // nationalReach/accessToCapital (real reasons, but no matching `evidence`
+  // entries) never tappable.
+  subSignals: CategorySubSignal[];
 };
 
 // Orders reason bullets by how many of the category's 0-100 points each one
@@ -223,10 +258,11 @@ router.post("/analyze", async (c) => {
 
   const config = c.get("config");
   const stateFips = STATE_FIPS[state];
-  const { codes: naicsCodes, matched: naicsMatched } = inferNaicsCodes(
-    industry,
-    businessIdea,
-  );
+  const {
+    codes: naicsCodes,
+    matched: naicsMatched,
+    establishmentCodes,
+  } = inferNaicsCodes(industry, businessIdea);
   const stateName = STATE_NAMES[state] ?? state;
   const { place, county, centroid } = await resolveGeography(
     body.formationCity,
@@ -269,11 +305,16 @@ router.post("/analyze", async (c) => {
     sbaLending,
   ] = await Promise.all([
     fetchAcsState(stateFips, config.censusApiKey, place, county),
-    fetchCbpState(stateFips, naicsCodes, config.censusApiKey, county),
-    fetchNonemployerState(stateFips, naicsCodes, config.censusApiKey, county),
+    fetchCbpState(stateFips, establishmentCodes, config.censusApiKey, county),
+    fetchNonemployerState(
+      stateFips,
+      establishmentCodes,
+      config.censusApiKey,
+      county,
+    ),
     fetchBeaRegionalState(state, stateFips, config.beaApiKey),
     fetchBeaRegionalPriceParity(state, stateFips, config.beaApiKey),
-    fetchQcewState(stateFips, naicsCodes, county),
+    fetchQcewState(stateFips, establishmentCodes, county),
     fetchCachedOrLiveOewsState(c.env.DB, state),
     fetchGooglePlacesCompetition(
       config,
@@ -295,17 +336,17 @@ router.post("/analyze", async (c) => {
     fetchGovernmentGuidance(state, industry, body),
     analyzePlanFields(body),
     fetchBfsTrend(stateFips),
-    fetchQcewTrend(stateFips, naicsCodes, county),
+    fetchQcewTrend(stateFips, establishmentCodes, county),
     fetchPopulationTrend(stateFips, config.censusApiKey, place, county),
     fetchLausTrend(stateFips),
     fetchAcsAgeBracket(stateFips, config.censusApiKey, place, county, ageFocus),
     // Location Quotient (see locationQuotientFor) needs national
     // establishments/population on every request, regardless of scope.
-    fetchCbpNational(naicsCodes, config.censusApiKey),
+    fetchCbpNational(establishmentCodes, config.censusApiKey),
     // National Reach's receipts/formation-trend signals only matter for a
     // National-scope idea — skip the extra calls otherwise.
     isNationalScope
-      ? fetchNonemployerNational(naicsCodes, config.censusApiKey)
+      ? fetchNonemployerNational(establishmentCodes, config.censusApiKey)
       : Promise.resolve(null),
     fetchAcsNationalPopulation(config.censusApiKey),
     isNationalScope ? fetchBfsNationalTrend() : Promise.resolve(null),
@@ -1493,7 +1534,12 @@ export function scoreStartupDifficulty(input: {
   // because the reference-distribution batch job hasn't populated
   // "unemployment_trend" yet. Optional for callers/tests that don't have it.
   laborTrendPercent?: number | null;
-}): { score: number; rationale: string; reasons: string[] } {
+}): {
+  score: number;
+  rationale: string;
+  reasons: string[];
+  subSignals: CategorySubSignal[];
+} {
   const text = `${input.industry} ${input.businessIdea}`;
   const isLicensedTrade = LICENSED_TRADE_PATTERN.test(text);
   const isB2B = input.customerType.trim().toUpperCase() === "B2B";
@@ -1761,7 +1807,100 @@ export function scoreStartupDifficulty(input: {
     { text: `${cap(licensingNote)}.`, weight: licensingComplexityPoints },
   ]);
 
-  return { score, rationale, reasons };
+  const complianceOsSource = {
+    name: "Compliance-OS",
+    url: "https://www.sba.gov/business-guide/launch-your-business/apply-licenses-permits",
+  };
+  const naicsSource = {
+    name: "NAICS sector classification",
+    url: "https://www.census.gov/naics/",
+  };
+  const subSignals: CategorySubSignal[] = [
+    subSignal({
+      label: "Capital requirements",
+      rawValue: hasBondInsuranceData
+        ? `${bondOrInsuranceCount} bond/insurance requirement${bondOrInsuranceCount === 1 ? "" : "s"}`
+        : `${cap(capitalNote)} (NAICS-based estimate)`,
+      meaning:
+        "Estimates up-front cash needed before the business can legally and physically operate — equipment, space build-out, inventory, and any required bonds or insurance.",
+      computation: `NAICS sector capital-intensity base (${capitalNote}) plus a Compliance-OS bond/insurance modifier (${hasBondInsuranceData ? "matched, real count" : "unavailable, neutral"}) → ${capitalPoints}/25 pts.`,
+      source: hasBondInsuranceData ? complianceOsSource.name : naicsSource.name,
+      sourceUrl: hasBondInsuranceData ? complianceOsSource.url : naicsSource.url,
+      quality: hasBondInsuranceData ? "strong" : "limited",
+      score: capitalPoints,
+      maxScore: 25,
+    }),
+    subSignal({
+      label: "Barrier to entry",
+      rawValue: hasLicenseRegData
+        ? `${licenseOrRegistrationCount} license/registration requirement${licenseOrRegistrationCount === 1 ? "" : "s"}`
+        : isLicensedTrade
+          ? "Reads as a licensed trade"
+          : "Doesn't read as a licensed trade",
+      meaning:
+        "How much of a track record, credential, or license buyers expect before trusting a new provider with their first contract.",
+      computation: `Credential signal (${hasLicenseRegData ? "real Compliance-OS match" : "keyword heuristic"}) plus a B2B compounding factor and overall requirement breadth → ${barrierPoints}/15 pts.`,
+      source: hasLicenseRegData ? complianceOsSource.name : "Business description keyword match",
+      sourceUrl: hasLicenseRegData ? complianceOsSource.url : complianceOsSource.url,
+      quality: hasLicenseRegData ? "strong" : "limited",
+      score: barrierPoints,
+      maxScore: 15,
+    }),
+    subSignal({
+      label: "Product/build complexity",
+      rawValue: `NAICS ${input.naicsCodes.join(", ") || "unmatched"}`,
+      meaning:
+        "Whether the business needs to stand up a physical production process, build-out, or infrastructure before it can operate, versus a service that can start from a laptop.",
+      computation: `NAICS-code product-complexity tier → ${productPoints}/20 pts (higher = less physical build-out required).`,
+      source: naicsSource.name,
+      sourceUrl: naicsSource.url,
+      quality: "medium",
+      score: productPoints,
+      maxScore: 20,
+    }),
+    subSignal({
+      label: "Labor market tightness",
+      rawValue: hasLaborData ? `${unemploymentRate.toFixed(1)}% unemployment` : "Unavailable",
+      meaning:
+        "How easy or costly it will be to hire staff locally, blended toward neutral for categories that don't typically need to hire much.",
+      computation: `Local unemployment rate (${input.laborPercentileBucket != null ? "national percentile rank" : "fallback tier"}), trend-adjusted and blended by category labor intensity → ${laborPoints}/20 pts.`,
+      source: "U.S. Census ACS / BLS LAUS",
+      sourceUrl: "https://www.bls.gov/lau/",
+      quality: hasLaborData ? "medium" : "limited",
+      score: laborPoints,
+      maxScore: 20,
+    }),
+    subSignal({
+      label: "Knowledge intensity",
+      rawValue: knowledgeIntensiveSector ? "Knowledge-intensive sector" : "Not a knowledge-intensive sector",
+      meaning:
+        "Whether the category demands deep specialized expertise as the product itself, independent of any formal license requirement.",
+      computation: `Credential signal plus a NAICS knowledge-intensity flag → ${knowledgePoints}/10 pts.`,
+      source: hasLicenseRegData ? complianceOsSource.name : naicsSource.name,
+      sourceUrl: hasLicenseRegData ? complianceOsSource.url : naicsSource.url,
+      quality: hasLicenseRegData ? "strong" : "limited",
+      score: knowledgePoints,
+      maxScore: 10,
+    }),
+    subSignal({
+      label: "Licensing complexity",
+      rawValue: hasCompositionData
+        ? `${licenseCount} of ${requirementCount} requirements are licenses`
+        : hasRequirementData
+          ? `${requirementCount} known requirement${requirementCount === 1 ? "" : "s"}`
+          : "Unavailable",
+      meaning:
+        "What share of the known compliance requirements are exam/credential-gated licenses, versus lighter registration or filing paperwork.",
+      computation: `${hasCompositionData ? "Compliance-OS LICENSE-category share of known requirements" : "Flat requirement-count fallback tiers"} → ${licensingComplexityPoints}/10 pts.`,
+      source: complianceOsSource.name,
+      sourceUrl: complianceOsSource.url,
+      quality: hasCompositionData ? "strong" : hasRequirementData ? "medium" : "limited",
+      score: licensingComplexityPoints,
+      maxScore: 10,
+    }),
+  ];
+
+  return { score, rationale, reasons, subSignals };
 }
 
 // Population/establishment tiers are sized for state-scale magnitudes by
@@ -2478,8 +2617,18 @@ function buildCategories(
   state: string,
   geo: { place: PlaceGeo | null; county: CountyGeo | null },
   allEvidence: EvidenceItem[],
-  startupDifficulty: { score: number; rationale: string; reasons: string[] },
-  outlook: { score: number; rationale: string; reasons: string[] },
+  startupDifficulty: {
+    score: number;
+    rationale: string;
+    reasons: string[];
+    subSignals: CategorySubSignal[];
+  },
+  outlook: {
+    score: number;
+    rationale: string;
+    reasons: string[];
+    subSignals: CategorySubSignal[];
+  },
   // Raw free text from the wizard, used for the income price-relevance
   // heuristic (see priceRelevanceMultiplier) and, since this phase, the
   // targetMarket income-bracket adjustment (see targetMarketFocusFor) —
@@ -2868,6 +3017,116 @@ function buildCategories(
         ]
       : []),
   ]);
+  const demandSubSignals: CategorySubSignal[] = [
+    subSignal({
+      label: "Population",
+      rawValue: population.toLocaleString() || "Unreported",
+      meaning: `Estimates the size of the potential customer base in ${geoNameFor(populationLevel)}.`,
+      computation: `Jurisdiction-scaled headcount tier (${populationResult.headcountTier}) plus a population-density bonus (${populationResult.densityTier})${input.ageFocus !== null ? ", age-relevance adjusted" : ""} → ${populationTier}/40 pts.`,
+      source: "U.S. Census ACS",
+      sourceUrl: "https://www.census.gov/programs-surveys/acs",
+      quality: population > 0 ? "strong" : "limited",
+      score: populationTier,
+      maxScore: 40,
+    }),
+    subSignal({
+      label: "Income level",
+      rawValue: money(income.realIncome),
+      meaning:
+        "Cost-of-living-adjusted household income — a higher real income means more discretionary spending power in the target area.",
+      computation: `Real (RPP-deflated) income through a tiered scale${income.direction !== "neutral" ? `, adjusted for a ${income.direction}-oriented pricing focus` : ""} → ${income.levelTier}/20 pts.`,
+      source: "U.S. Census ACS / BEA Regional Price Parity",
+      sourceUrl: "https://www.census.gov/programs-surveys/acs",
+      quality: regionalPriceParity ? "strong" : "medium",
+      score: income.levelTier,
+      maxScore: 20,
+    }),
+    subSignal({
+      label: "Income equality",
+      rawValue: giniIndex !== null ? giniIndex.toFixed(3) : "Unavailable",
+      meaning:
+        "How evenly household income is distributed (Gini index, 0 = perfect equality) — a broader, more evenly-spread income base tends to mean a healthier addressable market than the same median concentrated among a few high earners.",
+      computation: `Gini index through a tiered scale → ${income.equalityTier}/5 pts.`,
+      source: "U.S. Census ACS",
+      sourceUrl: "https://www.census.gov/programs-surveys/acs",
+      quality: giniIndex !== null ? "medium" : "limited",
+      score: income.equalityTier,
+      maxScore: 5,
+    }),
+    subSignal({
+      label: "Employer establishments",
+      rawValue: establishments.toLocaleString(),
+      meaning: `The number of employer businesses already operating in this category in ${geoNameFor(establishmentsLevel)} — a moderate count is read as the healthiest signal (proven demand without saturation).`,
+      computation: `Non-monotonic "moderate is healthiest" curve on establishment count → ${establishmentTier}/12 pts.`,
+      source: "U.S. Census County Business Patterns",
+      sourceUrl: "https://www.census.gov/programs-surveys/cbp.html",
+      quality: input.cbp ? "strong" : "limited",
+      score: establishmentTier,
+      maxScore: 12,
+    }),
+    subSignal({
+      label: "Non-employer establishments",
+      rawValue: nonemployerEstablishments.toLocaleString(),
+      meaning: `The number of solo/no-employee operators already active in this category in ${geoNameFor(receiptsLevel)} — an independent read on the same "moderate is healthiest" logic.`,
+      computation: `Non-monotonic "moderate is healthiest" curve on non-employer establishment count → ${nonemployerEstablishmentTier}/4 pts.`,
+      source: "U.S. Census Nonemployer Statistics",
+      sourceUrl: "https://www.census.gov/programs-surveys/nonemployer-statistics.html",
+      quality: input.nonemployer ? "strong" : "limited",
+      score: nonemployerEstablishmentTier,
+      maxScore: 4,
+    }),
+    subSignal({
+      label: "Establishment trend",
+      rawValue: input.qcewTrend
+        ? `${input.qcewTrend.trendPercent >= 0 ? "+" : ""}${input.qcewTrend.trendPercent.toFixed(1)}%`
+        : "Unavailable",
+      meaning:
+        "Whether the count of employer establishments in this category is growing or shrinking, so a healthy point-in-time count isn't the whole story.",
+      computation: `Multi-year trend percent through a tiered scale → ${establishmentTrendTier}/4 pts.`,
+      source: "BLS QCEW",
+      sourceUrl: "https://www.bls.gov/cew/",
+      quality: input.qcewTrend ? "strong" : "limited",
+      score: establishmentTrendTier,
+      maxScore: 4,
+    }),
+    subSignal({
+      label: "Regional income growth",
+      rawValue: `${beaGrowth >= 0 ? "+" : ""}${beaGrowth.toFixed(1)}%`,
+      meaning: "Whether regional personal income is growing — broader economic momentum feeding demand.",
+      computation: `Growth percent through a tiered scale → ${growthTier}/15 pts.`,
+      source: "BEA Regional Economic Accounts",
+      sourceUrl: "https://www.bea.gov/data/income-saving/personal-income-by-state",
+      quality: input.bea ? "strong" : "limited",
+      score: growthTier,
+      maxScore: 15,
+    }),
+    subSignal({
+      label: "Location Quotient",
+      rawValue: locationQuotient !== null ? locationQuotient.toFixed(2) : "Unavailable",
+      meaning:
+        "How concentrated this category is here relative to the national rate (1.0 = average) — a typical concentration is read as the most certain signal.",
+      computation: `"Moderate is healthiest" curve on local-vs-national establishment density → ${locationQuotientPoints}/6 pts.`,
+      source: "U.S. Census County Business Patterns (local + national)",
+      sourceUrl: "https://www.census.gov/programs-surveys/cbp.html",
+      quality: locationQuotient !== null ? "medium" : "limited",
+      score: locationQuotientPoints,
+      maxScore: 6,
+    }),
+    subSignal({
+      label: "Consumer spending power",
+      rawValue:
+        consumerSpendingGrowth !== undefined
+          ? `${consumerSpendingGrowth >= 0 ? "+" : ""}${consumerSpendingGrowth.toFixed(1)}%`
+          : "Unavailable",
+      meaning: "Whether statewide consumer spending (personal consumption expenditures) is growing over the same multi-year window.",
+      computation: `Growth percent through a small tiered scale → ${consumerSpendingPoints}/5 pts.`,
+      source: "BEA Personal Consumption Expenditures",
+      sourceUrl: "https://www.bea.gov/data/consumer-spending/main",
+      quality: consumerSpendingGrowth !== undefined ? "medium" : "limited",
+      score: consumerSpendingPoints,
+      maxScore: 5,
+    }),
+  ];
 
   // ── Competition: how crowded is the category near the formation city ──
   const competitionScoreBeforeFit = clamp(
@@ -2953,6 +3212,31 @@ function buildCategories(
       ),
     );
   }
+  const competitionSubSignals: CategorySubSignal[] = [
+    subSignal({
+      label: "Local competitive density",
+      rawValue: hasLocalCompetitorData
+        ? localCompetitors.toFixed(1)
+        : `${establishments.toLocaleString()} establishments (proxy)`,
+      meaning: hasLocalCompetitorData
+        ? "The blended count of nearby places matching this business type across independent place-search sources — more nearby matches means a more crowded market."
+        : "No local place-search data was available, so this is derived from employer establishment density as a weaker proxy for local competitive pressure.",
+      computation: hasLocalCompetitorData
+        ? `Averaged competitor count from ${competitionSourceNotes.join("; ") || "available sources"} through a tiered scale → ${competitionScoreBeforeFit}/100 pts (before the customer-type/geographic-scope fit adjustment).`
+        : `Establishment count run through the inverse of Demand's "moderate is healthiest" curve → ${competitionScoreBeforeFit}/100 pts (before the customer-type/geographic-scope fit adjustment).`,
+      source: hasLocalCompetitorData
+        ? [input.googlePlaces && "Google Places", input.foursquare && "Foursquare Places", input.overpass && "OpenStreetMap Overpass"]
+            .filter(Boolean)
+            .join(", ")
+        : "U.S. Census County Business Patterns",
+      sourceUrl: hasLocalCompetitorData
+        ? "https://developers.google.com/maps/documentation/places/web-service/text-search"
+        : "https://www.census.gov/programs-surveys/cbp.html",
+      quality: hasLocalCompetitorData ? "strong" : "limited",
+      score: competitionScoreBeforeFit,
+      maxScore: 100,
+    }),
+  ];
 
   // ── Revenue: how much cash is likely moving through this category ──
   // 30 (receipts) + 10 (payroll) + 25 (income) + 20 (wage) + 15 (plan) = 100.
@@ -3025,6 +3309,64 @@ function buildCategories(
       weight: planTier,
     },
   ]);
+  const revenueSubSignals: CategorySubSignal[] = [
+    subSignal({
+      label: "Receipts per business",
+      rawValue: nonemployerEstablishments > 0 ? money(receipts) : "Unavailable",
+      meaning: `Average annual receipts per non-employer (solo-operator) business in this category in ${geoNameFor(receiptsLevel)}.`,
+      computation: `Average receipts through a tiered dollar scale → ${receiptsTier}/30 pts.`,
+      source: "U.S. Census Nonemployer Statistics",
+      sourceUrl: "https://www.census.gov/programs-surveys/nonemployer-statistics.html",
+      quality: nonemployerEstablishments > 0 ? "strong" : "limited",
+      score: receiptsTier,
+      maxScore: 30,
+    }),
+    subSignal({
+      label: "Payroll per business",
+      rawValue: establishments > 0 ? money(avgAnnualPayroll) : "Unavailable",
+      meaning: `Average annual payroll per employer business in this category in ${geoNameFor(establishmentsLevel)} — a different slice of economic activity than solo-operator receipts.`,
+      computation: `Average payroll through a tiered dollar scale → ${payrollTier}/10 pts.`,
+      source: "U.S. Census County Business Patterns",
+      sourceUrl: "https://www.census.gov/programs-surveys/cbp.html",
+      quality: establishments > 0 ? "strong" : "limited",
+      score: payrollTier,
+      maxScore: 10,
+    }),
+    subSignal({
+      label: "Nominal income",
+      rawValue: money(nominalIncome),
+      meaning:
+        "Median household income at face value (not cost-of-living adjusted) — how many actual dollars a business here can expect to collect per transaction.",
+      computation: `Nominal income through a tiered scale${revenueIncome.direction !== "neutral" ? `, adjusted for a ${revenueIncome.direction}-oriented pricing focus` : ""} → ${revenueIncomeTier}/25 pts.`,
+      source: "U.S. Census ACS",
+      sourceUrl: "https://www.census.gov/programs-surveys/acs",
+      quality: "strong",
+      score: revenueIncomeTier,
+      maxScore: 25,
+    }),
+    subSignal({
+      label: "Wage benchmark",
+      rawValue: wages > 0 ? `${money(wages)}/week` : "Unreported",
+      meaning: "The going local wage rate for this category — a lower benchmark leaves more margin per dollar of revenue.",
+      computation: `Weekly wage through a tiered scale → ${wageTier}/20 pts.`,
+      source: "BLS QCEW / OEWS",
+      sourceUrl: "https://www.bls.gov/cew/",
+      quality: wages > 0 ? "medium" : "limited",
+      score: wageTier,
+      maxScore: 20,
+    }),
+    subSignal({
+      label: "Your pricing/validation plan",
+      rawValue: `${planCompleteness}/3 fields, ${priceSignals} concrete number${priceSignals === 1 ? "" : "s"}`,
+      meaning: "Whether you've filled in your own pricing hypothesis and validation plan, and whether it contains real numbers this scoring can use.",
+      computation: `Field-presence tier plus a pricing-number-quality tier → ${planTier}/15 pts.`,
+      source: "Your business setup plan notes",
+      sourceUrl: "",
+      quality: priceSignals > 0 ? "strong" : planCompleteness > 0 ? "medium" : "limited",
+      score: planTier,
+      maxScore: 15,
+    }),
+  ];
 
   // ── Startup difficulty: capital, barrier-to-entry, build complexity, ──
   // ── labor-market tightness, and industry-knowledge depth — computed ──
@@ -3032,6 +3374,7 @@ function buildCategories(
   const startupDifficultyScore = startupDifficulty.score;
   const startupDifficultyRationale = startupDifficulty.rationale;
   const startupDifficultyReasons = startupDifficulty.reasons;
+  const startupDifficultySubSignals = startupDifficulty.subSignals;
 
   // ── Regulatory friction: ongoing legal/compliance drag — licenses, ──
   // ── permits, taxes, filings, recordkeeping, and government approvals ──
@@ -3039,6 +3382,25 @@ function buildCategories(
   const regulatoryFrictionScore = input.compliance.frictionScore;
   const regulatoryFrictionRationale = `${verdictWord(regulatoryFrictionScore)} regulatory friction (${regulatoryFrictionScore}/100).`;
   const regulatoryFrictionReasons = input.compliance.reasons;
+  // Compliance-OS's requirement-level severity/renewal-cadence weighting
+  // happens inside computeRegulatoryFrictionScore and isn't itself broken
+  // back out into separate named sub-computations the way the other
+  // categories are — so this stays a single subsignal rather than being
+  // artificially split into parts that don't correspond to anything real.
+  const regulatoryFrictionSubSignals: CategorySubSignal[] = [
+    subSignal({
+      label: "Compliance requirement burden",
+      rawValue: `${input.compliance.requirementCount} requirement${input.compliance.requirementCount === 1 ? "" : "s"}`,
+      meaning:
+        "The number and severity of licenses, permits, taxes, filings, and other government requirements Compliance-OS found for this business type and state.",
+      computation: "Each known requirement is weighted by category severity and renewal cadence, summed and normalized to a 0-100 score (higher = less friction).",
+      source: "Compliance-OS",
+      sourceUrl: "https://www.sba.gov/business-guide/launch-your-business/apply-licenses-permits",
+      quality: input.compliance.requirementCount > 0 ? "strong" : "limited",
+      score: regulatoryFrictionScore,
+      maxScore: 100,
+    }),
+  ];
 
   // ── Outlook: multi-year momentum — business formation, establishment, ──
   // ── income, and population trends — computed once by scoreOutlook()   ──
@@ -3048,6 +3410,7 @@ function buildCategories(
   const outlookScore = outlook.score;
   const outlookRationale = outlook.rationale;
   const outlookReasons = outlook.reasons;
+  const outlookSubSignals = outlook.subSignals;
 
   // ── National Reach: only produced for geographicScope === "National" ──
   // A local coffee cart's real addressable market is one city; a
@@ -3131,6 +3494,43 @@ function buildCategories(
               url: "https://www.census.gov/programs-surveys/cbp.html",
             },
             evidence: evidenceFor("nationalReach"),
+            subSignals: [
+              subSignal({
+                label: "National establishments",
+                rawValue: nationalEstablishments.toLocaleString(),
+                meaning: "The number of employer establishments in this category nationwide — the real size of a nationally-reachable business's addressable market.",
+                computation: `Nationwide establishment count through a tiered scale → ${nationalEstablishmentPoints}/40 pts.`,
+                source: "U.S. Census County Business Patterns (national)",
+                sourceUrl: "https://www.census.gov/programs-surveys/cbp.html",
+                quality: input.cbpNational ? "medium" : "limited",
+                score: nationalEstablishmentPoints,
+                maxScore: 40,
+              }),
+              subSignal({
+                label: "National receipts",
+                rawValue: nationalReceipts > 0 ? money(nationalReceipts) : "Unavailable",
+                meaning: "Total nationwide receipts generated by non-employer businesses in this category — the scale of revenue already moving through the category.",
+                computation: `Nationwide receipts through a tiered dollar scale → ${nationalReceiptsPoints}/30 pts.`,
+                source: "U.S. Census Nonemployer Statistics (national)",
+                sourceUrl: "https://www.census.gov/programs-surveys/nonemployer-statistics.html",
+                quality: input.nonemployerNational ? "medium" : "limited",
+                score: nationalReceiptsPoints,
+                maxScore: 30,
+              }),
+              subSignal({
+                label: "National formation trend",
+                rawValue: input.bfsNationalTrend
+                  ? `${input.bfsNationalTrend.trendPercent >= 0 ? "+" : ""}${input.bfsNationalTrend.trendPercent.toFixed(1)}%`
+                  : "Unavailable",
+                meaning: "Whether new-business formation nationwide is accelerating or slowing (all categories — BFS doesn't reliably break out every NAICS code).",
+                computation: `Multi-year trend percent through a tiered scale → ${nationalTrendPoints}/30 pts.`,
+                source: "U.S. Census Business Formation Statistics (national)",
+                sourceUrl: "https://www.census.gov/econ/bfs/",
+                quality: input.bfsNationalTrend ? "medium" : "limited",
+                score: nationalTrendPoints,
+                maxScore: 30,
+              }),
+            ],
           };
         })()
       : null;
@@ -3175,6 +3575,30 @@ function buildCategories(
             url: "https://data.sba.gov/en/dataset/7-a-504-foia",
           },
           evidence: evidenceFor("accessToCapital"),
+          subSignals: [
+            subSignal({
+              label: "SBA loan count",
+              rawValue: `${loanCount.toLocaleString()} loan${loanCount === 1 ? "" : "s"}`,
+              meaning: "How many SBA 7(a)-guaranteed loans matched this category and state in Desk's size-capped sample — more matches means more precedent for lenders backing this category here.",
+              computation: `Matched loan count through a tiered scale → ${loanCountPoints}/50 pts.`,
+              source: "U.S. Small Business Administration (7(a) FOIA data)",
+              sourceUrl: "https://data.sba.gov/en/dataset/7-a-504-foia",
+              quality: loanCount > 0 ? "medium" : "limited",
+              score: loanCountPoints,
+              maxScore: 50,
+            }),
+            subSignal({
+              label: "Average loan size",
+              rawValue: loanCount > 0 ? money(avgLoanSize) : "Unavailable",
+              meaning: "The average SBA-guaranteed loan size in this sample — a proxy for how much capital lenders are willing to back for this category.",
+              computation: `Average loan size through a tiered dollar scale → ${avgLoanSizePoints}/50 pts.`,
+              source: "U.S. Small Business Administration (7(a) FOIA data)",
+              sourceUrl: "https://data.sba.gov/en/dataset/7-a-504-foia",
+              quality: loanCount > 0 ? "medium" : "limited",
+              score: avgLoanSizePoints,
+              maxScore: 50,
+            }),
+          ],
         };
       })()
     : null;
@@ -3191,6 +3615,7 @@ function buildCategories(
         url: "https://www.census.gov/programs-surveys/acs",
       },
       evidence: evidenceFor("demand"),
+      subSignals: demandSubSignals,
     },
     {
       key: "competition",
@@ -3218,6 +3643,7 @@ function buildCategories(
                 url: "https://www.census.gov/programs-surveys/cbp.html",
               },
       evidence: evidenceFor("competition"),
+      subSignals: competitionSubSignals,
     },
     {
       key: "revenue",
@@ -3230,6 +3656,7 @@ function buildCategories(
         url: "https://www.census.gov/programs-surveys/nonemployer-statistics.html",
       },
       evidence: evidenceFor("revenue"),
+      subSignals: revenueSubSignals,
     },
     {
       key: "startupDifficulty",
@@ -3242,6 +3669,7 @@ function buildCategories(
         url: "https://www.sba.gov/business-guide/launch-your-business/apply-licenses-permits",
       },
       evidence: evidenceFor("startupDifficulty"),
+      subSignals: startupDifficultySubSignals,
     },
     {
       key: "regulatoryFriction",
@@ -3254,6 +3682,7 @@ function buildCategories(
         url: "https://www.sba.gov/business-guide/launch-your-business/apply-licenses-permits",
       },
       evidence: evidenceFor("regulatoryFriction"),
+      subSignals: regulatoryFrictionSubSignals,
     },
     {
       key: "outlook",
@@ -3266,6 +3695,7 @@ function buildCategories(
         url: "https://www.census.gov/econ/bfs/index.html",
       },
       evidence: evidenceFor("outlook"),
+      subSignals: outlookSubSignals,
     },
   ];
   if (nationalReachCategory) categories.push(nationalReachCategory);
@@ -3495,6 +3925,15 @@ const TIGERWEB_PLACES_URL =
 // confirmed via `Places_CouSub_ConCity_SubMCD/MapServer?f=json`, where layer
 // ids 4/11/18/25 are all "Incorporated Places" across vintages; 4 is the
 // newest ("Current").
+const TIGERWEB_CDP_URL =
+  "https://tigerweb.geo.census.gov/arcgis/rest/services/TIGERweb/Places_CouSub_ConCity_SubMCD/MapServer/5/query";
+// Layer 5 (sibling of layer 4, same service, same vintage) is "Census
+// Designated Places" — unincorporated communities the Census still tracks
+// as named places. A large share of real formation cities (suburbs, small
+// unincorporated towns) are CDPs, not incorporated places, so querying only
+// layer 4 silently failed to resolve them, which — since county resolution
+// derives from the resolved place's centroid — was quietly forcing those
+// requests all the way down to state-level data instead of city/county.
 const TIGERWEB_COUNTIES_URL =
   "https://tigerweb.geo.census.gov/arcgis/rest/services/TIGERweb/State_County/MapServer/1/query";
 // Layer 1 of this service is the finest-detail "Counties" layer in the
@@ -3549,24 +3988,17 @@ type ArcgisPlaceFeature = {
   geometry?: { rings?: number[][][] };
 };
 
-// Resolves a bare city name + state FIPS to a TIGERweb "Incorporated
-// Places" feature. Prefers an exact BASENAME match over a prefix match when
-// both are present (there can be same-named places in different states, but
-// this query is already scoped to one state, so same-state duplicates are
-// rare); otherwise just takes the first result rather than trying to
-// disambiguate further.
-async function fetchPlaceGeo(
+// Queries a single TIGERweb Places-family layer (Incorporated Places or
+// Census Designated Places — same field schema on both) for BASENAME
+// matches within a state. Shared by fetchPlaceGeo so it can query both
+// layers and merge results, since a formation city can be either kind.
+async function queryPlacesLayer(
+  layerUrl: string,
   baseName: string,
   stateFips: string,
-): Promise<{
-  fips: string;
-  name: string;
-  rings: number[][][] | null;
-  areaLandSqMeters: number | null;
-} | null> {
-  if (!baseName) return null;
+): Promise<ArcgisPlaceFeature[]> {
   const escaped = escapeForArcgisLike(baseName);
-  const url = new URL(TIGERWEB_PLACES_URL);
+  const url = new URL(layerUrl);
   url.searchParams.set(
     "where",
     `UPPER(BASENAME) LIKE UPPER('${escaped}%') AND STATE='${stateFips}'`,
@@ -3583,26 +4015,53 @@ async function fetchPlaceGeo(
     const response = await fetch(url.toString(), {
       signal: AbortSignal.timeout(5000),
     });
-    if (!response.ok) return null;
+    if (!response.ok) return [];
     const data = (await response.json()) as { features?: ArcgisPlaceFeature[] };
-    const features = data.features ?? [];
-    if (features.length === 0) return null;
-    const upperBase = baseName.toUpperCase();
-    const exact = features.find(
-      (f) => (f.attributes?.BASENAME ?? "").toUpperCase() === upperBase,
-    );
-    const best = exact ?? features[0];
-    const placeFips = best.attributes?.PLACE;
-    if (!placeFips) return null;
-    return {
-      fips: placeFips,
-      name: best.attributes?.NAME ?? baseName,
-      rings: best.geometry?.rings ?? null,
-      areaLandSqMeters: parseArealand(best.attributes?.AREALAND),
-    };
+    return data.features ?? [];
   } catch {
-    return null;
+    return [];
   }
+}
+
+// Resolves a bare city name + state FIPS to a TIGERweb place feature,
+// checking both the "Incorporated Places" and "Census Designated Places"
+// layers (a formation city can be either — CDPs cover unincorporated towns
+// and suburbs that would otherwise never resolve). Prefers an exact
+// BASENAME match over a prefix match when both are present, preferring an
+// Incorporated Places match over a CDP match when both tie on exactness
+// (there can be same-named places in different states, but this query is
+// already scoped to one state, so same-state duplicates are rare);
+// otherwise just takes the first result rather than trying to disambiguate
+// further.
+async function fetchPlaceGeo(
+  baseName: string,
+  stateFips: string,
+): Promise<{
+  fips: string;
+  name: string;
+  rings: number[][][] | null;
+  areaLandSqMeters: number | null;
+} | null> {
+  if (!baseName) return null;
+  const [incorporatedFeatures, cdpFeatures] = await Promise.all([
+    queryPlacesLayer(TIGERWEB_PLACES_URL, baseName, stateFips),
+    queryPlacesLayer(TIGERWEB_CDP_URL, baseName, stateFips),
+  ]);
+  const features = [...incorporatedFeatures, ...cdpFeatures];
+  if (features.length === 0) return null;
+  const upperBase = baseName.toUpperCase();
+  const exact = features.find(
+    (f) => (f.attributes?.BASENAME ?? "").toUpperCase() === upperBase,
+  );
+  const best = exact ?? features[0];
+  const placeFips = best.attributes?.PLACE;
+  if (!placeFips) return null;
+  return {
+    fips: placeFips,
+    name: best.attributes?.NAME ?? baseName,
+    rings: best.geometry?.rings ?? null,
+    areaLandSqMeters: parseArealand(best.attributes?.AREALAND),
+  };
 }
 
 function ringSignedArea(ring: number[][]): number {
@@ -4897,7 +5356,12 @@ export function scoreOutlook(input: {
   // percentile bucket here still means "improving," matching every other
   // bucket in this input.
   lausPercentileBucket?: number | null;
-}): { score: number; rationale: string; reasons: string[] } {
+}): {
+  score: number;
+  rationale: string;
+  reasons: string[];
+  subSignals: CategorySubSignal[];
+} {
   // Point buckets were rebalanced to make room for the new LAUS signal
   // (added at 18, a real, direct near-term labor-market health indicator —
   // second in weight only to BFS/QCEW) while keeping the max-achievable
@@ -4966,7 +5430,80 @@ export function scoreOutlook(input: {
     { text: `${cap(lausNote)}.`, weight: lausPoints },
   ]);
 
-  return { score, rationale, reasons };
+  const subSignals: CategorySubSignal[] = [
+    subSignal({
+      label: "Business formation trend",
+      rawValue: input.bfsTrend
+        ? `${input.bfsTrend.trendPercent >= 0 ? "+" : ""}${input.bfsTrend.trendPercent.toFixed(1)}%`
+        : "Unavailable",
+      meaning:
+        "Whether new-business applications statewide are accelerating or slowing — a leading indicator of overall entrepreneurial momentum.",
+      computation: `Multi-year trend percent through a tiered point scale${input.bfsPercentileBucket != null ? " (national percentile-ranked)" : ""} → ${bfsPoints}/25 pts.`,
+      source: "U.S. Census Business Formation Statistics",
+      sourceUrl: "https://www.census.gov/econ/bfs/",
+      quality: input.bfsTrend ? "strong" : "limited",
+      score: bfsPoints,
+      maxScore: 25,
+    }),
+    subSignal({
+      label: "Establishment trend",
+      rawValue: input.qcewTrend
+        ? `${input.qcewTrend.trendPercent >= 0 ? "+" : ""}${input.qcewTrend.trendPercent.toFixed(1)}%`
+        : "Unavailable",
+      meaning:
+        "Whether the number of employer establishments in this specific category is growing or shrinking locally.",
+      computation: `Multi-year trend percent through a tiered point scale${input.qcewPercentileBucket != null ? " (national percentile-ranked)" : ""} → ${qcewPoints}/25 pts.`,
+      source: "BLS QCEW",
+      sourceUrl: "https://www.bls.gov/cew/",
+      quality: input.qcewTrend ? "strong" : "limited",
+      score: qcewPoints,
+      maxScore: 25,
+    }),
+    subSignal({
+      label: "Regional income growth",
+      rawValue:
+        input.beaGrowthPercent !== null
+          ? `${input.beaGrowthPercent >= 0 ? "+" : ""}${input.beaGrowthPercent.toFixed(1)}%`
+          : "Unavailable",
+      meaning: `Whether regional personal income is growing over roughly the last ${OUTLOOK_TREND_YEARS} years — broad economic momentum for the area.`,
+      computation: `Multi-year trend percent through a tiered point scale${input.beaPercentileBucket != null ? " (national percentile-ranked)" : ""} → ${beaPoints}/20 pts.`,
+      source: "BEA Regional Economic Accounts",
+      sourceUrl: "https://www.bea.gov/data/income-saving/personal-income-by-state",
+      quality: input.beaGrowthPercent !== null ? "strong" : "limited",
+      score: beaPoints,
+      maxScore: 20,
+    }),
+    subSignal({
+      label: "Population trend",
+      rawValue: input.populationTrend
+        ? `${input.populationTrend.trendPercent >= 0 ? "+" : ""}${input.populationTrend.trendPercent.toFixed(1)}%`
+        : "Unavailable",
+      meaning:
+        "Whether the local population is growing or shrinking — a slower-moving but directly relevant demand-side momentum indicator.",
+      computation: `Multi-year trend percent through a tiered point scale${input.popPercentileBucket != null ? " (national percentile-ranked)" : ""} → ${popPoints}/12 pts.`,
+      source: "U.S. Census Population Estimates",
+      sourceUrl: "https://www.census.gov/programs-surveys/popest.html",
+      quality: input.populationTrend ? "strong" : "limited",
+      score: popPoints,
+      maxScore: 12,
+    }),
+    subSignal({
+      label: "Unemployment trend",
+      rawValue: input.lausTrend
+        ? `${input.lausTrend.trendPercent >= 0 ? "improved" : "worsened"} ${Math.abs(input.lausTrend.trendPercent).toFixed(1)}%`
+        : "Unavailable",
+      meaning:
+        "Whether the statewide labor market is loosening (easier hiring) or tightening over the multi-year window.",
+      computation: `Multi-year trend percent (already inverted so improving = positive) through a tiered point scale${input.lausPercentileBucket != null ? " (national percentile-ranked)" : ""} → ${lausPoints}/18 pts.`,
+      source: "BLS Local Area Unemployment Statistics",
+      sourceUrl: "https://www.bls.gov/lau/",
+      quality: input.lausTrend ? "strong" : "limited",
+      score: lausPoints,
+      maxScore: 18,
+    }),
+  ];
+
+  return { score, rationale, reasons, subSignals };
 }
 
 async function fetchCachedOrLiveOewsState(
@@ -5045,6 +5582,20 @@ function googlePlacesUnavailableItem(hasKey: string | undefined): EvidenceItem {
   );
 }
 
+// Prefers the user's actual business idea text over the generic curated
+// industry label for competition search queries — a curated label like
+// "Heavy Manufacturing" is too broad a term for a places-search API (it
+// isn't the name of a business or product), and searching it instead of
+// the specific idea (e.g. "yacht manufacturer") was producing inflated,
+// loosely-related competitor counts. Falls back to the industry label only
+// when no idea text is available, and caps an unusually long idea
+// description to a reasonable query length.
+function competitionQueryText(industry: string, businessIdea: string): string {
+  const idea = clean(businessIdea);
+  if (idea) return idea.length > 120 ? idea.slice(0, 120) : idea;
+  return clean(industry);
+}
+
 async function fetchGooglePlacesCompetition(
   config: AppConfig,
   formationCity: string | undefined,
@@ -5053,7 +5604,7 @@ async function fetchGooglePlacesCompetition(
   businessIdea: string,
 ): Promise<MetricSet | null> {
   if (!config.googlePlacesApiKey) return null;
-  const textQuery = `${clean(industry) || clean(businessIdea)} in ${[clean(formationCity), state].filter(Boolean).join(", ")}`;
+  const textQuery = `${competitionQueryText(industry, businessIdea)} in ${[clean(formationCity), state].filter(Boolean).join(", ")}`;
   const url = "https://places.googleapis.com/v1/places:searchText";
   try {
     const response = await fetch(url, {
@@ -5468,7 +6019,7 @@ async function fetchFoursquareCompetition(
   const near = [clean(formationCity), state].filter(Boolean).join(", ");
   if (!near) return null;
   const url = new URL("https://places-api.foursquare.com/places/search");
-  url.searchParams.set("query", clean(industry) || clean(businessIdea));
+  url.searchParams.set("query", competitionQueryText(industry, businessIdea));
   url.searchParams.set("near", near);
   url.searchParams.set("limit", "20");
   try {
@@ -6006,10 +6557,64 @@ function summary(
 // generic "Professional Services" business — and the caller should disclose
 // that the score rests on an approximate proxy category rather than present
 // it with the same confidence as a well-matched, established category.
+// "31-33" is Census's own alias for the entire Manufacturing sector — the
+// coarsest code inferNaicsCodes can produce, and appropriate for the
+// capital/labor/knowledge scoring tables above (NAICS_CAPITAL_HIGH etc.),
+// which are deliberately keyed to this same fixed, coarse set of codes (see
+// their comments). But passing "31-33" verbatim to an establishment-count
+// fetch (QCEW, CBP, nonemployer) pulls in every manufacturer in the
+// state/county — a single-person boat builder counted alongside a large
+// steel mill — producing wildly inflated, implausible counts for any
+// specific manufacturing idea (a reported case: "yacht manufacturer"
+// returned 30,000+ QCEW establishments, which was really the entire
+// manufacturing sector's establishment count for that area, not boat
+// building specifically).
+//
+// This resolves a more specific 3-4 digit NAICS subsector when the idea
+// text names a recognizable manufacturing product line, for use only by
+// the establishment-count/competition fetches — the coarse "31-33" stays
+// the fallback for ideas with no specific product line named, and remains
+// what's used for the scoring tables via `codes` regardless.
+function inferManufacturingEstablishmentCode(text: string): string | null {
+  if (/\byacht|\bboat\b|boatbuild|shipbuild|\bshipyard\b/.test(text))
+    return "3366"; // Ship and Boat Building
+  if (/aircraft|aerospace|\bairplane/.test(text))
+    return "3364"; // Aerospace Product and Parts Manufacturing
+  if (
+    /automobile manufactur|vehicle manufactur|auto manufactur|car manufactur/.test(
+      text,
+    )
+  )
+    return "3361"; // Motor Vehicle Manufacturing
+  if (
+    /heavy equipment|heavy machinery|industrial machinery|machinery manufactur/.test(
+      text,
+    )
+  )
+    return "333"; // Machinery Manufacturing
+  if (/metal fabrication|steel fabrication|\bfoundry\b|forging/.test(text))
+    return "332"; // Fabricated Metal Product Manufacturing
+  if (
+    /food manufactur|food processing|co-?packer|packaged food production/.test(
+      text,
+    )
+  )
+    return "311"; // Food Manufacturing
+  if (
+    /chemical manufactur|chemical plant|chemical production|industrial chemicals/.test(
+      text,
+    )
+  )
+    return "325"; // Chemical Manufacturing
+  if (/furniture manufactur/.test(text)) return "337"; // Furniture and Related Product Manufacturing
+  if (/appliance manufactur/.test(text)) return "335"; // Electrical Equipment, Appliance Manufacturing
+  return null;
+}
+
 export function inferNaicsCodes(
   industry: string,
   idea: string,
-): { codes: string[]; matched: boolean } {
+): { codes: string[]; matched: boolean; establishmentCodes: string[] } {
   const text = `${industry} ${idea}`.toLowerCase();
   const codes = new Set<string>();
   if (/food|restaurant|cafe|catering/.test(text)) codes.add("72");
@@ -6034,7 +6639,11 @@ export function inferNaicsCodes(
   if (!matched) codes.add("54");
   // Cap at two codes so downstream fetches stay bounded — the first match
   // plus the strongest secondary (compound) signal, not an unbounded blend.
-  return { codes: Array.from(codes).slice(0, 2), matched };
+  const cappedCodes = Array.from(codes).slice(0, 2);
+  const establishmentCodes = cappedCodes.map((code) =>
+    code === "31-33" ? (inferManufacturingEstablishmentCode(text) ?? code) : code,
+  );
+  return { codes: cappedCodes, matched, establishmentCodes };
 }
 
 function inferIndustry(idea: string): string {

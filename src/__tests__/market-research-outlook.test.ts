@@ -289,4 +289,48 @@ describe("scoreOutlook", () => {
       expect(bottomed.score).toBeGreaterThanOrEqual(0);
     });
   });
+
+  describe("subSignals", () => {
+    it("returns one structured sub-signal per trend, summing to the total score", () => {
+      const result = scoreOutlook({
+        bfsTrend: trend(6),
+        qcewTrend: trend(4),
+        beaGrowthPercent: 3,
+        populationTrend: trend(2),
+        lausTrend: trend(1),
+      });
+      const labels = result.subSignals.map((s) => s.label);
+      expect(labels).toEqual([
+        "Business formation trend",
+        "Establishment trend",
+        "Regional income growth",
+        "Population trend",
+        "Unemployment trend",
+      ]);
+      const maxScores = result.subSignals.map((s) => s.maxScore);
+      expect(maxScores).toEqual([25, 25, 20, 12, 18]);
+      expect(maxScores.reduce((a, b) => a + b, 0)).toBe(100);
+      const totalSubSignalScore = result.subSignals.reduce((a, s) => a + s.score, 0);
+      expect(totalSubSignalScore).toBe(result.score);
+      for (const sub of result.subSignals) {
+        expect(sub.score).toBeGreaterThanOrEqual(0);
+        expect(sub.score).toBeLessThanOrEqual(sub.maxScore);
+        expect(sub.rawValue.length).toBeGreaterThan(0);
+        expect(sub.quality).toBe("strong");
+      }
+    });
+
+    it("marks a sub-signal as limited quality when its trend is unavailable", () => {
+      const result = scoreOutlook({
+        bfsTrend: null,
+        qcewTrend: trend(4),
+        beaGrowthPercent: 3,
+        populationTrend: trend(2),
+        lausTrend: trend(1),
+      });
+      const bfsSignal = result.subSignals.find((s) => s.label === "Business formation trend");
+      expect(bfsSignal?.quality).toBe("limited");
+      expect(bfsSignal?.rawValue).toBe("Unavailable");
+    });
+  });
 });

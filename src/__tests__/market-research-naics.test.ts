@@ -32,4 +32,53 @@ describe('inferNaicsCodes', () => {
     expect(result.codes).toEqual(['54']);
     expect(result.matched).toBe(false);
   });
+
+  describe('establishmentCodes', () => {
+    it('mirrors codes for non-manufacturing ideas', () => {
+      const result = inferNaicsCodes('Concrete Contractor', 'we pour driveways and sidewalks');
+      expect(result.establishmentCodes).toEqual(result.codes);
+    });
+
+    it('refines the broad manufacturing sector code to a specific subsector for a boat/yacht idea', () => {
+      // Reported bug: "yacht manufacturer" was resolving establishment
+      // counts against the entire "31-33" Manufacturing sector (30,000+
+      // QCEW establishments) instead of boat/ship building specifically.
+      const result = inferNaicsCodes('Heavy Manufacturing', 'yacht manufacturer');
+      expect(result.codes).toEqual(['31-33']);
+      expect(result.establishmentCodes).toEqual(['3366']);
+    });
+
+    it('refines to Food Manufacturing for a food-production idea', () => {
+      // "Food Manufacturing" (industry) and "food production" (idea) also
+      // trigger the separate food-service ("72") code — expected, since
+      // this function blends codes across a compound idea — so this only
+      // asserts the manufacturing slot ("31-33") specifically refines to
+      // "311" rather than requiring an exact two-code array.
+      const result = inferNaicsCodes(
+        'Food Manufacturing',
+        'a co-packer doing packaged food production for regional grocers',
+      );
+      expect(result.codes).toContain('31-33');
+      expect(result.establishmentCodes).toContain('311');
+      expect(result.establishmentCodes).toHaveLength(result.codes.length);
+    });
+
+    it('refines to Chemical Manufacturing for a chemical-production idea', () => {
+      const result = inferNaicsCodes(
+        'Chemical Manufacturing',
+        'an industrial chemical manufacturing plant',
+      );
+      expect(result.codes).toEqual(['31-33']);
+      expect(result.establishmentCodes).toEqual(['325']);
+    });
+
+    it('leaves the broad sector code as-is when no specific product line is named', () => {
+      const result = inferNaicsCodes(
+        'Light Manufacturing',
+        'a light manufacturing operation with small production runs',
+      );
+      expect(result.codes).toEqual(['31-33']);
+      expect(result.establishmentCodes).toEqual(['31-33']);
+    });
+  });
 });
