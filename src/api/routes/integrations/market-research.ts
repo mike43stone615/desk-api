@@ -90,10 +90,50 @@ type CategorySubSignal = {
   quality: "strong" | "medium" | "limited";
   score: number;
   maxScore: number;
+  // Whether this sub-signal's underlying raw data was actually present —
+  // distinct from `quality`, which can be "limited" while still carrying a
+  // real number (e.g. a keyword-based fallback). `score`/`maxScore` above
+  // are unchanged either way (kept for the fixed-tier math each category's
+  // headline score still runs internally), but a `false` here tells
+  // redistributedCategoryScore (see below) to exclude this sub-signal's
+  // budget from that math entirely rather than let its baked-in neutral
+  // default quietly pad the category's score — and tells the UI to gray it
+  // out instead of presenting a padded number as if it meant something.
+  available: boolean;
 };
 
 function subSignal(input: CategorySubSignal): CategorySubSignal {
   return input;
+}
+
+// Recomputes a category's headline score from only the sub-signals whose
+// data was actually available, redistributing an unavailable sub-signal's
+// point budget across the others in proportion to their existing weights —
+// rather than the category quietly keeping that sub-signal's fixed neutral-
+// default contribution baked into a 100-point total it never really had a
+// shot at earning cleanly. Concretely: sum(available scores) /
+// sum(available maxScores) * 100, so each available sub-signal's relative
+// share of the total grows exactly enough to fill the gap. Falls back to
+// beforeRedistribution unchanged when there are no sub-signals at all, or
+// none are available, since there's nothing left to redistribute across —
+// a category should never silently drop to 0 just because every one of its
+// inputs happened to be missing this run.
+// Accepts anything shaped like a CategorySubSignal's score/maxScore/
+// available (a full CategorySubSignal[] satisfies this structurally) so a
+// caller that hasn't built full subSignal objects yet at the point it needs
+// a redistributed score — e.g. buildCategories computes Demand's numeric
+// score before constructing demandSubSignals' user-facing text — can pass a
+// lightweight inline array instead of reordering unrelated code around it.
+function redistributedCategoryScore(
+  subSignals: Array<{ score: number; maxScore: number; available: boolean }>,
+  beforeRedistribution: number,
+): number {
+  const available = subSignals.filter((sub) => sub.available);
+  if (available.length === 0) return beforeRedistribution;
+  const scoreSum = available.reduce((sum, sub) => sum + sub.score, 0);
+  const maxSum = available.reduce((sum, sub) => sum + sub.maxScore, 0);
+  if (maxSum <= 0) return beforeRedistribution;
+  return clamp(Math.round((scoreSum / maxSum) * 100), 0, 100);
 }
 
 type CategoryResult = {
@@ -1634,7 +1674,13 @@ export function scoreStartupDifficulty(input: {
     hasRequirementData && input.licenseCount !== undefined;
   const licenseCount = input.licenseCount ?? 0;
 
-  const score = clamp(
+  // Renamed from `score`: this is the pre-redistribution total (each
+  // sub-signal's raw point contribution, including any neutral-default
+  // fallback baked into a sub-signal that had no real data). The category's
+  // actual returned score is computed further down, from subSignals, via
+  // redistributedCategoryScore — see its comment for why that's not simply
+  // this same sum.
+  const rawScore = clamp(
     capitalPoints +
       barrierPoints +
       productPoints +
@@ -1783,15 +1829,6 @@ export function scoreStartupDifficulty(input: {
           ? `Compliance-OS found ${requirementCount} known requirements for this category and state, a moderate licensing/permitting load`
           : `Compliance-OS found ${requirementCount} known requirements for this category and state, a relatively light licensing/permitting load`;
 
-  const rationale =
-    `${verdictWord(score)} to start (${score}/100). Product, labor, and knowledge signals ` +
-    `come from Desk's classification of this business idea rather than a single external ` +
-    `dataset — treat those as directional; capital and contract-barrier both blend that same ` +
-    `classification with real matched Compliance-OS signals where available (bond/insurance ` +
-    `for capital, license/registration for barrier), and the licensing-complexity signal ` +
-    `reflects the real matched Compliance-OS LICENSE-category share of the known requirements ` +
-    `where available, or the requirement count alone otherwise.`;
-
   const reasons = rankedReasons([
     {
       text: `Estimated startup capital needs are ${capitalNote}.${capitalBondNote}`,
@@ -1823,12 +1860,16 @@ export function scoreStartupDifficulty(input: {
         : `${cap(capitalNote)} (NAICS-based estimate)`,
       meaning:
         "Estimates up-front cash needed before the business can legally and physically operate — equipment, space build-out, inventory, and any required bonds or insurance.",
-      computation: `NAICS sector capital-intensity base (${capitalNote}) plus a Compliance-OS bond/insurance modifier (${hasBondInsuranceData ? "matched, real count" : "unavailable, neutral"}) → ${capitalPoints}/25 pts.`,
+      computation: `NAICS sector base (high-capital sectors→4 pts, moderate-high→8, moderate/default→12, low-capital sectors→20; here: ${capitalNote}→${naicsCapitalBaseFor(input.naicsCodes)}) + bond/insurance modifier (0 requirements→+5, 1–2→+0, 3+→-5; ${hasBondInsuranceData ? `${bondOrInsuranceCount} requirement${bondOrInsuranceCount === 1 ? "" : "s"}→${capitalModifierFor(input.bondOrInsuranceCount)}` : "unavailable, scored as neutral +0"}) → ${capitalPoints}/25 pts.`,
       source: hasBondInsuranceData ? complianceOsSource.name : naicsSource.name,
       sourceUrl: hasBondInsuranceData ? complianceOsSource.url : naicsSource.url,
       quality: hasBondInsuranceData ? "strong" : "limited",
       score: capitalPoints,
       maxScore: 25,
+      // Always has a real value — the NAICS sector base never fails to
+      // resolve, and a missing bond/insurance count just falls back to a
+      // neutral modifier rather than leaving the whole sub-signal blank.
+      available: true,
     }),
     subSignal({
       label: "Barrier to entry",
@@ -1839,48 +1880,62 @@ export function scoreStartupDifficulty(input: {
           : "Doesn't read as a licensed trade",
       meaning:
         "How much of a track record, credential, or license buyers expect before trusting a new provider with their first contract.",
-      computation: `Credential signal (${hasLicenseRegData ? "real Compliance-OS match" : "keyword heuristic"}) plus a B2B compounding factor and overall requirement breadth → ${barrierPoints}/15 pts.`,
+      computation: `Credential signal (0 matched requirements→6 pts, 1→3, 2+→1; ${hasLicenseRegData ? `${licenseOrRegistrationCount} matched here` : `unmatched, keyword guess used instead (${isLicensedTrade ? "reads as licensed→1" : "reads as unlicensed→6"})`}) + customer-type signal (B2C→5 pts; B2B, not credentialed→3; B2B, credentialed→1) + requirement-breadth signal (<5 known requirements→4 pts, 5–10→1, >10→0; unavailable→2, the neutral midpoint) → ${barrierPoints}/15 pts.`,
       source: hasLicenseRegData ? complianceOsSource.name : "Business description keyword match",
       sourceUrl: hasLicenseRegData ? complianceOsSource.url : complianceOsSource.url,
       quality: hasLicenseRegData ? "strong" : "limited",
       score: barrierPoints,
       maxScore: 15,
+      // Always resolves — the keyword-guess credential signal and the
+      // neutral requirement-breadth midpoint both apply even with zero
+      // real Compliance-OS data.
+      available: true,
     }),
     subSignal({
       label: "Product/build complexity",
       rawValue: `NAICS ${input.naicsCodes.join(", ") || "unmatched"}`,
       meaning:
         "Whether the business needs to stand up a physical production process, build-out, or infrastructure before it can operate, versus a service that can start from a laptop.",
-      computation: `NAICS-code product-complexity tier → ${productPoints}/20 pts (higher = less physical build-out required).`,
+      computation: `NAICS-code build-complexity tier: construction/manufacturing/transportation sectors→6 pts, food service/health care→10, retail→14 (also the default for an unmatched/ambiguous code), professional/education/finance services→20 (higher = less physical build-out required) → ${productPoints}/20 pts.`,
       source: naicsSource.name,
       sourceUrl: naicsSource.url,
       quality: "medium",
       score: productPoints,
       maxScore: 20,
+      // Always resolves — an unmatched/ambiguous NAICS code still lands on
+      // the "moderate" default tier rather than leaving this blank.
+      available: true,
     }),
     subSignal({
       label: "Labor market tightness",
       rawValue: hasLaborData ? `${unemploymentRate.toFixed(1)}% unemployment` : "Unavailable",
       meaning:
         "How easy or costly it will be to hire staff locally, blended toward neutral for categories that don't typically need to hire much.",
-      computation: `Local unemployment rate (${input.laborPercentileBucket != null ? "national percentile rank" : "fallback tier"}), trend-adjusted and blended by category labor intensity → ${laborPoints}/20 pts.`,
+      computation: `Snapshot (${input.laborPercentileBucket != null ? `national percentile decile × 2, decile ${input.laborPercentileBucket} here` : hasLaborData ? "no cached percentile yet, fallback bands used: ≤2.5%→4 pts, 2.5–4%→8, 4–6%→14, >6%→20" : "unavailable→10, the neutral midpoint"}) + trend modifier (unemployment rising >5%→+3 pts, 1–5%→+1, falling 1–5%→-1, falling >5%→-3, else→0), clamped to 0–20, then for categories that don't typically hire much, blended halfway toward the neutral midpoint (10) → ${laborPoints}/20 pts.`,
       source: "U.S. Census ACS / BLS LAUS",
       sourceUrl: "https://www.bls.gov/lau/",
       quality: hasLaborData ? "medium" : "limited",
       score: laborPoints,
       maxScore: 20,
+      // Unlike the other Startup Difficulty sub-signals, this one's
+      // fallback (unemploymentRate undefined→10, the neutral midpoint) is
+      // a genuine "we have nothing" case, not a real secondary read — so
+      // it's the one sub-signal in this category redistribution actually
+      // excludes when unavailable.
+      available: hasLaborData,
     }),
     subSignal({
       label: "Knowledge intensity",
       rawValue: knowledgeIntensiveSector ? "Knowledge-intensive sector" : "Not a knowledge-intensive sector",
       meaning:
         "Whether the category demands deep specialized expertise as the product itself, independent of any formal license requirement.",
-      computation: `Credential signal plus a NAICS knowledge-intensity flag → ${knowledgePoints}/10 pts.`,
+      computation: `Credential signal (0 matched requirements→6 pts, 1→3, 2+→1; keyword fallback if unmatched) + NAICS knowledge-intensity flag (professional/education/finance sectors→1 pt, all other sectors→4) → ${knowledgePoints}/10 pts.`,
       source: hasLicenseRegData ? complianceOsSource.name : naicsSource.name,
       sourceUrl: hasLicenseRegData ? complianceOsSource.url : naicsSource.url,
       quality: hasLicenseRegData ? "strong" : "limited",
       score: knowledgePoints,
       maxScore: 10,
+      available: true,
     }),
     subSignal({
       label: "Licensing complexity",
@@ -1891,14 +1946,31 @@ export function scoreStartupDifficulty(input: {
           : "Unavailable",
       meaning:
         "What share of the known compliance requirements are exam/credential-gated licenses, versus lighter registration or filing paperwork.",
-      computation: `${hasCompositionData ? "Compliance-OS LICENSE-category share of known requirements" : "Flat requirement-count fallback tiers"} → ${licensingComplexityPoints}/10 pts.`,
+      computation: hasCompositionData
+        ? `Share of known requirements that are LICENSE-category: 0 requirements or 0 licenses→10 pts, ≤1/3 are licenses→7, ≤2/3→4, >2/3→1 → ${licensingComplexityPoints}/10 pts.`
+        : `Composition data unavailable, flat requirement-count fallback used: unknown count→5 pts, >10 known requirements→2, 5–10→6, <5 (or none)→10 → ${licensingComplexityPoints}/10 pts.`,
       source: complianceOsSource.name,
       sourceUrl: complianceOsSource.url,
       quality: hasCompositionData ? "strong" : hasRequirementData ? "medium" : "limited",
       score: licensingComplexityPoints,
       maxScore: 10,
+      // Unlike Capital/Barrier/Product/Knowledge above, a missing
+      // requirementCount here really does fall back to a flat neutral
+      // midpoint (5/10) rather than a real secondary signal — the same
+      // "genuinely nothing to go on" case Labor market tightness has.
+      available: hasRequirementData,
     }),
   ];
+
+  const score = redistributedCategoryScore(subSignals, rawScore);
+  const rationale =
+    `${verdictWord(score)} to start (${score}/100). Product, labor, and knowledge signals ` +
+    `come from Desk's classification of this business idea rather than a single external ` +
+    `dataset — treat those as directional; capital and contract-barrier both blend that same ` +
+    `classification with real matched Compliance-OS signals where available (bond/insurance ` +
+    `for capital, license/registration for barrier), and the licensing-complexity signal ` +
+    `reflects the real matched Compliance-OS LICENSE-category share of the known requirements ` +
+    `where available, or the requirement count alone otherwise.`;
 
   return { score, rationale, reasons, subSignals };
 }
@@ -2884,7 +2956,7 @@ function buildCategories(
         : consumerSpendingGrowth >= 0
           ? 3
           : 0;
-  const demandScoreBeforeFit = clamp(
+  const demandScoreRawSum = clamp(
     populationTier +
       incomeTier +
       establishmentTier +
@@ -2895,6 +2967,51 @@ function buildCategories(
       consumerSpendingPoints,
     0,
     100,
+  );
+  // Redistributes budget away from any sub-signal whose underlying data was
+  // actually unavailable this run (see redistributedCategoryScore) instead
+  // of quietly keeping its baked-in neutral-default point contribution —
+  // this same availability list is what demandSubSignals below builds its
+  // user-facing `available` flags from, kept in sync by construction rather
+  // than by convention since both read the same underlying booleans.
+  const demandScoreBeforeFit = redistributedCategoryScore(
+    [
+      { score: populationTier, maxScore: 40, available: population > 0 },
+      // One combined entry, not two — incomeTier already folds together
+      // levelTier + equalityTier (plus the price-relevance/target-market
+      // multipliers) into a single number; the "Income level" and "Income
+      // equality" subSignal rows below split that same combined figure
+      // back out for display, but summing both of *their* raw scores here
+      // too would double-count the equality portion.
+      {
+        score: incomeTier,
+        maxScore: 25,
+        available: nominalIncome > 0 || giniIndex !== null,
+      },
+      { score: establishmentTier, maxScore: 12, available: input.cbp !== null },
+      {
+        score: nonemployerEstablishmentTier,
+        maxScore: 4,
+        available: input.nonemployer !== null,
+      },
+      {
+        score: establishmentTrendTier,
+        maxScore: 4,
+        available: input.qcewTrend !== null,
+      },
+      { score: growthTier, maxScore: 15, available: input.bea !== null },
+      {
+        score: locationQuotientPoints,
+        maxScore: 6,
+        available: locationQuotient !== null,
+      },
+      {
+        score: consumerSpendingPoints,
+        maxScore: 5,
+        available: consumerSpendingGrowth !== undefined,
+      },
+    ],
+    demandScoreRawSum,
   );
   // customerType fit multiplier — see its definition above buildCategories'
   // body for the B2B/B2C reasoning.
@@ -3017,63 +3134,102 @@ function buildCategories(
         ]
       : []),
   ]);
+  // ── Explicit breakpoint text for subSignal.computation ──────────────────
+  // Every function below just renders the real numeric bands a tier
+  // function (see their definitions above buildCategories) actually
+  // compares the raw value against, so "how did my number turn into this
+  // score" is answerable by reading the subcategory row itself rather than
+  // trusting an unexplained label like "jurisdiction-scaled headcount
+  // tier."
+  const populationHeadcountBandsText = (level: GeographyLevel | undefined) =>
+    level === "place"
+      ? "≤10,000→8 pts, 10,001–50,000→16, 50,001–150,000→24, >150,000→32"
+      : level === "county"
+        ? "≤15,000→8 pts, 15,001–75,000→16, 75,001–300,000→24, >300,000→32"
+        : "≤25,000→8 pts, 25,001–100,000→16, 100,001–500,000→24, >500,000→32";
+  const populationDensityBandsText =
+    "≤1,000 people/sq mi→0 pts, 1,001–5,000→5, >5,000→8 (0 when land area is unavailable)";
+  const establishmentBandsText = (level: GeographyLevel | undefined) =>
+    level === "county"
+      ? "≤20→5 pts, 21–75→9, 76–300→12 (healthiest), 301–500→8, >500→4"
+      : "≤50→5 pts, 51–250→9, 251–1,000→12 (healthiest), 1,001–1,700→8, >1,700→4";
+  const nonemployerEstablishmentBandsText = (level: GeographyLevel | undefined) =>
+    level === "county"
+      ? "≤300→1 pt, 301–3,000→3, 3,001–20,000→4 (healthiest), 20,001–60,000→2, >60,000→0"
+      : "≤1,000→1 pt, 1,001–10,000→3, 10,001–70,000→4 (healthiest), 70,001–200,000→2, >200,000→0";
+  const incomeLevelBandsText =
+    "≤$45,000→6 pts, $45,001–65,000→10, $65,001–90,000→15, >$90,000→20 (of real, cost-of-living-adjusted income)";
+  const incomeEqualityBandsText =
+    "Gini ≥0.50→0 pts, 0.45–0.50→1, 0.40–0.45→3, <0.40→5 (lower Gini = more evenly distributed)";
+  const growthBandsText =
+    "≤-2%→0 pts, -2%–1%→3, 1%–4%→8, >4%→15";
+  const locationQuotientBandsText =
+    "<0.4 or >2.2→2 pts, 0.4–0.7 or 1.4–2.2→4, 0.7–1.4→6 (typical concentration); unavailable→3, the neutral midpoint";
+  const consumerSpendingBandsText =
+    "<0%→0 pts, 0%–3%→3, ≥3%→5; unavailable→0";
+
   const demandSubSignals: CategorySubSignal[] = [
     subSignal({
       label: "Population",
       rawValue: population.toLocaleString() || "Unreported",
       meaning: `Estimates the size of the potential customer base in ${geoNameFor(populationLevel)}.`,
-      computation: `Jurisdiction-scaled headcount tier (${populationResult.headcountTier}) plus a population-density bonus (${populationResult.densityTier})${input.ageFocus !== null ? ", age-relevance adjusted" : ""} → ${populationTier}/40 pts.`,
+      computation: `Headcount tier: ${populationHeadcountBandsText(populationLevel)} (${populationResult.headcountTier}/32 pts here) + density tier: ${populationDensityBandsText} (${populationResult.densityTier}/8 pts here)${input.ageFocus !== null ? `, then × ${populationResult.ageMultiplier.toFixed(2)} age-relevance multiplier on the headcount portion` : ""} → ${populationTier}/40 pts.`,
       source: "U.S. Census ACS",
-      sourceUrl: "https://www.census.gov/programs-surveys/acs",
+      sourceUrl: "https://data.census.gov/table?q=DP05",
       quality: population > 0 ? "strong" : "limited",
       score: populationTier,
       maxScore: 40,
+      available: population > 0,
     }),
     subSignal({
       label: "Income level",
       rawValue: money(income.realIncome),
       meaning:
         "Cost-of-living-adjusted household income — a higher real income means more discretionary spending power in the target area.",
-      computation: `Real (RPP-deflated) income through a tiered scale${income.direction !== "neutral" ? `, adjusted for a ${income.direction}-oriented pricing focus` : ""} → ${income.levelTier}/20 pts.`,
+      computation: `Real (RPP-deflated) income: ${incomeLevelBandsText}${income.direction !== "neutral" ? `, then × ${income.multiplier.toFixed(2)} for a ${income.direction}-oriented pricing focus` : ""} → ${income.levelTier}/20 pts.`,
       source: "U.S. Census ACS / BEA Regional Price Parity",
-      sourceUrl: "https://www.census.gov/programs-surveys/acs",
+      sourceUrl: "https://data.census.gov/table?q=DP03",
       quality: regionalPriceParity ? "strong" : "medium",
       score: income.levelTier,
       maxScore: 20,
+      available: nominalIncome > 0,
     }),
     subSignal({
       label: "Income equality",
       rawValue: giniIndex !== null ? giniIndex.toFixed(3) : "Unavailable",
       meaning:
         "How evenly household income is distributed (Gini index, 0 = perfect equality) — a broader, more evenly-spread income base tends to mean a healthier addressable market than the same median concentrated among a few high earners.",
-      computation: `Gini index through a tiered scale → ${income.equalityTier}/5 pts.`,
+      computation: `${incomeEqualityBandsText} → ${income.equalityTier}/5 pts.`,
       source: "U.S. Census ACS",
-      sourceUrl: "https://www.census.gov/programs-surveys/acs",
+      sourceUrl: "https://data.census.gov/table?q=DP03",
       quality: giniIndex !== null ? "medium" : "limited",
       score: income.equalityTier,
       maxScore: 5,
+      available: giniIndex !== null,
     }),
     subSignal({
       label: "Employer establishments",
       rawValue: establishments.toLocaleString(),
       meaning: `The number of employer businesses already operating in this category in ${geoNameFor(establishmentsLevel)} — a moderate count is read as the healthiest signal (proven demand without saturation).`,
-      computation: `Non-monotonic "moderate is healthiest" curve on establishment count → ${establishmentTier}/12 pts.`,
+      computation: `Establishment count: ${establishmentBandsText(establishmentsLevel)} → ${establishmentTier}/12 pts.`,
       source: "U.S. Census County Business Patterns",
-      sourceUrl: "https://www.census.gov/programs-surveys/cbp.html",
+      sourceUrl: "https://www.census.gov/programs-surveys/cbp/data/tables.html",
       quality: input.cbp ? "strong" : "limited",
       score: establishmentTier,
       maxScore: 12,
+      available: input.cbp !== null,
     }),
     subSignal({
       label: "Non-employer establishments",
       rawValue: nonemployerEstablishments.toLocaleString(),
       meaning: `The number of solo/no-employee operators already active in this category in ${geoNameFor(receiptsLevel)} — an independent read on the same "moderate is healthiest" logic.`,
-      computation: `Non-monotonic "moderate is healthiest" curve on non-employer establishment count → ${nonemployerEstablishmentTier}/4 pts.`,
+      computation: `Non-employer establishment count: ${nonemployerEstablishmentBandsText(receiptsLevel)} → ${nonemployerEstablishmentTier}/4 pts.`,
       source: "U.S. Census Nonemployer Statistics",
-      sourceUrl: "https://www.census.gov/programs-surveys/nonemployer-statistics.html",
+      sourceUrl: "https://www.census.gov/programs-surveys/nonemployer-statistics/data/tables.html",
       quality: input.nonemployer ? "strong" : "limited",
       score: nonemployerEstablishmentTier,
       maxScore: 4,
+      available: input.nonemployer !== null,
     }),
     subSignal({
       label: "Establishment trend",
@@ -3082,35 +3238,38 @@ function buildCategories(
         : "Unavailable",
       meaning:
         "Whether the count of employer establishments in this category is growing or shrinking, so a healthy point-in-time count isn't the whole story.",
-      computation: `Multi-year trend percent through a tiered scale → ${establishmentTrendTier}/4 pts.`,
+      computation: `Multi-year trend percent: ${trendPointsBandsText(4)} → ${establishmentTrendTier}/4 pts.`,
       source: "BLS QCEW",
-      sourceUrl: "https://www.bls.gov/cew/",
+      sourceUrl: "https://data.bls.gov/cew/apps/table_maker/v4/table_maker.htm",
       quality: input.qcewTrend ? "strong" : "limited",
       score: establishmentTrendTier,
       maxScore: 4,
+      available: input.qcewTrend !== null,
     }),
     subSignal({
       label: "Regional income growth",
       rawValue: `${beaGrowth >= 0 ? "+" : ""}${beaGrowth.toFixed(1)}%`,
       meaning: "Whether regional personal income is growing — broader economic momentum feeding demand.",
-      computation: `Growth percent through a tiered scale → ${growthTier}/15 pts.`,
+      computation: `${growthBandsText} → ${growthTier}/15 pts.`,
       source: "BEA Regional Economic Accounts",
-      sourceUrl: "https://www.bea.gov/data/income-saving/personal-income-by-state",
+      sourceUrl: "https://apps.bea.gov/itable/?ReqID=70&step=1",
       quality: input.bea ? "strong" : "limited",
       score: growthTier,
       maxScore: 15,
+      available: input.bea !== null,
     }),
     subSignal({
       label: "Location Quotient",
       rawValue: locationQuotient !== null ? locationQuotient.toFixed(2) : "Unavailable",
       meaning:
         "How concentrated this category is here relative to the national rate (1.0 = average) — a typical concentration is read as the most certain signal.",
-      computation: `"Moderate is healthiest" curve on local-vs-national establishment density → ${locationQuotientPoints}/6 pts.`,
+      computation: `${locationQuotientBandsText} → ${locationQuotientPoints}/6 pts.`,
       source: "U.S. Census County Business Patterns (local + national)",
-      sourceUrl: "https://www.census.gov/programs-surveys/cbp.html",
+      sourceUrl: "https://www.census.gov/programs-surveys/cbp/data/tables.html",
       quality: locationQuotient !== null ? "medium" : "limited",
       score: locationQuotientPoints,
       maxScore: 6,
+      available: locationQuotient !== null,
     }),
     subSignal({
       label: "Consumer spending power",
@@ -3119,12 +3278,13 @@ function buildCategories(
           ? `${consumerSpendingGrowth >= 0 ? "+" : ""}${consumerSpendingGrowth.toFixed(1)}%`
           : "Unavailable",
       meaning: "Whether statewide consumer spending (personal consumption expenditures) is growing over the same multi-year window.",
-      computation: `Growth percent through a small tiered scale → ${consumerSpendingPoints}/5 pts.`,
+      computation: `${consumerSpendingBandsText} → ${consumerSpendingPoints}/5 pts.`,
       source: "BEA Personal Consumption Expenditures",
-      sourceUrl: "https://www.bea.gov/data/consumer-spending/main",
+      sourceUrl: "https://apps.bea.gov/itable/?ReqID=70&step=1",
       quality: consumerSpendingGrowth !== undefined ? "medium" : "limited",
       score: consumerSpendingPoints,
       maxScore: 5,
+      available: consumerSpendingGrowth !== undefined,
     }),
   ];
 
@@ -3222,8 +3382,8 @@ function buildCategories(
         ? "The blended count of nearby places matching this business type across independent place-search sources — more nearby matches means a more crowded market."
         : "No local place-search data was available, so this is derived from employer establishment density as a weaker proxy for local competitive pressure.",
       computation: hasLocalCompetitorData
-        ? `Averaged competitor count from ${competitionSourceNotes.join("; ") || "available sources"} through a tiered scale → ${competitionScoreBeforeFit}/100 pts (before the customer-type/geographic-scope fit adjustment).`
-        : `Establishment count run through the inverse of Demand's "moderate is healthiest" curve → ${competitionScoreBeforeFit}/100 pts (before the customer-type/geographic-scope fit adjustment).`,
+        ? `Averaged competitor count from ${competitionSourceNotes.join("; ") || "available sources"}: >15 matches→35 pts, 9–15→55, 4–8→75, ≤3→90 (fewer matches presumed less crowded) — ${competitionScoreBeforeFit}/100 before the customer-type/geographic-scope fit adjustment below.`
+        : `Establishment count (${establishmentBandsText(establishmentsLevel)}, same bands as Demand's "Employer establishments" row) inverted onto a 45–75 range: the healthiest/moderate band → 45 pts (read as most crowded here), a very low or very high count → 75 pts (read as least crowded here) — ${competitionScoreBeforeFit}/100 before the customer-type/geographic-scope fit adjustment below.`,
       source: hasLocalCompetitorData
         ? [input.googlePlaces && "Google Places", input.foursquare && "Foursquare Places", input.overpass && "OpenStreetMap Overpass"]
             .filter(Boolean)
@@ -3231,10 +3391,14 @@ function buildCategories(
         : "U.S. Census County Business Patterns",
       sourceUrl: hasLocalCompetitorData
         ? "https://developers.google.com/maps/documentation/places/web-service/text-search"
-        : "https://www.census.gov/programs-surveys/cbp.html",
+        : "https://www.census.gov/programs-surveys/cbp/data/tables.html",
       quality: hasLocalCompetitorData ? "strong" : "limited",
       score: competitionScoreBeforeFit,
       maxScore: 100,
+      // Always has a real value — the establishment-density proxy is a
+      // weaker read than actual nearby-place matches, but it's never
+      // literally missing, so there's nothing to redistribute here.
+      available: true,
     }),
   ];
 
@@ -3266,10 +3430,28 @@ function buildCategories(
   const wageTier =
     wages > 0 && wages < 1200 ? 20 : wages > 0 && wages < 1800 ? 14 : 8;
   const planTier = planTierFor(planCompleteness, priceSignals);
-  const revenueScore = clamp(
+  const revenueScoreRawSum = clamp(
     receiptsTier + payrollTier + revenueIncomeTier + wageTier + planTier,
     0,
     100,
+  );
+  const revenueScore = redistributedCategoryScore(
+    [
+      {
+        score: receiptsTier,
+        maxScore: 30,
+        available: nonemployerEstablishments > 0,
+      },
+      { score: payrollTier, maxScore: 10, available: establishments > 0 },
+      {
+        score: revenueIncomeTier,
+        maxScore: 25,
+        available: nominalIncome > 0,
+      },
+      { score: wageTier, maxScore: 20, available: wages > 0 },
+      { score: planTier, maxScore: 15, available: true },
+    ],
+    revenueScoreRawSum,
   );
   const revenueRationale = `${verdictWord(revenueScore)} revenue potential (${revenueScore}/100).`;
   const revenueIncomeNote =
@@ -3314,57 +3496,65 @@ function buildCategories(
       label: "Receipts per business",
       rawValue: nonemployerEstablishments > 0 ? money(receipts) : "Unavailable",
       meaning: `Average annual receipts per non-employer (solo-operator) business in this category in ${geoNameFor(receiptsLevel)}.`,
-      computation: `Average receipts through a tiered dollar scale → ${receiptsTier}/30 pts.`,
+      computation: `≤$30,000→4 pts, $30,001–60,000→10, $60,001–100,000→20, >$100,000→30 → ${receiptsTier}/30 pts.`,
       source: "U.S. Census Nonemployer Statistics",
-      sourceUrl: "https://www.census.gov/programs-surveys/nonemployer-statistics.html",
+      sourceUrl: "https://www.census.gov/programs-surveys/nonemployer-statistics/data/tables.html",
       quality: nonemployerEstablishments > 0 ? "strong" : "limited",
       score: receiptsTier,
       maxScore: 30,
+      available: nonemployerEstablishments > 0,
     }),
     subSignal({
       label: "Payroll per business",
       rawValue: establishments > 0 ? money(avgAnnualPayroll) : "Unavailable",
       meaning: `Average annual payroll per employer business in this category in ${geoNameFor(establishmentsLevel)} — a different slice of economic activity than solo-operator receipts.`,
-      computation: `Average payroll through a tiered dollar scale → ${payrollTier}/10 pts.`,
+      computation: `≤$500,000→1 pt, $500,001–900,000→4, $900,001–1,500,000→7, >$1,500,000→10 → ${payrollTier}/10 pts.`,
       source: "U.S. Census County Business Patterns",
-      sourceUrl: "https://www.census.gov/programs-surveys/cbp.html",
+      sourceUrl: "https://www.census.gov/programs-surveys/cbp/data/tables.html",
       quality: establishments > 0 ? "strong" : "limited",
       score: payrollTier,
       maxScore: 10,
+      available: establishments > 0,
     }),
     subSignal({
       label: "Nominal income",
       rawValue: money(nominalIncome),
       meaning:
         "Median household income at face value (not cost-of-living adjusted) — how many actual dollars a business here can expect to collect per transaction.",
-      computation: `Nominal income through a tiered scale${revenueIncome.direction !== "neutral" ? `, adjusted for a ${revenueIncome.direction}-oriented pricing focus` : ""} → ${revenueIncomeTier}/25 pts.`,
+      computation: `≤$50,000→9 pts, $50,001–75,000→17, >$75,000→25${revenueIncome.direction !== "neutral" ? `, then × ${revenueIncome.multiplier.toFixed(2)} for a ${revenueIncome.direction}-oriented pricing focus` : ""} → ${revenueIncomeTier}/25 pts.`,
       source: "U.S. Census ACS",
-      sourceUrl: "https://www.census.gov/programs-surveys/acs",
+      sourceUrl: "https://data.census.gov/table?q=DP03",
       quality: "strong",
       score: revenueIncomeTier,
       maxScore: 25,
+      available: nominalIncome > 0,
     }),
     subSignal({
       label: "Wage benchmark",
       rawValue: wages > 0 ? `${money(wages)}/week` : "Unreported",
       meaning: "The going local wage rate for this category — a lower benchmark leaves more margin per dollar of revenue.",
-      computation: `Weekly wage through a tiered scale → ${wageTier}/20 pts.`,
+      computation: `<$1,200/wk→20 pts, $1,200–1,800/wk→14, ≥$1,800/wk or unreported→8 → ${wageTier}/20 pts.`,
       source: "BLS QCEW / OEWS",
-      sourceUrl: "https://www.bls.gov/cew/",
+      sourceUrl: "https://data.bls.gov/cew/apps/table_maker/v4/table_maker.htm",
       quality: wages > 0 ? "medium" : "limited",
       score: wageTier,
       maxScore: 20,
+      available: wages > 0,
     }),
     subSignal({
       label: "Your pricing/validation plan",
       rawValue: `${planCompleteness}/3 fields, ${priceSignals} concrete number${priceSignals === 1 ? "" : "s"}`,
       meaning: "Whether you've filled in your own pricing hypothesis and validation plan, and whether it contains real numbers this scoring can use.",
-      computation: `Field-presence tier plus a pricing-number-quality tier → ${planTier}/15 pts.`,
+      computation: `Fields filled in: 0→0 pts, 1–2→6, all 3→11; plus concrete numbers found in your pricing notes: 0→0 pts, 1–2→2, ≥3→4 → ${planTier}/15 pts.`,
       source: "Your business setup plan notes",
       sourceUrl: "",
       quality: priceSignals > 0 ? "strong" : planCompleteness > 0 ? "medium" : "limited",
       score: planTier,
       maxScore: 15,
+      // The user's own plan notes are always "available" even when empty
+      // — 0 fields filled in is a real, meaningful answer, not missing
+      // data the way an unfetched external source would be.
+      available: true,
     }),
   ];
 
@@ -3393,12 +3583,15 @@ function buildCategories(
       rawValue: `${input.compliance.requirementCount} requirement${input.compliance.requirementCount === 1 ? "" : "s"}`,
       meaning:
         "The number and severity of licenses, permits, taxes, filings, and other government requirements Compliance-OS found for this business type and state.",
-      computation: "Each known requirement is weighted by category severity and renewal cadence, summed and normalized to a 0-100 score (higher = less friction).",
+      computation: "0 known requirements→90 pts. Otherwise, each requirement adds a severity weight (mandatory→3, conditional→1.5, recommended→0.5, unspecified→1.5) plus 0.5 if it renews periodically; the weighted total × 2.2 is subtracted from 100 and clamped to 5–95, then adjusted (clamped to 0–100) for how many requirements recently changed (a more volatile regulatory picture scores lower, even before any single change is severe).",
       source: "Compliance-OS",
       sourceUrl: "https://www.sba.gov/business-guide/launch-your-business/apply-licenses-permits",
       quality: input.compliance.requirementCount > 0 ? "strong" : "limited",
       score: regulatoryFrictionScore,
       maxScore: 100,
+      // Always resolves — 0 known requirements is itself a real, scored
+      // outcome (90 pts), not a missing-data case.
+      available: true,
     }),
   ];
 
@@ -3457,12 +3650,32 @@ function buildCategories(
             30,
             null,
           );
-          const nationalScore = clamp(
+          const nationalScoreRawSum = clamp(
             nationalEstablishmentPoints +
               nationalReceiptsPoints +
               nationalTrendPoints,
             0,
             100,
+          );
+          const nationalScore = redistributedCategoryScore(
+            [
+              {
+                score: nationalEstablishmentPoints,
+                maxScore: 40,
+                available: input.cbpNational !== null,
+              },
+              {
+                score: nationalReceiptsPoints,
+                maxScore: 30,
+                available: input.nonemployerNational !== null,
+              },
+              {
+                score: nationalTrendPoints,
+                maxScore: 30,
+                available: input.bfsNationalTrend !== null,
+              },
+            ],
+            nationalScoreRawSum,
           );
           const nationalReasons = rankedReasons([
             {
@@ -3499,23 +3712,25 @@ function buildCategories(
                 label: "National establishments",
                 rawValue: nationalEstablishments.toLocaleString(),
                 meaning: "The number of employer establishments in this category nationwide — the real size of a nationally-reachable business's addressable market.",
-                computation: `Nationwide establishment count through a tiered scale → ${nationalEstablishmentPoints}/40 pts.`,
+                computation: `0→0 pts, 1–499→8, 500–1,999→16, 2,000–9,999→24, 10,000–49,999→32, ≥50,000→40 → ${nationalEstablishmentPoints}/40 pts.`,
                 source: "U.S. Census County Business Patterns (national)",
-                sourceUrl: "https://www.census.gov/programs-surveys/cbp.html",
+                sourceUrl: "https://www.census.gov/programs-surveys/cbp/data/tables.html",
                 quality: input.cbpNational ? "medium" : "limited",
                 score: nationalEstablishmentPoints,
                 maxScore: 40,
+                available: input.cbpNational !== null,
               }),
               subSignal({
                 label: "National receipts",
                 rawValue: nationalReceipts > 0 ? money(nationalReceipts) : "Unavailable",
                 meaning: "Total nationwide receipts generated by non-employer businesses in this category — the scale of revenue already moving through the category.",
-                computation: `Nationwide receipts through a tiered dollar scale → ${nationalReceiptsPoints}/30 pts.`,
+                computation: `$0→0 pts, up to $1B→8, $1B–10B→16, $10B–50B→24, ≥$50B→30 → ${nationalReceiptsPoints}/30 pts.`,
                 source: "U.S. Census Nonemployer Statistics (national)",
-                sourceUrl: "https://www.census.gov/programs-surveys/nonemployer-statistics.html",
+                sourceUrl: "https://www.census.gov/programs-surveys/nonemployer-statistics/data/tables.html",
                 quality: input.nonemployerNational ? "medium" : "limited",
                 score: nationalReceiptsPoints,
                 maxScore: 30,
+                available: input.nonemployerNational !== null,
               }),
               subSignal({
                 label: "National formation trend",
@@ -3523,12 +3738,13 @@ function buildCategories(
                   ? `${input.bfsNationalTrend.trendPercent >= 0 ? "+" : ""}${input.bfsNationalTrend.trendPercent.toFixed(1)}%`
                   : "Unavailable",
                 meaning: "Whether new-business formation nationwide is accelerating or slowing (all categories — BFS doesn't reliably break out every NAICS code).",
-                computation: `Multi-year trend percent through a tiered scale → ${nationalTrendPoints}/30 pts.`,
+                computation: `Multi-year trend percent: ${trendPointsBandsText(30, false)} → ${nationalTrendPoints}/30 pts.`,
                 source: "U.S. Census Business Formation Statistics (national)",
-                sourceUrl: "https://www.census.gov/econ/bfs/",
+                sourceUrl: "https://www.census.gov/econ/currentdata/dbsearch?program=BFS",
                 quality: input.bfsNationalTrend ? "medium" : "limited",
                 score: nationalTrendPoints,
                 maxScore: 30,
+                available: input.bfsNationalTrend !== null,
               }),
             ],
           };
@@ -3580,23 +3796,28 @@ function buildCategories(
               label: "SBA loan count",
               rawValue: `${loanCount.toLocaleString()} loan${loanCount === 1 ? "" : "s"}`,
               meaning: "How many SBA 7(a)-guaranteed loans matched this category and state in Desk's size-capped sample — more matches means more precedent for lenders backing this category here.",
-              computation: `Matched loan count through a tiered scale → ${loanCountPoints}/50 pts.`,
+              computation: `0→0 pts, 1–9→12, 10–49→25, 50–199→38, ≥200→50 → ${loanCountPoints}/50 pts.`,
               source: "U.S. Small Business Administration (7(a) FOIA data)",
               sourceUrl: "https://data.sba.gov/en/dataset/7-a-504-foia",
               quality: loanCount > 0 ? "medium" : "limited",
               score: loanCountPoints,
               maxScore: 50,
+              // Always resolves once this category exists at all (gated
+              // on input.sbaLending !== null above) — 0 matching loans is
+              // a real, confirmed result, not missing data.
+              available: true,
             }),
             subSignal({
               label: "Average loan size",
               rawValue: loanCount > 0 ? money(avgLoanSize) : "Unavailable",
               meaning: "The average SBA-guaranteed loan size in this sample — a proxy for how much capital lenders are willing to back for this category.",
-              computation: `Average loan size through a tiered dollar scale → ${avgLoanSizePoints}/50 pts.`,
+              computation: `$0→0 pts, up to $50,000→10, $50,000–200,000→25, $200,000–500,000→40, ≥$500,000→50 → ${avgLoanSizePoints}/50 pts.`,
               source: "U.S. Small Business Administration (7(a) FOIA data)",
               sourceUrl: "https://data.sba.gov/en/dataset/7-a-504-foia",
               quality: loanCount > 0 ? "medium" : "limited",
               score: avgLoanSizePoints,
               maxScore: 50,
+              available: true,
             }),
           ],
         };
@@ -4076,7 +4297,17 @@ async function fetchPlaceGeo(
   if (!placeFips) return null;
   return {
     fips: placeFips,
-    name: best.attributes?.NAME ?? baseName,
+    // BASENAME, not NAME: TIGERweb's NAME field appends a lowercase
+    // generic entity-type suffix ("city"/"town"/"CDP") to the place's own
+    // proper name — for a normal name that reads fine in a sentence ("X
+    // has a population of..." vs. the actual "X city has a population
+    // of..."), but for any place whose OWN official name already ends in
+    // that same word (e.g. Boise City, ID; Rapid City, SD; Union City, CA)
+    // it doubles up into "Boise City city". Confirmed live against
+    // TIGERweb: Boise's BASENAME is "Boise City" (the correct, undoubled
+    // proper name) while its NAME is "Boise City city". BASENAME is the
+    // right field for anywhere this name is shown to a user.
+    name: best.attributes?.BASENAME ?? best.attributes?.NAME ?? baseName,
     rings: best.geometry?.rings ?? null,
     areaLandSqMeters: parseArealand(best.attributes?.AREALAND),
   };
@@ -5341,6 +5572,22 @@ export function trendPoints(
   return Math.round(maxPoints * 0.1);
 }
 
+// Renders trendPoints()'s fixed percent-change bands, scaled to a specific
+// maxPoints budget, as explicit text for a subSignal.computation field —
+// shared by every trendPoints() call site (Demand's establishment trend,
+// every Outlook signal, and National Reach's formation trend) rather than
+// each maintaining its own copy of the same five bands.
+function trendPointsBandsText(
+  maxPoints: number,
+  percentileRankEligible = true,
+): string {
+  const at = (fraction: number) => Math.round(maxPoints * fraction);
+  const base = `≤-5%→${at(0.1)} pts, -5%–0%→${at(0.3)}, 0%–3%→${at(0.55)}, 3%–8%→${at(0.75)}, >8%→${maxPoints}; unavailable→${at(0.5)}, the neutral midpoint`;
+  return percentileRankEligible
+    ? `${base} (or, when a national percentile rank is cached for this metric, decile × ${maxPoints}/10 instead of these fixed bands)`
+    : base;
+}
+
 export function scoreOutlook(input: {
   bfsTrend: TrendResult | null;
   qcewTrend: TrendResult | null;
@@ -5413,7 +5660,10 @@ export function scoreOutlook(input: {
     18,
     input.lausPercentileBucket,
   );
-  const score = clamp(
+  // Pre-redistribution total — see scoreStartupDifficulty's matching
+  // rawScore comment for why the category's actual returned score
+  // (computed further down from subSignals) isn't simply this sum.
+  const rawScore = clamp(
     bfsPoints + qcewPoints + beaPoints + popPoints + lausPoints,
     0,
     100,
@@ -5436,10 +5686,6 @@ export function scoreOutlook(input: {
     ? `the statewide unemployment rate ${input.lausTrend.trendPercent >= 0 ? "improved (fell)" : "worsened (rose)"} ${Math.abs(input.lausTrend.trendPercent).toFixed(1)}% from ${input.lausTrend.oldestLabel} to ${input.lausTrend.newestLabel} (${trendSourceClause(input.lausPercentileBucket)})`
     : "a multi-year unemployment-rate trend was unavailable";
 
-  const rationale =
-    `${verdictWord(score)} short-term outlook (${score}/100). This looks backward at recent ` +
-    `multi-year trends as a proxy for near-term momentum, not a guarantee of future results.`;
-
   const reasons = rankedReasons([
     { text: `${cap(bfsNote)}.`, weight: bfsPoints },
     { text: `${cap(qcewNote)}.`, weight: qcewPoints },
@@ -5456,12 +5702,13 @@ export function scoreOutlook(input: {
         : "Unavailable",
       meaning:
         "Whether new-business applications statewide are accelerating or slowing — a leading indicator of overall entrepreneurial momentum.",
-      computation: `Multi-year trend percent through a tiered point scale${input.bfsPercentileBucket != null ? " (national percentile-ranked)" : ""} → ${bfsPoints}/25 pts.`,
+      computation: `Multi-year trend percent: ${trendPointsBandsText(25)} → ${bfsPoints}/25 pts.`,
       source: "U.S. Census Business Formation Statistics",
-      sourceUrl: "https://www.census.gov/econ/bfs/",
+      sourceUrl: "https://www.census.gov/econ/currentdata/dbsearch?program=BFS",
       quality: input.bfsTrend ? "strong" : "limited",
       score: bfsPoints,
       maxScore: 25,
+      available: input.bfsTrend !== null,
     }),
     subSignal({
       label: "Establishment trend",
@@ -5470,12 +5717,13 @@ export function scoreOutlook(input: {
         : "Unavailable",
       meaning:
         "Whether the number of employer establishments in this specific category is growing or shrinking locally.",
-      computation: `Multi-year trend percent through a tiered point scale${input.qcewPercentileBucket != null ? " (national percentile-ranked)" : ""} → ${qcewPoints}/25 pts.`,
+      computation: `Multi-year trend percent: ${trendPointsBandsText(25)} → ${qcewPoints}/25 pts.`,
       source: "BLS QCEW",
-      sourceUrl: "https://www.bls.gov/cew/",
+      sourceUrl: "https://data.bls.gov/cew/apps/table_maker/v4/table_maker.htm",
       quality: input.qcewTrend ? "strong" : "limited",
       score: qcewPoints,
       maxScore: 25,
+      available: input.qcewTrend !== null,
     }),
     subSignal({
       label: "Regional income growth",
@@ -5484,12 +5732,13 @@ export function scoreOutlook(input: {
           ? `${input.beaGrowthPercent >= 0 ? "+" : ""}${input.beaGrowthPercent.toFixed(1)}%`
           : "Unavailable",
       meaning: `Whether regional personal income is growing over roughly the last ${OUTLOOK_TREND_YEARS} years — broad economic momentum for the area.`,
-      computation: `Multi-year trend percent through a tiered point scale${input.beaPercentileBucket != null ? " (national percentile-ranked)" : ""} → ${beaPoints}/20 pts.`,
+      computation: `Multi-year trend percent: ${trendPointsBandsText(20)} → ${beaPoints}/20 pts.`,
       source: "BEA Regional Economic Accounts",
-      sourceUrl: "https://www.bea.gov/data/income-saving/personal-income-by-state",
+      sourceUrl: "https://apps.bea.gov/itable/?ReqID=70&step=1",
       quality: input.beaGrowthPercent !== null ? "strong" : "limited",
       score: beaPoints,
       maxScore: 20,
+      available: input.beaGrowthPercent !== null,
     }),
     subSignal({
       label: "Population trend",
@@ -5498,12 +5747,13 @@ export function scoreOutlook(input: {
         : "Unavailable",
       meaning:
         "Whether the local population is growing or shrinking — a slower-moving but directly relevant demand-side momentum indicator.",
-      computation: `Multi-year trend percent through a tiered point scale${input.popPercentileBucket != null ? " (national percentile-ranked)" : ""} → ${popPoints}/12 pts.`,
+      computation: `Multi-year trend percent: ${trendPointsBandsText(12)} → ${popPoints}/12 pts.`,
       source: "U.S. Census Population Estimates",
-      sourceUrl: "https://www.census.gov/programs-surveys/popest.html",
+      sourceUrl: "https://www.census.gov/programs-surveys/popest/data/tables.html",
       quality: input.populationTrend ? "strong" : "limited",
       score: popPoints,
       maxScore: 12,
+      available: input.populationTrend !== null,
     }),
     subSignal({
       label: "Unemployment trend",
@@ -5512,14 +5762,20 @@ export function scoreOutlook(input: {
         : "Unavailable",
       meaning:
         "Whether the statewide labor market is loosening (easier hiring) or tightening over the multi-year window.",
-      computation: `Multi-year trend percent (already inverted so improving = positive) through a tiered point scale${input.lausPercentileBucket != null ? " (national percentile-ranked)" : ""} → ${lausPoints}/18 pts.`,
+      computation: `Multi-year trend percent (already inverted so improving = positive): ${trendPointsBandsText(18)} → ${lausPoints}/18 pts.`,
       source: "BLS Local Area Unemployment Statistics",
       sourceUrl: "https://www.bls.gov/lau/",
       quality: input.lausTrend ? "strong" : "limited",
       score: lausPoints,
       maxScore: 18,
+      available: input.lausTrend !== null,
     }),
   ];
+
+  const score = redistributedCategoryScore(subSignals, rawScore);
+  const rationale =
+    `${verdictWord(score)} short-term outlook (${score}/100). This looks backward at recent ` +
+    `multi-year trends as a proxy for near-term momentum, not a guarantee of future results.`;
 
   return { score, rationale, reasons, subSignals };
 }

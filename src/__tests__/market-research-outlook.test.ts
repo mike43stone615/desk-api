@@ -332,5 +332,66 @@ describe("scoreOutlook", () => {
       expect(bfsSignal?.quality).toBe("limited");
       expect(bfsSignal?.rawValue).toBe("Unavailable");
     });
+
+    it("marks an unavailable trend's sub-signal accordingly, and redistributes its budget instead of quietly keeping its neutral-default contribution", () => {
+      const allPresent = scoreOutlook({
+        bfsTrend: trend(15),
+        qcewTrend: trend(15),
+        beaGrowthPercent: 15,
+        populationTrend: trend(15),
+        lausTrend: trend(15),
+      });
+      // All five trends independently max out their own band (>8% ->
+      // 100% of that signal's max), so with everything available the
+      // category should hit exactly 100.
+      expect(allPresent.score).toBe(100);
+
+      const bfsMissing = scoreOutlook({
+        bfsTrend: null,
+        qcewTrend: trend(15),
+        beaGrowthPercent: 15,
+        populationTrend: trend(15),
+        lausTrend: trend(15),
+      });
+      const bfsSignal = bfsMissing.subSignals.find(
+        (s) => s.label === "Business formation trend",
+      );
+      expect(bfsSignal?.available).toBe(false);
+      // Without redistribution, a missing 25-point signal defaulting to
+      // its 50%-of-max neutral midpoint (12.5, rounds to 13) would drag
+      // this down to roughly 88 even though every *available* signal is
+      // maxed out. With redistribution, the remaining four signals' 75
+      // combined points are rescaled over their own 75-point budget
+      // instead, landing back at 100 -- missing data doesn't get to drag
+      // down a category that's otherwise scoring perfectly on what it
+      // does have.
+      expect(bfsMissing.score).toBe(100);
+      expect(bfsMissing.score).toBeGreaterThan(88);
+    });
+
+    it("does not let a missing trend's neutral default inflate a category that is otherwise scoring poorly", () => {
+      const bfsMissingWeak = scoreOutlook({
+        bfsTrend: null,
+        qcewTrend: trend(-10),
+        beaGrowthPercent: -10,
+        populationTrend: trend(-10),
+        lausTrend: trend(-10),
+      });
+      // The four available signals all independently bottom out (<=-5% ->
+      // 10% of that signal's max), so the redistributed score should stay
+      // down near that same bottomed-out read.
+      expect(bfsMissingWeak.score).toBeLessThanOrEqual(15);
+
+      // Without redistribution, the missing 25-point signal would instead
+      // contribute its 50%-of-max neutral default (~13 pts) on top of the
+      // other four's own bottomed-out totals -- a meaningfully higher,
+      // inflated score this redistributed version must beat.
+      const qcewPts = Math.round(25 * 0.1);
+      const beaPts = Math.round(20 * 0.1);
+      const popPts = Math.round(12 * 0.1);
+      const lausPts = Math.round(18 * 0.1);
+      const wouldBeOldScore = Math.round(25 * 0.5) + qcewPts + beaPts + popPts + lausPts;
+      expect(bfsMissingWeak.score).toBeLessThan(wouldBeOldScore);
+    });
   });
 });

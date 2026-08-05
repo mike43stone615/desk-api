@@ -378,6 +378,30 @@ describe('scoreStartupDifficulty', () => {
       expect(capitalWith?.quality).toBe('strong');
       expect(capitalWithout?.quality).toBe('limited');
     });
+
+    it('states the real numeric breakpoints in computation text, not just a vague tier label', () => {
+      const result = scoreStartupDifficulty({
+        industry: 'Concrete Contractor',
+        businessIdea: 'concrete contractor serving commercial developers',
+        naicsCodes: ['23'],
+        customerType: 'B2B',
+        unemploymentRate: 4,
+        requirementCount: 6,
+        bondOrInsuranceCount: 2,
+        licenseOrRegistrationCount: 3,
+        licenseCount: 2,
+      });
+      const byLabel = Object.fromEntries(result.subSignals.map((s) => [s.label, s]));
+      // Every computation string should name real dollar/percent/count
+      // breakpoints, not just a tier's name -- spot-check a representative
+      // number from each sub-signal's actual band table.
+      expect(byLabel['Capital requirements'].computation).toContain('moderate/default→12');
+      expect(byLabel['Barrier to entry'].computation).toContain('B2C→5 pts');
+      expect(byLabel['Product/build complexity'].computation).toContain('retail→14');
+      expect(byLabel['Labor market tightness'].computation).toMatch(/2\.5–4%→8/);
+      expect(byLabel['Knowledge intensity'].computation).toContain('2+→1');
+      expect(byLabel['Licensing complexity'].computation).toContain('≤2/3→4');
+    });
   });
 });
 

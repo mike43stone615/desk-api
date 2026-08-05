@@ -51,7 +51,7 @@ describe('resolveGeography', () => {
 
     const result = await resolveGeography('Denver', '08');
 
-    expect(result.place).toEqual({ fips: '20000', name: 'Denver city', stateFips: '08' });
+    expect(result.place).toEqual({ fips: '20000', name: 'Denver', stateFips: '08' });
     expect(result.county).toEqual({ fips: '031', name: 'Denver County', stateFips: '08' });
     // SQUARE_RING's centroid is (50, 50) in Web Mercator meters, which
     // converts to a tiny lat/lon near the origin — the point isn't a real
@@ -93,7 +93,29 @@ describe('resolveGeography', () => {
       .mockResolvedValueOnce(countiesResponse([]));
 
     const result = await resolveGeography('Paradise', '32');
-    expect(result.place).toEqual({ fips: '55240', name: 'Paradise CDP', stateFips: '32' });
+    expect(result.place).toEqual({ fips: '55240', name: 'Paradise', stateFips: '32' });
+  });
+
+  it('uses BASENAME instead of NAME so a place whose own name already ends in the generic entity-type word is not doubled up', async () => {
+    // Confirmed live against TIGERweb: Boise City, ID's NAME is
+    // "Boise City city" (its own proper name, "Boise City", plus
+    // TIGERweb's appended generic "city" suffix) while its BASENAME is the
+    // correct, undoubled "Boise City" — this was showing up in generated
+    // sentences as "...potential customer base in Boise City city.".
+    fetchMock
+      .mockResolvedValueOnce(
+        placesResponse([
+          {
+            attributes: { NAME: 'Boise City city', PLACE: '08830', STATE: '16', BASENAME: 'Boise City' },
+            geometry: { rings: [SQUARE_RING] },
+          },
+        ]),
+      )
+      .mockResolvedValueOnce(placesResponse([]))
+      .mockResolvedValueOnce(countiesResponse([]));
+
+    const result = await resolveGeography('Boise', '16');
+    expect(result.place).toEqual({ fips: '08830', name: 'Boise City', stateFips: '16' });
   });
 
   it('prefers an exact BASENAME match over a prefix match, across both layers', async () => {
@@ -118,7 +140,7 @@ describe('resolveGeography', () => {
 
     const result = await resolveGeography('Denver', '08');
     expect(result.place?.fips).toBe('20000');
-    expect(result.place?.name).toBe('Denver city');
+    expect(result.place?.name).toBe('Denver');
   });
 
   it('escapes an embedded single quote before sending the where clause', async () => {
@@ -181,7 +203,7 @@ describe('resolveGeography', () => {
       .mockResolvedValueOnce(countiesResponse([]));
 
     const result = await resolveGeography('Denver, CO, USA', '08');
-    expect(result.place).toEqual({ fips: '20000', name: 'Denver city', stateFips: '08' });
+    expect(result.place).toEqual({ fips: '20000', name: 'Denver', stateFips: '08' });
     const placeUrl = new URL(fetchMock.mock.calls[0][0] as string);
     expect(placeUrl.searchParams.get('where')).toBe(
       "UPPER(BASENAME) LIKE UPPER('Denver%') AND STATE='08'",
@@ -201,7 +223,7 @@ describe('resolveGeography', () => {
       .mockResolvedValueOnce(placesResponse([]));
 
     const result = await resolveGeography('Denver', '08');
-    expect(result.place).toEqual({ fips: '20000', name: 'Denver city', stateFips: '08' });
+    expect(result.place).toEqual({ fips: '20000', name: 'Denver', stateFips: '08' });
     expect(result.county).toBeNull();
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
@@ -220,7 +242,7 @@ describe('resolveGeography', () => {
       .mockResolvedValueOnce(countiesResponse([]));
 
     const result = await resolveGeography('Denver', '08');
-    expect(result.place).toEqual({ fips: '20000', name: 'Denver city', stateFips: '08' });
+    expect(result.place).toEqual({ fips: '20000', name: 'Denver', stateFips: '08' });
     expect(result.county).toBeNull();
   });
 
@@ -269,7 +291,7 @@ describe('resolveGeography', () => {
       .mockRejectedValueOnce(new Error('county service down'));
 
     const result = await resolveGeography('Denver', '08');
-    expect(result.place).toEqual({ fips: '20000', name: 'Denver city', stateFips: '08' });
+    expect(result.place).toEqual({ fips: '20000', name: 'Denver', stateFips: '08' });
     expect(result.county).toBeNull();
   });
 });
