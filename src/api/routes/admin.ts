@@ -131,6 +131,8 @@ router.get("/tables/:table/rows", async (c) => {
     const limit = c.req.query("limit") ?? "200";
     const offset = c.req.query("offset") ?? "0";
     const filters = c.req.query("filters");
+    const sortColumn = c.req.query("sortColumn");
+    const sortDirection = c.req.query("sortDirection");
     const rows = await proxyUpstreamRows(
       c.get("config"),
       parsed.source,
@@ -138,6 +140,8 @@ router.get("/tables/:table/rows", async (c) => {
       limit,
       offset,
       filters,
+      sortColumn,
+      sortDirection,
     );
     return c.json({
       ...rows,
@@ -153,9 +157,14 @@ router.get("/tables/:table/rows", async (c) => {
   const columns = table.columns.join(", ");
   const filters = parseFilters(c.req.query("filters"), table.columns);
   const { sql: whereSql, params: filterParams } = buildFilterClause(filters);
+  const sort = parseSort(
+    c.req.query("sortColumn"),
+    c.req.query("sortDirection"),
+    table,
+  );
 
   const result = await c.env.DB.prepare(
-    `SELECT ${columns} FROM ${tableName} ${whereSql} ORDER BY ${table.primaryKey} LIMIT ? OFFSET ?`,
+    `SELECT ${columns} FROM ${tableName} ${whereSql} ORDER BY ${sort.column} ${sort.direction} LIMIT ? OFFSET ?`,
   )
     .bind(...filterParams, limit, offset)
     .all<Record<string, unknown>>();
@@ -303,9 +312,13 @@ async function proxyUpstreamRows(
   limit: string,
   offset: string,
   filters?: string,
+  sortColumn?: string,
+  sortDirection?: string,
 ): Promise<UpstreamRows> {
   const query = new URLSearchParams({ limit, offset });
   if (filters) query.set("filters", filters);
+  if (sortColumn) query.set("sortColumn", sortColumn);
+  if (sortDirection) query.set("sortDirection", sortDirection);
   return proxyUpstreamJson<UpstreamRows>(
     config,
     source,
@@ -443,6 +456,19 @@ export function buildFilterClause(filters: Record<string, string>): {
       .join(" AND ");
   const params = entries.map(([, value]) => `%${escapeLikeValue(value)}%`);
   return { sql, params };
+}
+
+function parseSort(
+  rawColumn: string | undefined,
+  rawDirection: string | undefined,
+  table: AdminTableConfig,
+): { column: string; direction: "ASC" | "DESC" } {
+  const column =
+    rawColumn && table.columns.includes(rawColumn)
+      ? rawColumn
+      : table.primaryKey;
+  const direction = rawDirection?.toLowerCase() === "desc" ? "DESC" : "ASC";
+  return { column, direction };
 }
 
 function normalizeValue(value: unknown): string | null {
