@@ -234,6 +234,8 @@ export default {
 
     const db = new D1DatabaseAdapter(env.DB);
     await db.deleteExpiredSessions();
+    await db.deleteExpiredPasswordResetTokens();
+    await db.deleteExpiredEmailConfirmationTokens();
     const oewsImport = await importOewsCacheIfStale(env).catch((error) => ({
       status: "failed",
       source: "BLS OEWS",
@@ -244,7 +246,7 @@ export default {
     console.log(
       JSON.stringify({
         level: "info",
-        event: "cron_session_cleanup",
+        event: "cron_auth_cleanup",
         ts: new Date().toISOString(),
         oewsImport,
       }),

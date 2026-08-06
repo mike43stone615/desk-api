@@ -18,6 +18,116 @@ type AdminSource = "desk" | "registry" | "compliance";
 
 const router = new Hono<Env>();
 
+const BUSINESS_INDUSTRIES = [
+  "Restaurant",
+  "Food Truck",
+  "Bakery",
+  "Coffee Shop / Cafe",
+  "Bar / Tavern",
+  "Brewery / Winery",
+  "Catering Service",
+  "Grocery Store",
+  "Convenience Store",
+  "Medical Practice",
+  "Dental Practice",
+  "Mental Health Practice",
+  "Physical Therapy Clinic",
+  "Chiropractic Practice",
+  "Optometry Practice",
+  "Pharmacy",
+  "Hospital",
+  "Home Health Agency",
+  "Veterinary Practice",
+  "Gym / Fitness Center",
+  "Spa / Salon",
+  "Barbershop",
+  "Tattoo Studio",
+  "Personal Training",
+  "Auto Repair Shop",
+  "Auto Dealership",
+  "Auto Body Shop",
+  "Car Wash",
+  "General Contractor",
+  "Electrical Contractor",
+  "Plumbing Contractor",
+  "HVAC Contractor",
+  "Roofing Contractor",
+  "Landscaping",
+  "Concrete Contractor",
+  "Painting Contractor",
+  "Excavation Contractor",
+  "Specialty Contractor",
+  "Light Manufacturing",
+  "Heavy Manufacturing",
+  "Food Manufacturing",
+  "Chemical Manufacturing",
+  "Real Estate Brokerage / Agent",
+  "Property Management",
+  "Real Estate Developer",
+  "Short-Term Rental",
+  "Hotel / Motel / Inn",
+  "Bed & Breakfast",
+  "Law Firm",
+  "Financial Advisor",
+  "Insurance Agency",
+  "Mortgage Broker",
+  "Accounting / Bookkeeping / Tax Preparation",
+  "Financial Services / Bank",
+  "Credit Union",
+  "Engineering Firm",
+  "Childcare Center / Daycare",
+  "Private School",
+  "Tutoring Center",
+  "Driving School",
+  "Retail Store",
+  "Liquor Store",
+  "Cannabis Dispensary",
+  "Pawn Shop",
+  "Firearms Dealer",
+  "Secondhand / Consignment Store",
+  "E-commerce / Online Store",
+  "Dropshipping / Reselling",
+  "Print on Demand",
+  "Handmade / Craft Business",
+  "Trucking / Freight / Transportation",
+  "Taxi / Rideshare / Limo",
+  "Moving Company",
+  "Courier / Delivery Service",
+  "Waste Management",
+  "Warehousing / Self-Storage",
+  "Software Development",
+  "IT / Managed Services",
+  "AI Services",
+  "Cybersecurity Services",
+  "Staffing Agency",
+  "Security Guard Company",
+  "Cleaning / Janitorial Service",
+  "Pest Control",
+  "Consulting / Professional Services",
+  "Marketing Agency",
+  "PR / Public Relations",
+  "Social Media Management",
+  "Virtual Assistant Services",
+  "Translation Services",
+  "Farm / Agricultural Operation",
+  "Nursery / Greenhouse",
+  "Solar Energy Installer",
+  "Utility / Pipeline Contractor",
+  "Photography / Videography",
+  "Graphic Design",
+  "Content Creator",
+  "Event Planning",
+  "Wedding Services",
+  "Music / Entertainment",
+  "Funeral Home",
+  "Nonprofit Organization",
+  "Pet Services",
+  "Subscription Box Business",
+  "Import / Export",
+  "Home Daycare",
+  "Laundromat / Dry Cleaning",
+] as const;
+
 const TABLES = {
   users: {
     primaryKey: "id",
@@ -26,34 +136,33 @@ const TABLES = {
       "email",
       "first_name",
       "last_name",
-      "password_hash",
       "email_confirmed_at",
       "created_at",
       "updated_at",
     ],
     editable: ["email", "first_name", "last_name"],
-    secret: ["password_hash"],
+    secret: [],
     deletable: true,
   },
   sessions: {
     primaryKey: "id",
-    columns: ["id", "user_id", "token", "expires_at", "created_at"],
+    columns: ["id", "user_id", "expires_at", "created_at"],
     editable: [],
-    secret: ["token"],
+    secret: [],
     deletable: true,
   },
   password_reset_tokens: {
     primaryKey: "id",
-    columns: ["id", "user_id", "token", "expires_at", "used_at", "created_at"],
+    columns: ["id", "user_id", "expires_at", "used_at", "created_at"],
     editable: [],
-    secret: ["token"],
+    secret: [],
     deletable: true,
   },
   email_confirmation_tokens: {
     primaryKey: "id",
-    columns: ["id", "user_id", "token", "expires_at", "used_at", "created_at"],
+    columns: ["id", "user_id", "expires_at", "used_at", "created_at"],
     editable: [],
-    secret: ["token"],
+    secret: [],
     deletable: true,
   },
   business_setup_drafts: {
@@ -76,6 +185,26 @@ const TABLES = {
     ],
     editable: ["name", "industry"],
     secret: [],
+    options: {
+      industry: BUSINESS_INDUSTRIES,
+    },
+    deletable: true,
+  },
+  business_memberships: {
+    primaryKey: "id",
+    columns: [
+      "id",
+      "business_id",
+      "user_id",
+      "role",
+      "invited_by_user_id",
+      "invited_at",
+      "accepted_at",
+      "created_at",
+      "updated_at",
+    ],
+    editable: ["role", "invited_at", "accepted_at"],
+    secret: [],
     deletable: true,
   },
 } as const;
@@ -87,6 +216,7 @@ type AdminTableConfig = {
   columns: readonly string[];
   editable: readonly string[];
   secret: readonly string[];
+  options?: Record<string, readonly string[]>;
   deletable?: boolean;
 };
 
@@ -96,6 +226,7 @@ type UpstreamTableSummary = {
   columns: string[];
   editableColumns: string[];
   secretColumns: string[];
+  columnOptions?: Record<string, string[]>;
   deletable?: boolean;
 };
 
@@ -117,6 +248,7 @@ router.get("/tables", async (c) => {
       columns: table.columns,
       editableColumns: table.editable,
       secretColumns: table.secret,
+      columnOptions: columnOptionsFor(table),
       deletable: table.deletable === true,
     })),
     ...(await listUpstreamTables(c.get("config"), "registry")),
@@ -182,6 +314,7 @@ router.get("/tables/:table/rows", async (c) => {
     columns: table.columns,
     editableColumns: table.editable,
     secretColumns: table.secret,
+    columnOptions: columnOptionsFor(table),
     rows: (result.results ?? []).map((row) => maskSecrets(row, table)),
     totalRows: count?.count ?? 0,
     deletable: table.deletable === true,
@@ -211,12 +344,18 @@ router.patch("/tables/:table/rows/:id", async (c) => {
   const entries = Object.entries(values).filter(([column]) =>
     editableColumns.includes(column),
   );
+  const validatedEntries = entries.map(
+    ([column, value]) =>
+      [column, validateEditableValue(tableName, column, value)] as const,
+  );
 
-  if (entries.length === 0)
+  if (validatedEntries.length === 0)
     throw new ApiError(400, "No editable fields were provided.");
 
-  const assignments = entries.map(([column]) => `${column} = ?`).join(", ");
-  const params = entries.map(([, value]) => normalizeValue(value));
+  const assignments = validatedEntries
+    .map(([column]) => `${column} = ?`)
+    .join(", ");
+  const params = validatedEntries.map(([, value]) => normalizeValue(value));
   await c.env.DB.prepare(
     `UPDATE ${tableName} SET ${assignments} WHERE ${table.primaryKey} = ?`,
   )
@@ -474,6 +613,31 @@ function parseSort(
 function normalizeValue(value: unknown): string | null {
   if (value === null || value === undefined) return null;
   return String(value);
+}
+
+function columnOptionsFor(
+  table: AdminTableConfig,
+): Record<string, readonly string[]> {
+  return table.options ?? {};
+}
+
+export function validateEditableValue(
+  tableName: TableName,
+  column: string,
+  value: unknown,
+): unknown {
+  if (tableName === "businesses" && column === "industry") {
+    const industry = String(value ?? "").trim();
+    if (
+      !BUSINESS_INDUSTRIES.includes(
+        industry as (typeof BUSINESS_INDUSTRIES)[number],
+      )
+    ) {
+      throw new ApiError(400, "Industry must match a supported Desk industry.");
+    }
+    return industry;
+  }
+  return value;
 }
 
 function maskSecrets(
