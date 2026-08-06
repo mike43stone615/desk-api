@@ -9,6 +9,8 @@
   complianceOsApiKey: string | undefined;
   registryApiSecret: string | undefined;
   registryApiAdminKey: string | undefined;
+  marketApiUrl: string | undefined;
+  marketApiKey: string | undefined;
   openaiApiKey: string | undefined;
   openaiModel: string;
   googlePlacesApiKey: string | undefined;
@@ -36,6 +38,8 @@ export interface AppEnv {
   COMPLIANCE_OS_API_KEY?: string;
   REGISTRY_API_SECRET?: string;
   REGISTRY_API_ADMIN_KEY?: string;
+  MARKET_API_URL?: string;
+  MARKET_API_KEY?: string;
   OPENAI_API_KEY?: string;
   OPENAI_MODEL?: string;
   GOOGLE_PLACES_API_KEY?: string;
@@ -73,6 +77,8 @@ export function parseConfig(env: AppEnv): AppConfig {
     complianceOsApiKey: env.COMPLIANCE_OS_API_KEY,
     registryApiSecret: env.REGISTRY_API_SECRET,
     registryApiAdminKey: env.REGISTRY_API_ADMIN_KEY ?? env.REGISTRY_API_SECRET,
+    marketApiUrl: env.MARKET_API_URL,
+    marketApiKey: env.MARKET_API_KEY,
     openaiApiKey: env.OPENAI_API_KEY,
     openaiModel: env.OPENAI_MODEL ?? "gpt-4.1-mini",
     googlePlacesApiKey: env.GOOGLE_PLACES_API_KEY,

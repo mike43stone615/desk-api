@@ -35,6 +35,7 @@ ADMIN_EMAILS = "mike43stone615@gmail.com"
 # IMPORTANT: must NOT point to api.deskbusiness.co (would create a loop).
 COMPLIANCE_OS_URL = "https://compliance-api.deskbusiness.co"
 REGISTRY_API_URL = "https://registry-api.deskbusiness.co"
+MARKET_API_URL = "https://market-api.deskbusiness.co"
 
 # -- Secrets (set via `wrangler secret put <NAME>`) ---------------------------
 # Required secrets:

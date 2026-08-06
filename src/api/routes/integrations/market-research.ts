@@ -10,6 +10,37 @@ type Env = { Bindings: AppEnv; Variables: { config: AppConfig } };
 
 const router = new Hono<Env>();
 
+async function proxyToMarketApi(
+  config: AppConfig,
+  body: ResearchRequest,
+): Promise<unknown | null> {
+  try {
+    const targetUrl = `${config.marketApiUrl!.replace(/\/$/, "")}/research/analyze`;
+    const headers: HeadersInit = { "content-type": "application/json" };
+    if (config.marketApiKey) headers["x-api-key"] = config.marketApiKey;
+
+    const resp = await fetch(targetUrl, {
+      method: "POST",
+      headers,
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(15000),
+    });
+    if (!resp.ok) {
+      console.error(
+        `market-validation-api proxy returned ${resp.status}; falling back to embedded scoring.`,
+      );
+      return null;
+    }
+    return await resp.json();
+  } catch (err) {
+    console.error(
+      "market-validation-api proxy failed; falling back to embedded scoring.",
+      err instanceof Error ? err.message : err,
+    );
+    return null;
+  }
+}
+
 type ResearchRequest = {
   businessIdea?: string;
   industry?: string;
@@ -290,13 +321,28 @@ const STATE_NAMES: Record<string, string> = {
 
 router.post("/analyze", async (c) => {
   const body = await c.req.json<ResearchRequest>();
+  const config = c.get("config");
+
+  // Primary path: the standalone market-validation-api service (same scoring
+  // engine, extracted so it can be called by other consumers too — see
+  // market-validation-api's SCORING_METHODOLOGY.md). Falls through to the
+  // embedded implementation below whenever MARKET_API_URL is unset or the
+  // call fails/times out, so a bad day on that service degrades this feature
+  // instead of breaking it — this is the same fallback shape already used
+  // for compliance-os in ../compliance.ts. The 15s budget leaves headroom
+  // for the ~9s-plus fallback computation to still finish inside the
+  // client's 30s apiMarketResearchTimeout if the proxy attempt fails.
+  if (config.marketApiUrl) {
+    const proxied = await proxyToMarketApi(config, body);
+    if (proxied) return c.json(proxied);
+  }
+
   const businessIdea = clean(body.businessIdea);
   const industry = clean(body.industry) || inferIndustry(businessIdea);
   const state = normalizeState(body.formationState);
   if (!businessIdea) throw new ApiError(400, "Business idea is required.");
   if (!state) throw new ApiError(400, "Formation state is required.");
 
-  const config = c.get("config");
   const stateFips = STATE_FIPS[state];
   const {
     codes: naicsCodes,
