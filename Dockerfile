@@ -1,13 +1,7 @@
-# desk-api Dockerfile — multi-stage, for self-hosted Node.js deployment.
-#
-# NOT used for Cloudflare Workers deployment (use `npm run deploy` instead).
-# This is a scaffold for the future self-hosted migration.
-# See docs/FUTURE-MIGRATION.md and docs/KNOWN-LIMITATIONS.md for prerequisites.
-#
-# Prerequisites before this Dockerfile is functional:
-#   1. src/server.ts must be implemented (see docs/FUTURE-MIGRATION.md Step 1)
-#   2. npm install @hono/node-server
-#   3. PostgreSQL adapter implemented (see docs/POSTGRES-ADAPTER-PLAN.md)
+# desk-api Dockerfile — multi-stage, for the self-hosted Fastify/Postgres
+# service (see git history for the retired Cloudflare Workers/D1/Hono build
+# this replaced). Not currently wired into any deployment — see this repo's
+# rewrite notes for the safety constraints around cutover.
 
 # ── Build stage ───────────────────────────────────────────────────────────────
 FROM node:20-alpine AS build
@@ -34,11 +28,13 @@ RUN npm ci --omit=dev && npm cache clean --force
 
 COPY --from=build /app/dist ./dist
 
-# Health check matches the /health route in src/index.ts
+# Health check matches the GET /health route registered in src/app.ts
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
-  CMD wget -qO- http://localhost:${PORT:-8787}/health || exit 1
+  CMD wget -qO- http://localhost:${PORT:-3458}/health || exit 1
 
-EXPOSE 8787
+EXPOSE 3458
 
-# Start via src/server.ts (compiled to dist/server.js)
+# Start via src/server.ts (compiled to dist/server.js). Migrations are NOT
+# run automatically — apply them separately with `npm run migrate` before
+# starting a new environment.
 CMD ["node", "dist/server.js"]

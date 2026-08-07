@@ -1,27 +1,51 @@
 {
   "name": "desk-api",
-  "version": "1.0.0",
+  "version": "2.0.0",
   "private": true,
-  "type": "module",
+  "description": "Desk business-management API — Fastify/TypeScript/Postgres. Rewritten in place from the original Hono/Cloudflare Workers/D1 implementation (see git history).",
   "scripts": {
-    "dev": "wrangler dev",
-    "deploy": "wrangler deploy",
-    "build": "tsc --noEmit",
+    "dev": "tsx watch src/server.ts",
+    "start": "tsx src/server.ts",
+    "build": "tsc",
     "typecheck": "tsc --noEmit",
-    "migrate:local": "wrangler d1 execute desk-api-db --local --file=migrations/001_initial_schema.sql",
-    "migrate:prod": "wrangler d1 execute desk-api-db --remote --file=migrations/001_initial_schema.sql",
-    "db:studio:local": "wrangler d1 studio desk-api-db --local",
     "test": "vitest run",
     "test:watch": "vitest",
-    "oews:validate": "node scripts/validate-oews-compact.mjs"
+    "test:e2e": "vitest run --config vitest.e2e.config.ts",
+    "test:coverage": "vitest run --coverage",
+    "migrate": "tsx scripts/apply-migrations.ts",
+    "generate:openapi": "tsx scripts/export-openapi.ts",
+    "generate:client": "npm run generate:openapi && openapi-typescript docs/openapi.json -o packages/desk-client/src/openapi-types.ts",
+    "lint": "eslint src --ext .ts",
+    "format": "prettier --write src"
   },
   "dependencies": {
-    "hono": "^4.7.0"
+    "@fastify/cors": "^9.0.1",
+    "@opentelemetry/api": "^1.9.1",
+    "@opentelemetry/auto-instrumentations-node": "^0.79.0",
+    "@opentelemetry/exporter-trace-otlp-http": "^0.221.0",
+    "@opentelemetry/sdk-node": "^0.221.0",
+    "dotenv": "^16.4.5",
+    "fastify": "^4.28.1",
+    "ioredis": "^5.11.1",
+    "node-cron": "^3.0.3",
+    "openapi-fetch": "^0.17.0",
+    "pg": "^8.13.1",
+    "prom-client": "^15.1.3",
+    "zod": "^4.4.3"
   },
   "devDependencies": {
-    "@cloudflare/workers-types": "^5.20260722.0",
-    "typescript": "^5.7.3",
-    "vitest": "^4.0.0",
-    "wrangler": "^4.14.0"
+    "@eslint/js": "^10.0.1",
+    "@types/node": "^22.0.0",
+    "@types/node-cron": "^3.0.11",
+    "@types/pg": "^8.11.6",
+    "@vitest/coverage-v8": "^4.1.10",
+    "eslint": "^10.7.0",
+    "eslint-config-prettier": "^10.1.8",
+    "openapi-typescript": "^7.13.0",
+    "prettier": "^3.9.6",
+    "tsx": "^4.19.0",
+    "typescript": "^5.5.4",
+    "typescript-eslint": "^8.65.0",
+    "vitest": "^4.1.10"
   }
 }

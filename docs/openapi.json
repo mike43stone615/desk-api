@@ -1,0 +1,761 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "Desk API",
+    "version": "2.0.0",
+    "description": "Desk business-management API — self-service email/password auth, business-setup drafts/businesses/memberships, and an admin table browser aggregating this service plus registry-api and compliance-os. Rewritten from the original Hono/Cloudflare Workers/D1 implementation onto Fastify/TypeScript/Postgres."
+  },
+  "tags": [
+    {
+      "name": "Auth",
+      "description": "Self-service email/password authentication"
+    },
+    {
+      "name": "Setup",
+      "description": "Business-setup drafts, completed businesses, and memberships"
+    },
+    {
+      "name": "Admin",
+      "description": "Table browser + upstream aggregation (email-allowlisted admins only)"
+    },
+    {
+      "name": "Functions",
+      "description": "Business-setup-wizard support endpoints"
+    },
+    {
+      "name": "Integrations",
+      "description": "Compliance-OS / registry-api / market-validation-api proxies"
+    },
+    {
+      "name": "System",
+      "description": "Health and metrics"
+    }
+  ],
+  "components": {
+    "securitySchemes": {
+      "SessionToken": {
+        "type": "http",
+        "scheme": "bearer",
+        "description": "Opaque session token from POST /auth/signin, sent as Authorization: Bearer <token>."
+      }
+    },
+    "schemas": {
+      "Problem": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "status": {
+            "type": "number"
+          },
+          "detail": {
+            "type": "string"
+          },
+          "instance": {
+            "type": "string"
+          },
+          "error": {
+            "type": "string",
+            "description": "Duplicates detail — kept for the current Flutter client."
+          }
+        }
+      },
+      "PublicUser": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "email": {
+            "type": "string"
+          },
+          "firstName": {
+            "type": "string"
+          },
+          "lastName": {
+            "type": "string"
+          },
+          "emailConfirmedAt": {
+            "type": "string",
+            "nullable": true
+          }
+        }
+      },
+      "Ok": {
+        "type": "object",
+        "properties": {
+          "ok": {
+            "type": "boolean"
+          }
+        }
+      }
+    }
+  },
+  "paths": {
+    "/health": {
+      "get": {
+        "tags": [
+          "System"
+        ],
+        "summary": "Health check (basic liveness)",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/health/live": {
+      "get": {
+        "tags": [
+          "System"
+        ],
+        "summary": "Liveness probe",
+        "responses": {
+          "200": {
+            "description": "Process is alive"
+          }
+        }
+      }
+    },
+    "/health/ready": {
+      "get": {
+        "tags": [
+          "System"
+        ],
+        "summary": "Readiness probe (database + Redis connectivity)",
+        "responses": {
+          "200": {
+            "description": "Ready"
+          },
+          "503": {
+            "description": "Not ready"
+          }
+        }
+      }
+    },
+    "/metrics": {
+      "get": {
+        "tags": [
+          "System"
+        ],
+        "summary": "Prometheus metrics",
+        "responses": {
+          "200": {
+            "description": "Prometheus text format",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/auth/signup": {
+      "post": {
+        "tags": [
+          "Auth"
+        ],
+        "summary": "Create an account (requires email confirmation before sign-in)",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "email",
+                  "password",
+                  "firstName",
+                  "lastName"
+                ],
+                "properties": {
+                  "email": {
+                    "type": "string",
+                    "format": "email"
+                  },
+                  "password": {
+                    "type": "string"
+                  },
+                  "firstName": {
+                    "type": "string"
+                  },
+                  "lastName": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Account created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "user": {
+                      "$ref": "#/components/schemas/PublicUser"
+                    },
+                    "emailConfirmationRequired": {
+                      "type": "boolean"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Email already in use",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/auth/signin": {
+      "post": {
+        "tags": [
+          "Auth"
+        ],
+        "summary": "Sign in with email + password",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "email",
+                  "password"
+                ],
+                "properties": {
+                  "email": {
+                    "type": "string"
+                  },
+                  "password": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Signed in",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "token": {
+                      "type": "string"
+                    },
+                    "user": {
+                      "$ref": "#/components/schemas/PublicUser"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Invalid credentials"
+          },
+          "403": {
+            "description": "Email not confirmed"
+          }
+        }
+      }
+    },
+    "/auth/signout": {
+      "post": {
+        "tags": [
+          "Auth"
+        ],
+        "summary": "Revoke the current session",
+        "security": [
+          {
+            "SessionToken": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/auth/session": {
+      "get": {
+        "tags": [
+          "Auth"
+        ],
+        "summary": "Get the current session user",
+        "security": [
+          {
+            "SessionToken": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "user": {
+                      "$ref": "#/components/schemas/PublicUser"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Session expired or invalid"
+          }
+        }
+      }
+    },
+    "/auth/email-confirmation/request": {
+      "post": {
+        "tags": [
+          "Auth"
+        ],
+        "summary": "Request a new email-confirmation link (enumeration-safe: always 200)",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/auth/email-confirmation/confirm": {
+      "post": {
+        "tags": [
+          "Auth"
+        ],
+        "summary": "Confirm an email using a token",
+        "responses": {
+          "200": {
+            "description": "OK"
+          },
+          "400": {
+            "description": "Invalid or expired token"
+          }
+        }
+      }
+    },
+    "/auth/password-reset/request": {
+      "post": {
+        "tags": [
+          "Auth"
+        ],
+        "summary": "Request a password-reset link (enumeration-safe: always 200)",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/auth/password-reset/confirm": {
+      "post": {
+        "tags": [
+          "Auth"
+        ],
+        "summary": "Confirm a password reset using a token",
+        "responses": {
+          "200": {
+            "description": "OK"
+          },
+          "400": {
+            "description": "Invalid or expired token"
+          }
+        }
+      }
+    },
+    "/auth/password": {
+      "post": {
+        "tags": [
+          "Auth"
+        ],
+        "summary": "Update password while authenticated",
+        "security": [
+          {
+            "SessionToken": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/setup/drafts": {
+      "get": {
+        "tags": [
+          "Setup"
+        ],
+        "summary": "List the caller's setup drafts",
+        "security": [
+          {
+            "SessionToken": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Setup"
+        ],
+        "summary": "Create a new setup draft (max 5 incomplete per user)",
+        "security": [
+          {
+            "SessionToken": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Safe retry — the same key replays the first response instead of creating a second draft."
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "Created"
+          },
+          "409": {
+            "description": "Too many incomplete drafts"
+          }
+        }
+      }
+    },
+    "/setup/drafts/{id}": {
+      "get": {
+        "tags": [
+          "Setup"
+        ],
+        "summary": "Get a draft",
+        "security": [
+          {
+            "SessionToken": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          },
+          "404": {
+            "description": "Not found"
+          }
+        }
+      },
+      "patch": {
+        "tags": [
+          "Setup"
+        ],
+        "summary": "Update a draft (256KB cap)",
+        "security": [
+          {
+            "SessionToken": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          },
+          "413": {
+            "description": "Draft too large"
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "Setup"
+        ],
+        "summary": "Delete a draft",
+        "security": [
+          {
+            "SessionToken": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          },
+          "404": {
+            "description": "Not found"
+          }
+        }
+      }
+    },
+    "/setup/drafts/{id}/complete": {
+      "post": {
+        "tags": [
+          "Setup"
+        ],
+        "summary": "Complete a draft into a business (creates an owner membership)",
+        "security": [
+          {
+            "SessionToken": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Safe retry — the same key replays the first response instead of creating a second business."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          },
+          "400": {
+            "description": "Business name required"
+          }
+        }
+      }
+    },
+    "/setup/businesses": {
+      "get": {
+        "tags": [
+          "Setup"
+        ],
+        "summary": "List businesses the caller belongs to",
+        "security": [
+          {
+            "SessionToken": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/setup/businesses/{id}/members": {
+      "get": {
+        "tags": [
+          "Setup"
+        ],
+        "summary": "List a business's members",
+        "security": [
+          {
+            "SessionToken": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Setup"
+        ],
+        "summary": "Invite/update a member (owner/admin only)",
+        "security": [
+          {
+            "SessionToken": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          },
+          "403": {
+            "description": "Forbidden"
+          }
+        }
+      }
+    },
+    "/setup/businesses/{id}/members/{membershipId}": {
+      "delete": {
+        "tags": [
+          "Setup"
+        ],
+        "summary": "Remove a member (owner/admin only; cannot remove the last owner)",
+        "security": [
+          {
+            "SessionToken": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          },
+          "409": {
+            "description": "Business must keep at least one owner"
+          }
+        }
+      }
+    },
+    "/admin/tables": {
+      "get": {
+        "tags": [
+          "Admin"
+        ],
+        "summary": "List browsable tables (this service + registry-api + compliance-os)",
+        "security": [
+          {
+            "SessionToken": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          },
+          "403": {
+            "description": "Admin access required"
+          }
+        }
+      }
+    },
+    "/admin/tables/{table}/rows": {
+      "get": {
+        "tags": [
+          "Admin"
+        ],
+        "summary": "List rows (supports filters/sort/pagination)",
+        "security": [
+          {
+            "SessionToken": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/admin/tables/{table}/rows/{id}": {
+      "patch": {
+        "tags": [
+          "Admin"
+        ],
+        "summary": "Update editable fields on a row (audit-logged)",
+        "security": [
+          {
+            "SessionToken": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "Admin"
+        ],
+        "summary": "Delete a row where deletable (audit-logged)",
+        "security": [
+          {
+            "SessionToken": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          },
+          "403": {
+            "description": "Deletes disabled for this table"
+          }
+        }
+      }
+    },
+    "/functions/v1/analyze-business-setup": {
+      "post": {
+        "tags": [
+          "Functions"
+        ],
+        "summary": "OpenAI-backed business-idea classification (heuristic fallback without an API key)",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/functions/v1/search-place-areas": {
+      "post": {
+        "tags": [
+          "Functions"
+        ],
+        "summary": "Google Places city autocomplete",
+        "responses": {
+          "200": {
+            "description": "OK"
+          },
+          "503": {
+            "description": "Not configured"
+          }
+        }
+      }
+    },
+    "/integrations/market-research/analyze": {
+      "post": {
+        "tags": [
+          "Integrations"
+        ],
+        "summary": "Proxies to market-validation-api's POST /research/analyze",
+        "description": "Returns 503 (not a locally-computed fallback score) if market-validation-api is unreachable, misconfigured, or times out.",
+        "responses": {
+          "200": {
+            "description": "Market-validation score"
+          },
+          "503": {
+            "description": "Market validation is temporarily unavailable."
+          }
+        }
+      }
+    }
+  }
+}

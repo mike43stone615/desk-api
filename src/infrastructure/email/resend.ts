@@ -1,4 +1,12 @@
-﻿import type { AppConfig } from '../../config.js';
+// Ported unchanged from the original (see git history) — same Resend
+// integration, same themed HTML email, same "click a link to
+// {appBaseUrl}/reset-password?token=..." design. Kept deliberately
+// different from the sibling API-only services (registry-api,
+// market-validation-api), which switched to a raw-token pattern since they
+// have no web frontend of their own — desk-api's Flutter app (moving to
+// Cloudflare Pages) DOES have a real frontend that serves /reset-password
+// and /confirm-email, so the link-based design stays.
+import type { AppConfig } from '../../config';
 
 export async function sendPasswordResetEmail(
   config: AppConfig,
@@ -68,12 +76,14 @@ interface ThemedEmailContent {
 
 async function sendEmail(config: AppConfig, request: EmailRequest): Promise<void> {
   if (!config.resendApiKey) {
-    console.warn(JSON.stringify({
-      level: 'warn',
-      event: request.skippedEvent,
-      requestId: request.requestId,
-      reason: 'RESEND_API_KEY not configured',
-    }));
+    console.warn(
+      JSON.stringify({
+        level: 'warn',
+        event: request.skippedEvent,
+        requestId: request.requestId,
+        reason: 'RESEND_API_KEY not configured',
+      }),
+    );
     return;
   }
 
@@ -93,21 +103,25 @@ async function sendEmail(config: AppConfig, request: EmailRequest): Promise<void
 
   if (!resp.ok) {
     const detail = await resp.text().catch(() => '');
-    console.error(JSON.stringify({
-      level: 'error',
-      event: request.failedEvent,
-      requestId: request.requestId,
-      status: resp.status,
-      detail: detail.substring(0, 300),
-    }));
+    console.error(
+      JSON.stringify({
+        level: 'error',
+        event: request.failedEvent,
+        requestId: request.requestId,
+        status: resp.status,
+        detail: detail.substring(0, 300),
+      }),
+    );
     return;
   }
 
-  console.log(JSON.stringify({
-    level: 'audit',
-    event: request.sentEvent,
-    requestId: request.requestId,
-  }));
+  console.log(
+    JSON.stringify({
+      level: 'audit',
+      event: request.sentEvent,
+      requestId: request.requestId,
+    }),
+  );
 }
 
 function themedEmailHtml(content: ThemedEmailContent): string {
@@ -176,4 +190,3 @@ function escapeHtml(value: string): string {
     .replace(/"/g, '&quot;')
     .replace(/'/g, '&#39;');
 }
-

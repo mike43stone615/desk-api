@@ -1,8 +1,11 @@
+// Ported unchanged in behavior from the WebCrypto version — generateToken/
+// generateId now use Node's `crypto.randomBytes` instead of
+// `crypto.getRandomValues`, everything else (ISO-8601 string timestamps,
+// hex token/id encoding) is identical.
+import { randomBytes } from 'crypto';
+
 export function generateToken(byteLength = 32): string {
-  const bytes = crypto.getRandomValues(new Uint8Array(byteLength));
-  return Array.from(bytes)
-    .map((b) => b.toString(16).padStart(2, '0'))
-    .join('');
+  return randomBytes(byteLength).toString('hex');
 }
 
 export function generateId(): string {

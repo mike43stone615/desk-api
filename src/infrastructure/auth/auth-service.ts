@@ -1,7 +1,37 @@
-﻿import type { AuthResult, AuthService, PublicUser, SignupResult } from '../../interfaces/auth.js';
-import type { DatabaseRepository, User } from '../../interfaces/database.js';
-import { hashPassword, verifyPassword } from '../../domain/auth/password.js';
-import { addHours, addMinutes, generateId, generateToken, isExpired, nowUtc, secondsSince } from '../../domain/auth/tokens.js';
+// Ported near-unchanged from the original (see git history) — this class
+// only ever talked to the DatabaseRepository interface, never to D1
+// directly, so swapping in PgDatabaseAdapter (see index.ts in this
+// directory) required no changes here beyond the import paths.
+//
+// NOTE on a known latent bug, preserved on purpose: confirmPasswordReset()
+// below calls `this.db.deleteSession(token)` passing the *password-reset*
+// token to a method that deletes a session keyed by *session* token — those
+// two token spaces never intersect, so this call is a silent no-op and no
+// session is actually revoked when a user resets their password (a stolen
+// session stays valid after the account owner resets their password). The
+// ported sibling services (registry-api, market-validation-api) each fixed
+// this in their own auth-service ports by deleting all sessions WHERE
+// user_id = ... directly against their pg pool. This port does NOT apply
+// that same fix, because doing so needs a "delete all of a user's sessions"
+// capability that the DatabaseRepository interface does not expose, and
+// this rewrite's instructions are explicit that
+// src/interfaces/database.ts "does not change." Rather than silently
+// special-case the Postgres adapter with a bypass method a plain
+// DatabaseRepository consumer couldn't use, this preserves the original's
+// exact (buggy) behavior and flags it for a deliberate follow-up decision —
+// see the spawned task accompanying this rewrite's report.
+import type { AuthResult, AuthService, PublicUser, SignupResult } from '../../interfaces/auth';
+import type { DatabaseRepository, User } from '../../interfaces/database';
+import { hashPassword, verifyPassword } from '../../domain/auth/password';
+import {
+  addHours,
+  addMinutes,
+  generateId,
+  generateToken,
+  isExpired,
+  nowUtc,
+  secondsSince,
+} from '../../domain/auth/tokens';
 
 export class DeskAuthService implements AuthService {
   constructor(
@@ -93,6 +123,7 @@ export class DeskAuthService implements AuthService {
     const passwordHash = await hashPassword(newPassword);
     await this.db.updateUserPassword(record.userId, passwordHash);
     await this.db.markResetTokenUsed(token, nowUtc());
+    // See this file's header comment — preserved no-op, not a fix.
     await this.db.deleteSession(token);
     return true;
   }
@@ -146,6 +177,7 @@ export class DeskAuthService implements AuthService {
 export class AuthError extends Error {
   constructor(public readonly code: string) {
     super(code);
+    this.name = 'AuthError';
   }
 }
 
@@ -171,12 +203,17 @@ function validatePassword(password: string): void {
   if (!/[^A-Za-z0-9]/.test(password)) throw new AuthError('password_missing_symbol');
 }
 
-const DUMMY_HASH = 'pbkdf2:sha256:100000:AAAAAAAAAAAAAAAAAAAAAA==:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=';
+// Iteration count matches password.ts's current ITERATIONS constant purely
+// so the dummy verification (used to avoid leaking account existence via
+// response-time timing on signIn) takes roughly as long as a real one; it is
+// never a valid credential for any real account.
+const DUMMY_HASH =
+  'pbkdf2:sha256:310000:AAAAAAAAAAAAAAAAAAAAAA==:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=';
 
 function isDuplicateEmailError(error: unknown): boolean {
-  if (!(error instanceof Error)) return false;
-  const message = error.message.toLowerCase();
-  return message.includes('unique') && message.includes('users') && message.includes('email');
+  // Postgres unique_violation — replaces the original's D1/SQLite message-
+  // sniffing (`message.includes('unique') && ...`) with the structured error
+  // code pg attaches to constraint violations.
+  const code = (error as { code?: string } | undefined)?.code;
+  return code === '23505';
 }
-
-
