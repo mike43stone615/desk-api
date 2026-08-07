@@ -58,6 +58,7 @@ export interface DatabaseRepository {
   ): Promise<Session>;
   findSessionByToken(token: string): Promise<Session | null>;
   deleteSession(token: string): Promise<void>;
+  deleteAllSessionsForUser(userId: string): Promise<void>;
   deleteExpiredSessions(): Promise<void>;
 
   // Password reset

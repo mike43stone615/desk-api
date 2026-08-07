@@ -3,23 +3,17 @@
 // directly, so swapping in PgDatabaseAdapter (see index.ts in this
 // directory) required no changes here beyond the import paths.
 //
-// NOTE on a known latent bug, preserved on purpose: confirmPasswordReset()
-// below calls `this.db.deleteSession(token)` passing the *password-reset*
-// token to a method that deletes a session keyed by *session* token — those
-// two token spaces never intersect, so this call is a silent no-op and no
-// session is actually revoked when a user resets their password (a stolen
-// session stays valid after the account owner resets their password). The
-// ported sibling services (registry-api, market-validation-api) each fixed
-// this in their own auth-service ports by deleting all sessions WHERE
-// user_id = ... directly against their pg pool. This port does NOT apply
-// that same fix, because doing so needs a "delete all of a user's sessions"
-// capability that the DatabaseRepository interface does not expose, and
-// this rewrite's instructions are explicit that
-// src/interfaces/database.ts "does not change." Rather than silently
-// special-case the Postgres adapter with a bypass method a plain
-// DatabaseRepository consumer couldn't use, this preserves the original's
-// exact (buggy) behavior and flags it for a deliberate follow-up decision —
-// see the spawned task accompanying this rewrite's report.
+// Fixed during review: the original's confirmPasswordReset() called
+// `this.db.deleteSession(token)` passing the *password-reset* token to a
+// method keyed by *session* token — those two token spaces never intersect,
+// so the call was a silent no-op and no session was actually revoked on
+// password reset (a stolen session stayed valid after the account owner
+// reset their password). registry-api's and market-validation-api's ports
+// each independently fixed the same inherited bug by revoking every session
+// for the user directly. This port does the same via the interface's new
+// deleteAllSessionsForUser(), added specifically for this fix (see
+// src/interfaces/database.ts) rather than staying silently broken for the
+// sake of leaving the interface untouched.
 import type { AuthResult, AuthService, PublicUser, SignupResult } from '../../interfaces/auth';
 import type { DatabaseRepository, User } from '../../interfaces/database';
 import { hashPassword, verifyPassword } from '../../domain/auth/password';
@@ -123,8 +117,10 @@ export class DeskAuthService implements AuthService {
     const passwordHash = await hashPassword(newPassword);
     await this.db.updateUserPassword(record.userId, passwordHash);
     await this.db.markResetTokenUsed(token, nowUtc());
-    // See this file's header comment — preserved no-op, not a fix.
-    await this.db.deleteSession(token);
+    // Revoke every existing session for this user — see this file's header
+    // comment. A password reset should invalidate any already-issued session,
+    // not just future sign-ins with the old password.
+    await this.db.deleteAllSessionsForUser(record.userId);
     return true;
   }
 

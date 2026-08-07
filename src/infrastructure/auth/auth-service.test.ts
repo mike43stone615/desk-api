@@ -60,6 +60,9 @@ class InMemoryDatabaseRepository implements DatabaseRepository {
   async deleteSession(token: string) {
     this.sessions.delete(token);
   }
+  async deleteAllSessionsForUser(userId: string) {
+    for (const [token, s] of this.sessions) if (s.userId === userId) this.sessions.delete(token);
+  }
   async deleteExpiredSessions() {
     for (const [token, s] of this.sessions) if (new Date(s.expiresAt) <= new Date()) this.sessions.delete(token);
   }
@@ -210,6 +213,22 @@ describe('password reset — enumeration-safety and cooldown', () => {
 
     // Reusing the same (now-used) token fails.
     expect(await service.confirmPasswordReset(token, 'AnotherStr0ng!1')).toBe(false);
+  });
+
+  it('confirmPasswordReset revokes every existing session for the user (regression: was previously a silent no-op)', async () => {
+    const { user } = await service.signUp('revokeonreset@example.com', 'Str0ng!Pass', 'A', 'B');
+    await service.confirmEmail((await db.findLatestEmailConfirmationTokenForUser(user.id))!.token);
+
+    const { token: sessionA } = (await service.signIn('revokeonreset@example.com', 'Str0ng!Pass'))!;
+    const { token: sessionB } = (await service.signIn('revokeonreset@example.com', 'Str0ng!Pass'))!;
+    expect(await service.verifySession(sessionA)).not.toBeNull();
+    expect(await service.verifySession(sessionB)).not.toBeNull();
+
+    const resetToken = (await service.requestPasswordReset('revokeonreset@example.com'))!;
+    await service.confirmPasswordReset(resetToken, 'NewStr0ng!Pass1');
+
+    expect(await service.verifySession(sessionA)).toBeNull();
+    expect(await service.verifySession(sessionB)).toBeNull();
   });
 
   it('confirmPasswordReset returns false for an unknown token', async () => {
