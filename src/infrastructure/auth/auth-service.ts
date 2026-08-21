@@ -44,7 +44,12 @@ export class DeskAuthService implements AuthService {
     return verifyPassword(password, hash);
   }
 
-  async signUp(email: string, password: string, firstName: string, lastName: string): Promise<SignupResult> {
+  async signUp(
+    email: string,
+    password: string,
+    firstName: string,
+    lastName: string,
+  ): Promise<SignupResult> {
     const existing = await this.db.findUserByEmail(email);
     if (existing) throw new AuthError('email_in_use');
 
@@ -55,7 +60,13 @@ export class DeskAuthService implements AuthService {
     const passwordHash = await hashPassword(password);
     let user: User;
     try {
-      user = await this.db.createUser(generateId(), email, passwordHash, firstName.trim(), lastName.trim());
+      user = await this.db.createUser(
+        generateId(),
+        email,
+        passwordHash,
+        firstName.trim(),
+        lastName.trim(),
+      );
     } catch (error) {
       if (isDuplicateEmailError(error)) throw new AuthError('email_in_use');
       throw error;
@@ -102,7 +113,12 @@ export class DeskAuthService implements AuthService {
     if (latest && secondsSince(latest.createdAt) < this.resendCooldownSeconds) return null;
 
     const token = generateToken(32);
-    await this.db.createResetToken(generateId(), user.id, token, addMinutes(this.resetTokenDurationMinutes));
+    await this.db.createResetToken(
+      generateId(),
+      user.id,
+      token,
+      addMinutes(this.resetTokenDurationMinutes),
+    );
     return token;
   }
 
@@ -129,7 +145,14 @@ export class DeskAuthService implements AuthService {
     if (!user || user.emailConfirmedAt) return null;
 
     const latest = await this.db.findLatestEmailConfirmationTokenForUser(user.id);
-    if (latest && secondsSince(latest.createdAt) < this.resendCooldownSeconds) return null;
+    if (
+      latest &&
+      !latest.usedAt &&
+      !isExpired(latest.expiresAt) &&
+      secondsSince(latest.createdAt) < this.resendCooldownSeconds
+    ) {
+      return latest.token;
+    }
 
     return this.createEmailConfirmationToken(user.id);
   }

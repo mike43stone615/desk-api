@@ -23,38 +23,126 @@ import { logMutation, requestIp, requestUserAgent } from '../modules/audit/mutat
 type AdminSource = 'desk' | 'registry' | 'compliance';
 
 const BUSINESS_INDUSTRIES = [
-  'Restaurant', 'Food Truck', 'Bakery', 'Coffee Shop / Cafe', 'Bar / Tavern', 'Brewery / Winery',
-  'Catering Service', 'Grocery Store', 'Convenience Store', 'Medical Practice', 'Dental Practice',
-  'Mental Health Practice', 'Physical Therapy Clinic', 'Chiropractic Practice', 'Optometry Practice',
-  'Pharmacy', 'Hospital', 'Home Health Agency', 'Veterinary Practice', 'Gym / Fitness Center',
-  'Spa / Salon', 'Barbershop', 'Tattoo Studio', 'Personal Training', 'Auto Repair Shop',
-  'Auto Dealership', 'Auto Body Shop', 'Car Wash', 'General Contractor', 'Electrical Contractor',
-  'Plumbing Contractor', 'HVAC Contractor', 'Roofing Contractor', 'Landscaping', 'Concrete Contractor',
-  'Painting Contractor', 'Excavation Contractor', 'Specialty Contractor', 'Light Manufacturing',
-  'Heavy Manufacturing', 'Food Manufacturing', 'Chemical Manufacturing', 'Real Estate Brokerage / Agent',
-  'Property Management', 'Real Estate Developer', 'Short-Term Rental', 'Hotel / Motel / Inn',
-  'Bed & Breakfast', 'Law Firm', 'Financial Advisor', 'Insurance Agency', 'Mortgage Broker',
-  'Accounting / Bookkeeping / Tax Preparation', 'Financial Services / Bank', 'Credit Union',
-  'Engineering Firm', 'Childcare Center / Daycare', 'Private School', 'Tutoring Center', 'Driving School',
-  'Retail Store', 'Liquor Store', 'Cannabis Dispensary', 'Pawn Shop', 'Firearms Dealer',
-  'Secondhand / Consignment Store', 'E-commerce / Online Store', 'Dropshipping / Reselling',
-  'Print on Demand', 'Handmade / Craft Business', 'Trucking / Freight / Transportation',
-  'Taxi / Rideshare / Limo', 'Moving Company', 'Courier / Delivery Service', 'Waste Management',
-  'Warehousing / Self-Storage', 'Software Development', 'IT / Managed Services', 'AI Services',
-  'Cybersecurity Services', 'Staffing Agency', 'Security Guard Company', 'Cleaning / Janitorial Service',
-  'Pest Control', 'Consulting / Professional Services', 'Marketing Agency', 'PR / Public Relations',
-  'Social Media Management', 'Virtual Assistant Services', 'Translation Services',
-  'Farm / Agricultural Operation', 'Nursery / Greenhouse', 'Solar Energy Installer',
-  'Utility / Pipeline Contractor', 'Photography / Videography', 'Graphic Design', 'Content Creator',
-  'Event Planning', 'Wedding Services', 'Music / Entertainment', 'Funeral Home', 'Nonprofit Organization',
-  'Pet Services', 'Subscription Box Business', 'Import / Export', 'Home Daycare',
+  'Restaurant',
+  'Food Truck',
+  'Bakery',
+  'Coffee Shop / Cafe',
+  'Bar / Tavern',
+  'Brewery / Winery',
+  'Catering Service',
+  'Grocery Store',
+  'Convenience Store',
+  'Medical Practice',
+  'Dental Practice',
+  'Mental Health Practice',
+  'Physical Therapy Clinic',
+  'Chiropractic Practice',
+  'Optometry Practice',
+  'Pharmacy',
+  'Hospital',
+  'Home Health Agency',
+  'Veterinary Practice',
+  'Gym / Fitness Center',
+  'Spa / Salon',
+  'Barbershop',
+  'Tattoo Studio',
+  'Personal Training',
+  'Auto Repair Shop',
+  'Auto Dealership',
+  'Collision / Auto Body Repair',
+  'Car Wash',
+  'General Contractor',
+  'Electrical Contractor',
+  'Plumbing Contractor',
+  'HVAC Contractor',
+  'Roofing Contractor',
+  'Landscaping',
+  'Concrete Contractor',
+  'Painting Contractor',
+  'Excavation Contractor',
+  'Light Manufacturing',
+  'Heavy Manufacturing',
+  'Food Manufacturing',
+  'Chemical Manufacturing',
+  'Real Estate Brokerage / Agent',
+  'Property Management',
+  'Real Estate Developer',
+  'Short-Term Rental',
+  'Hotel / Motel / Inn',
+  'Bed & Breakfast',
+  'Law Firm',
+  'Financial Advisor',
+  'Insurance Agency',
+  'Mortgage Broker',
+  'Accounting / Bookkeeping / Tax Preparation',
+  'Bank / Financial Institution',
+  'Credit Union',
+  'Engineering Firm',
+  'Childcare Center / Daycare',
+  'Private School',
+  'Tutoring Center',
+  'Driving School',
+  'Retail Store',
+  'Liquor Store',
+  'Cannabis Dispensary',
+  'Pawn Shop',
+  'Firearms Dealer',
+  'Secondhand / Consignment Store',
+  'E-commerce / Online Store',
+  'Dropshipping / Reselling',
+  'Print on Demand',
+  'Handmade / Craft Business',
+  'Trucking / Freight / Transportation',
+  'Taxi / Rideshare / Limo',
+  'Moving Company',
+  'Courier / Delivery Service',
+  'Waste Management',
+  'Warehousing / Self-Storage',
+  'Software Development',
+  'IT / Managed Services',
+  'AI Services',
+  'Cybersecurity Services',
+  'Staffing Agency',
+  'Security Guard Company',
+  'Cleaning / Janitorial Service',
+  'Pest Control',
+  'Consulting / Professional Services',
+  'Marketing Agency',
+  'PR / Public Relations',
+  'Social Media Management',
+  'Virtual Assistant Services',
+  'Translation Services',
+  'Farm / Agricultural Operation',
+  'Nursery / Greenhouse',
+  'Solar Energy Installer',
+  'Utility / Pipeline Contractor',
+  'Photography / Videography',
+  'Graphic Design',
+  'Content Creator',
+  'Event Planning',
+  'Wedding Services',
+  'Music / Entertainment',
+  'Funeral Home',
+  'Nonprofit Organization',
+  'Pet Services',
+  'Subscription Box Business',
+  'Import / Export',
+  'Home Daycare',
   'Laundromat / Dry Cleaning',
 ] as const;
 
 const TABLES = {
   users: {
     primaryKey: 'id',
-    columns: ['id', 'email', 'first_name', 'last_name', 'email_confirmed_at', 'created_at', 'updated_at'],
+    columns: [
+      'id',
+      'email',
+      'first_name',
+      'last_name',
+      'email_confirmed_at',
+      'created_at',
+      'updated_at',
+    ],
     editable: ['email', 'first_name', 'last_name'],
     secret: [],
     deletable: true,
@@ -98,8 +186,15 @@ const TABLES = {
   business_memberships: {
     primaryKey: 'id',
     columns: [
-      'id', 'business_id', 'user_id', 'role', 'invited_by_user_id', 'invited_at', 'accepted_at',
-      'created_at', 'updated_at',
+      'id',
+      'business_id',
+      'user_id',
+      'role',
+      'invited_by_user_id',
+      'invited_at',
+      'accepted_at',
+      'created_at',
+      'updated_at',
     ],
     editable: ['role', 'invited_at', 'accepted_at'],
     secret: [],
@@ -138,13 +233,21 @@ function quoteIdentifier(value: string): string {
   return `"${value.replace(/"/g, '""')}"`;
 }
 
-function parseBoundedInt(raw: string | undefined, fallback: number, min: number, max: number): number {
+function parseBoundedInt(
+  raw: string | undefined,
+  fallback: number,
+  min: number,
+  max: number,
+): number {
   const parsed = raw ? parseInt(raw, 10) : fallback;
   if (Number.isNaN(parsed)) return fallback;
   return Math.min(max, Math.max(min, parsed));
 }
 
-export function parseFilters(raw: string | undefined, allowedColumns: readonly string[]): Record<string, string> {
+export function parseFilters(
+  raw: string | undefined,
+  allowedColumns: readonly string[],
+): Record<string, string> {
   if (!raw) return {};
   let parsed: unknown;
   try {
@@ -166,12 +269,15 @@ export function escapeLikeValue(value: string): string {
   return value.replace(/[\\%_]/g, (ch) => `\\${ch}`);
 }
 
-export function buildFilterClause(
-  filters: Record<string, string>,
-): { sql: string; params: string[] } {
+export function buildFilterClause(filters: Record<string, string>): {
+  sql: string;
+  params: string[];
+} {
   const entries = Object.entries(filters);
   if (entries.length === 0) return { sql: '', params: [] };
-  const clauses = entries.map(([column], index) => `${quoteIdentifier(column)}::text ILIKE $${index + 1} ESCAPE '\\'`);
+  const clauses = entries.map(
+    ([column], index) => `${quoteIdentifier(column)}::text ILIKE $${index + 1} ESCAPE '\\'`,
+  );
   const params = entries.map(([, value]) => `%${escapeLikeValue(value)}%`);
   return { sql: `WHERE ${clauses.join(' AND ')}`, params };
 }
@@ -192,7 +298,10 @@ function normalizeValue(value: unknown): unknown {
   return String(value);
 }
 
-function maskSecrets(row: Record<string, unknown>, table: AdminTableConfig): Record<string, unknown> {
+function maskSecrets(
+  row: Record<string, unknown>,
+  table: AdminTableConfig,
+): Record<string, unknown> {
   const copy: Record<string, unknown> = { ...row };
   for (const column of table.secret) {
     if (copy[column] != null) copy[column] = '[hidden]';
@@ -200,7 +309,11 @@ function maskSecrets(row: Record<string, unknown>, table: AdminTableConfig): Rec
   return copy;
 }
 
-export function validateEditableValue(tableName: TableName, column: string, value: unknown): unknown {
+export function validateEditableValue(
+  tableName: TableName,
+  column: string,
+  value: unknown,
+): unknown {
   if (tableName === 'businesses' && column === 'industry') {
     const industry = String(value ?? '').trim();
     if (!BUSINESS_INDUSTRIES.includes(industry as (typeof BUSINESS_INDUSTRIES)[number])) {
@@ -221,7 +334,10 @@ function tableKey(source: AdminSource, rawName: string): string {
 
 function parseTableKey(raw: string): { source: AdminSource; rawName: string } {
   const [maybeSource, ...rest] = raw.split('.');
-  if ((maybeSource === 'desk' || maybeSource === 'registry' || maybeSource === 'compliance') && rest.length > 0) {
+  if (
+    (maybeSource === 'desk' || maybeSource === 'registry' || maybeSource === 'compliance') &&
+    rest.length > 0
+  ) {
     return { source: maybeSource, rawName: rest.join('.') };
   }
   return { source: 'desk', rawName: raw };
@@ -246,18 +362,27 @@ async function proxyUpstreamJson<T = unknown>(
   const response = await fetch(`${baseUrl.replace(/\/$/, '')}${path}`, {
     method,
     headers: { 'Content-Type': 'application/json', 'x-api-key': apiKey },
-    body: body === undefined || method === 'GET' || method === 'DELETE' ? undefined : JSON.stringify(body),
+    body:
+      body === undefined || method === 'GET' || method === 'DELETE'
+        ? undefined
+        : JSON.stringify(body),
   });
   const text = await response.text();
-  const data = text.trim() ? (JSON.parse(text) as T & { error?: string }) : ({} as T & { error?: string });
-  if (!response.ok) throw new HttpError(response.status, data.error ?? `${source} admin request failed.`);
+  const data = text.trim()
+    ? (JSON.parse(text) as T & { error?: string })
+    : ({} as T & { error?: string });
+  if (!response.ok)
+    throw new HttpError(response.status, data.error ?? `${source} admin request failed.`);
   return data as T;
 }
 
 async function listUpstreamTables(source: Exclude<AdminSource, 'desk'>) {
   let upstream: { tables?: UpstreamTableSummary[] };
   try {
-    upstream = await proxyUpstreamJson<{ tables?: UpstreamTableSummary[] }>(source, '/admin/tables');
+    upstream = await proxyUpstreamJson<{ tables?: UpstreamTableSummary[] }>(
+      source,
+      '/admin/tables',
+    );
   } catch {
     return [];
   }
@@ -283,7 +408,10 @@ async function proxyUpstreamRows(
   if (filters) query.set('filters', filters);
   if (sortColumn) query.set('sortColumn', sortColumn);
   if (sortDirection) query.set('sortDirection', sortDirection);
-  return proxyUpstreamJson<UpstreamRows>(source, `/admin/tables/${encodeURIComponent(table)}/rows?${query.toString()}`);
+  return proxyUpstreamJson<UpstreamRows>(
+    source,
+    `/admin/tables/${encodeURIComponent(table)}/rows?${query.toString()}`,
+  );
 }
 
 async function proxyUpstreamMutation(
@@ -293,7 +421,12 @@ async function proxyUpstreamMutation(
   id: string,
   body?: unknown,
 ): Promise<unknown> {
-  return proxyUpstreamJson(source, `/admin/tables/${encodeURIComponent(table)}/rows/${encodeURIComponent(id)}`, method, body);
+  return proxyUpstreamJson(
+    source,
+    `/admin/tables/${encodeURIComponent(table)}/rows/${encodeURIComponent(id)}`,
+    method,
+    body,
+  );
 }
 
 async function guard(request: FastifyRequest, reply: FastifyReply): Promise<void> {
@@ -343,7 +476,11 @@ export async function adminTableRowsHandler(request: FastifyRequest, reply: Fast
       query.sortColumn,
       query.sortDirection,
     );
-    return reply.send({ ...rows, source: parsed.source, table: tableKey(parsed.source, rows.table) });
+    return reply.send({
+      ...rows,
+      source: parsed.source,
+      table: tableKey(parsed.source, rows.table),
+    });
   }
 
   const tableName = parseLocalTableName(parsed.rawName);
@@ -395,7 +532,9 @@ export async function adminTableUpdateRowHandler(request: FastifyRequest, reply:
   const table: AdminTableConfig = TABLES[tableName];
   const values = body.values ?? {};
   const entries = Object.entries(values).filter(([column]) => table.editable.includes(column));
-  const validatedEntries = entries.map(([column, value]) => [column, validateEditableValue(tableName, column, value)] as const);
+  const validatedEntries = entries.map(
+    ([column, value]) => [column, validateEditableValue(tableName, column, value)] as const,
+  );
   if (validatedEntries.length === 0) throw new HttpError(400, 'No editable fields were provided.');
 
   const columns = table.columns.map(quoteIdentifier).join(', ');
@@ -405,7 +544,9 @@ export async function adminTableUpdateRowHandler(request: FastifyRequest, reply:
   );
   const before = beforeResult.rows[0] ?? null;
 
-  const assignments = validatedEntries.map(([column], index) => `${quoteIdentifier(column)} = $${index + 1}`).join(', ');
+  const assignments = validatedEntries
+    .map(([column], index) => `${quoteIdentifier(column)} = $${index + 1}`)
+    .join(', ');
   const params = validatedEntries.map(([, value]) => normalizeValue(value));
   params.push(id);
   await pool.query(
@@ -457,7 +598,10 @@ export async function adminTableDeleteRowHandler(request: FastifyRequest, reply:
   );
   const before = beforeResult.rows[0] ?? null;
 
-  await pool.query(`DELETE FROM ${quoteIdentifier(tableName)} WHERE ${quoteIdentifier(table.primaryKey)} = $1`, [id]);
+  await pool.query(
+    `DELETE FROM ${quoteIdentifier(tableName)} WHERE ${quoteIdentifier(table.primaryKey)} = $1`,
+    [id],
+  );
 
   const admin = request.currentUser!;
   logMutation({
