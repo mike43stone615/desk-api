@@ -44,6 +44,71 @@ beforeAll(async () => {
   authHeaders = { authorization: `Bearer ${token}` };
 });
 
+describe('POST /functions/v1/analyze-business-setup fallback classification', () => {
+  const industries = [
+    'Consulting / Professional Services',
+    'Coffee Shop / Cafe',
+    'Brewery / Winery',
+    'Barbershop',
+    'Medical Practice',
+    'Software Development',
+    'Real Estate Brokerage / Agent',
+    'Accounting / Bookkeeping / Tax Preparation',
+    'Trucking / Freight / Transportation',
+  ];
+
+  async function classify(businessIdea: string) {
+    const res = await app.inject({
+      method: 'POST',
+      url: '/functions/v1/analyze-business-setup',
+      payload: {
+        action: 'classify_unregistered_business',
+        businessIdea,
+        industries,
+      },
+    });
+    expect(res.statusCode).toBe(200);
+    return JSON.parse(res.body).classification as {
+      industry: string;
+      additionalIndustries: string[];
+    };
+  }
+
+  it('uses the full local keyword dictionary when OpenAI is unavailable', async () => {
+    await expect(classify('a neighborhood taproom and craft beer brewery')).resolves.toMatchObject({
+      industry: 'Brewery / Winery',
+    });
+    await expect(
+      classify("a men's grooming barbershop with straight razor shaves"),
+    ).resolves.toMatchObject({
+      industry: 'Barbershop',
+    });
+    await expect(
+      classify('a SaaS product and mobile app for workflow automation'),
+    ).resolves.toMatchObject({
+      industry: 'Software Development',
+    });
+  });
+
+  it('matches newly promoted phrase aliases in the local fallback dictionary', async () => {
+    await expect(classify('an estate agent office for residential buyers')).resolves.toMatchObject({
+      industry: 'Real Estate Brokerage / Agent',
+    });
+    await expect(classify('a tax preparer and bookkeeping service')).resolves.toMatchObject({
+      industry: 'Accounting / Bookkeeping / Tax Preparation',
+    });
+    await expect(classify('a freight forwarding logistics company')).resolves.toMatchObject({
+      industry: 'Trucking / Freight / Transportation',
+    });
+  });
+  it('picks the highest keyword-score match instead of the first broad match', async () => {
+    const classification = await classify('a coffee shop and cafe business for remote workers');
+
+    expect(classification.industry).toBe('Coffee Shop / Cafe');
+    expect(classification.additionalIndustries).not.toContain('Coffee Shop / Cafe');
+  });
+});
+
 describe('POST /setup/drafts', () => {
   it('creates a draft', async () => {
     const res = await app.inject({ method: 'POST', url: '/setup/drafts', headers: authHeaders });
@@ -57,7 +122,11 @@ describe('POST /setup/drafts', () => {
       const res = await app.inject({ method: 'POST', url: '/setup/drafts', headers: authHeaders });
       expect(res.statusCode).toBe(201);
     }
-    const overCap = await app.inject({ method: 'POST', url: '/setup/drafts', headers: authHeaders });
+    const overCap = await app.inject({
+      method: 'POST',
+      url: '/setup/drafts',
+      headers: authHeaders,
+    });
     expect(overCap.statusCode).toBe(409);
   });
 
@@ -80,9 +149,19 @@ describe('POST /setup/drafts', () => {
   it('a different request body under the same Idempotency-Key returns 409', async () => {
     fakeDb.drafts.clear();
     const headers = { ...authHeaders, 'idempotency-key': 'draft-create-key-2' };
-    const first = await app.inject({ method: 'POST', url: '/setup/drafts', headers, payload: { a: 1 } });
+    const first = await app.inject({
+      method: 'POST',
+      url: '/setup/drafts',
+      headers,
+      payload: { a: 1 },
+    });
     expect(first.statusCode).toBe(201);
-    const second = await app.inject({ method: 'POST', url: '/setup/drafts', headers, payload: { a: 2 } });
+    const second = await app.inject({
+      method: 'POST',
+      url: '/setup/drafts',
+      headers,
+      payload: { a: 2 },
+    });
     expect(second.statusCode).toBe(409);
   });
 });
@@ -94,7 +173,11 @@ describe('PATCH /setup/drafts/:id and POST /setup/drafts/:id/complete', () => {
     fakeDb.memberships.clear();
     fakeDb.idempotencyKeys.clear();
 
-    const created = await app.inject({ method: 'POST', url: '/setup/drafts', headers: authHeaders });
+    const created = await app.inject({
+      method: 'POST',
+      url: '/setup/drafts',
+      headers: authHeaders,
+    });
     const draftId = JSON.parse(created.body).id as string;
 
     const patch = await app.inject({
@@ -118,7 +201,11 @@ describe('PATCH /setup/drafts/:id and POST /setup/drafts/:id/complete', () => {
     // Draft was deleted after completion.
     expect(fakeDb.drafts.has(draftId)).toBe(false);
 
-    const list = await app.inject({ method: 'GET', url: '/setup/businesses', headers: authHeaders });
+    const list = await app.inject({
+      method: 'GET',
+      url: '/setup/businesses',
+      headers: authHeaders,
+    });
     expect(list.statusCode).toBe(200);
     expect(JSON.parse(list.body).businesses).toHaveLength(1);
   });
@@ -128,7 +215,11 @@ describe('PATCH /setup/drafts/:id and POST /setup/drafts/:id/complete', () => {
     fakeDb.businesses.clear();
     fakeDb.memberships.clear();
 
-    const created = await app.inject({ method: 'POST', url: '/setup/drafts', headers: authHeaders });
+    const created = await app.inject({
+      method: 'POST',
+      url: '/setup/drafts',
+      headers: authHeaders,
+    });
     const draftId = JSON.parse(created.body).id as string;
     await app.inject({
       method: 'PATCH',
@@ -138,18 +229,34 @@ describe('PATCH /setup/drafts/:id and POST /setup/drafts/:id/complete', () => {
     });
 
     const headers = { ...authHeaders, 'idempotency-key': `complete-${draftId}` };
-    const first = await app.inject({ method: 'POST', url: `/setup/drafts/${draftId}/complete`, headers });
+    const first = await app.inject({
+      method: 'POST',
+      url: `/setup/drafts/${draftId}/complete`,
+      headers,
+    });
     expect(first.statusCode).toBe(200);
-    const second = await app.inject({ method: 'POST', url: `/setup/drafts/${draftId}/complete`, headers });
+    const second = await app.inject({
+      method: 'POST',
+      url: `/setup/drafts/${draftId}/complete`,
+      headers,
+    });
     expect(second.statusCode).toBe(200);
     expect(JSON.parse(first.body)).toEqual(JSON.parse(second.body));
     expect(fakeDb.businesses.size).toBe(1);
   });
 
   it('rejects completing a draft with no business name', async () => {
-    const created = await app.inject({ method: 'POST', url: '/setup/drafts', headers: authHeaders });
+    const created = await app.inject({
+      method: 'POST',
+      url: '/setup/drafts',
+      headers: authHeaders,
+    });
     const draftId = JSON.parse(created.body).id as string;
-    const complete = await app.inject({ method: 'POST', url: `/setup/drafts/${draftId}/complete`, headers: authHeaders });
+    const complete = await app.inject({
+      method: 'POST',
+      url: `/setup/drafts/${draftId}/complete`,
+      headers: authHeaders,
+    });
     expect(complete.statusCode).toBe(400);
   });
 });

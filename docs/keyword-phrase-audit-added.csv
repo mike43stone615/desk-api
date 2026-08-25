@@ -1,0 +1,515 @@
+added_to_code,phrase,decision,library,target,source,reason
+yes,taco truck,add,setup-classifier,Food Truck,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,lunch truck,add,setup-classifier,Food Truck,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,mobile catering,add,setup-classifier,Food Truck,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,food cart,add,setup-classifier,Food Truck,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,street vendor,add,setup-classifier,Food Truck,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,bake shop,add,setup-classifier,Bakery,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,cake shop,add,setup-classifier,Bakery,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,pastry shop,add,setup-classifier,Bakery,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,bread bakery,add,setup-classifier,Bakery,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,cookie shop,add,setup-classifier,Bakery,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,coffee cafe,add,setup-classifier,Coffee Shop / Cafe,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,espresso bar,add,setup-classifier,Coffee Shop / Cafe,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,coffee roaster,add,setup-classifier,Coffee Shop / Cafe,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,tea room,add,setup-classifier,Coffee Shop / Cafe,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,coffee stand,add,setup-classifier,Coffee Shop / Cafe,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,brew pub,add,setup-classifier,Brewery / Winery,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,beer garden,add,setup-classifier,Brewery / Winery,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,cider house,add,setup-classifier,Brewery / Winery,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,wine tasting room,add,setup-classifier,Brewery / Winery,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,craft brewery,add,setup-classifier,Brewery / Winery,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,cocktail lounge,add,setup-classifier,Bar / Tavern,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,beer bar,add,setup-classifier,Bar / Tavern,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,wine lounge,add,setup-classifier,Bar / Tavern,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,pub house,add,setup-classifier,Bar / Tavern,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,event catering,add,setup-classifier,Catering Service,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,wedding catering,add,setup-classifier,Catering Service,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,corporate catering,add,setup-classifier,Catering Service,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,catering company,add,setup-classifier,Catering Service,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,food store,add,setup-classifier,Grocery Store,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,produce store,add,setup-classifier,Grocery Store,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,grocery market,add,setup-classifier,Grocery Store,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,fresh market,add,setup-classifier,Grocery Store,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,corner market,add,setup-classifier,Convenience Store,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,quick stop,add,setup-classifier,Convenience Store,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,neighborhood market,add,setup-classifier,Convenience Store,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,sandwich bar,add,setup-classifier,Restaurant,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,lunch counter,add,setup-classifier,Restaurant,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,fast food restaurant,add,setup-classifier,Restaurant,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,takeout restaurant,add,setup-classifier,Restaurant,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,supper club,add,setup-classifier,Restaurant,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,family restaurant,add,setup-classifier,Restaurant,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,dental office,add,setup-classifier,Dental Practice,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,dental clinic,add,setup-classifier,Dental Practice,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,orthodontic office,add,setup-classifier,Dental Practice,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,family dentist,add,setup-classifier,Dental Practice,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,counseling center,add,setup-classifier,Mental Health Practice,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,therapy practice,add,setup-classifier,Mental Health Practice,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,addiction counseling,add,setup-classifier,Mental Health Practice,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,behavioral therapy,add,setup-classifier,Mental Health Practice,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,psychotherapy practice,add,setup-classifier,Mental Health Practice,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,family counseling,add,setup-classifier,Mental Health Practice,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,rehab clinic,add,setup-classifier,Physical Therapy Clinic,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,physiotherapy clinic,add,setup-classifier,Physical Therapy Clinic,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,sports therapy,add,setup-classifier,Physical Therapy Clinic,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,physical rehab,add,setup-classifier,Physical Therapy Clinic,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,chiropractic clinic,add,setup-classifier,Chiropractic Practice,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,spine care,add,setup-classifier,Chiropractic Practice,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,back clinic,add,setup-classifier,Chiropractic Practice,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,eye care clinic,add,setup-classifier,Optometry Practice,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,vision clinic,add,setup-classifier,Optometry Practice,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,optical shop,add,setup-classifier,Optometry Practice,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,eye care center,add,setup-classifier,Optometry Practice,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,apothecary shop,add,setup-classifier,Pharmacy,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,compounding drugstore,add,setup-classifier,Pharmacy,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,prescription pharmacy,add,setup-classifier,Pharmacy,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,home nursing,add,setup-classifier,Home Health Agency,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,senior home care,add,setup-classifier,Home Health Agency,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,in home care,add,setup-classifier,Home Health Agency,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,caregiver agency,add,setup-classifier,Home Health Agency,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,veterinary clinic,add,setup-classifier,Veterinary Practice,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,animal doctor,add,setup-classifier,Veterinary Practice,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,pet clinic,add,setup-classifier,Veterinary Practice,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,medical hospital,add,setup-classifier,Hospital,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,surgical center,add,setup-classifier,Hospital,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,acute care hospital,add,setup-classifier,Hospital,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,doctor office,add,setup-classifier,Medical Practice,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,physician office,add,setup-classifier,Medical Practice,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,primary care clinic,add,setup-classifier,Medical Practice,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,family doctor,add,setup-classifier,Medical Practice,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,medical clinic,add,setup-classifier,Medical Practice,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,pediatric clinic,add,setup-classifier,Medical Practice,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,specialty clinic,add,setup-classifier,Medical Practice,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,fitness studio,add,setup-classifier,Gym / Fitness Center,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,exercise gym,add,setup-classifier,Gym / Fitness Center,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,training gym,add,setup-classifier,Gym / Fitness Center,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,weight room,add,setup-classifier,Gym / Fitness Center,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,personal training studio,add,setup-classifier,Personal Training,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,fitness trainer,add,setup-classifier,Personal Training,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,strength training coach,add,setup-classifier,Personal Training,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,beauty shop,add,setup-classifier,Spa / Salon,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,hairdresser salon,add,setup-classifier,Spa / Salon,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,day spa,add,setup-classifier,Spa / Salon,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,nail spa,add,setup-classifier,Spa / Salon,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,skin care clinic,add,setup-classifier,Spa / Salon,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,massage spa,add,setup-classifier,Spa / Salon,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,barber shop,add,setup-classifier,Barbershop,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,grooming studio,add,setup-classifier,Barbershop,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,shave shop,add,setup-classifier,Barbershop,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,tattoo parlor,add,setup-classifier,Tattoo Studio,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,piercing studio,add,setup-classifier,Tattoo Studio,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,body art studio,add,setup-classifier,Tattoo Studio,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,used car dealership,add,setup-classifier,Auto Dealership,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,car dealer,add,setup-classifier,Auto Dealership,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,auto dealer,add,setup-classifier,Auto Dealership,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,vehicle dealership,add,setup-classifier,Auto Dealership,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,collision center,add,setup-classifier,Collision / Auto Body Repair,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,body repair shop,add,setup-classifier,Collision / Auto Body Repair,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,auto paint shop,add,setup-classifier,Collision / Auto Body Repair,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,detailing shop,add,setup-classifier,Car Wash,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,vehicle wash,add,setup-classifier,Car Wash,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,auto detail shop,add,setup-classifier,Car Wash,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,mechanic shop,add,setup-classifier,Auto Repair Shop,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,repair garage,add,setup-classifier,Auto Repair Shop,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,brake repair,add,setup-classifier,Auto Repair Shop,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,oil change shop,add,setup-classifier,Auto Repair Shop,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,automotive garage,add,setup-classifier,Auto Repair Shop,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,electrical service,add,setup-classifier,Electrical Contractor,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,electrical company,add,setup-classifier,Electrical Contractor,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,electric service,add,setup-classifier,Electrical Contractor,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,wiring contractor,add,setup-classifier,Electrical Contractor,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,plumbing company,add,setup-classifier,Plumbing Contractor,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,plumbing service,add,setup-classifier,Plumbing Contractor,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,pipe fitting,add,setup-classifier,Plumbing Contractor,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,drain cleaning service,add,setup-classifier,Plumbing Contractor,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,heating contractor,add,setup-classifier,HVAC Contractor,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,cooling contractor,add,setup-classifier,HVAC Contractor,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,air conditioning service,add,setup-classifier,HVAC Contractor,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,hvac service,add,setup-classifier,HVAC Contractor,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,roof repair,add,setup-classifier,Roofing Contractor,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,roofing company,add,setup-classifier,Roofing Contractor,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,roof contractor,add,setup-classifier,Roofing Contractor,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,lawn service,add,setup-classifier,Landscaping,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,yard care,add,setup-classifier,Landscaping,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,garden service,add,setup-classifier,Landscaping,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,landscape company,add,setup-classifier,Landscaping,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,concrete company,add,setup-classifier,Concrete Contractor,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,cement contractor,add,setup-classifier,Concrete Contractor,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,flatwork contractor,add,setup-classifier,Concrete Contractor,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,house painter,add,setup-classifier,Painting Contractor,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,painting company,add,setup-classifier,Painting Contractor,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,paint contractor,add,setup-classifier,Painting Contractor,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,excavating company,add,setup-classifier,Excavation Contractor,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,earth moving,add,setup-classifier,Excavation Contractor,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,site work contractor,add,setup-classifier,Excavation Contractor,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,building contractor,add,setup-classifier,General Contractor,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,construction company,add,setup-classifier,General Contractor,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,remodeling contractor,add,setup-classifier,General Contractor,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,home renovation contractor,add,setup-classifier,General Contractor,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,home builder contractor,add,setup-classifier,General Contractor,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,rental management company,add,setup-classifier,Property Management,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,property manager office,add,setup-classifier,Property Management,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,tenant placement,add,setup-classifier,Property Management,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,land development company,add,setup-classifier,Real Estate Developer,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,property developer,add,setup-classifier,Real Estate Developer,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,housing developer,add,setup-classifier,Real Estate Developer,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,estate agent,add,setup-classifier,Real Estate Brokerage / Agent,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,realtor office,add,setup-classifier,Real Estate Brokerage / Agent,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,brokerage firm,add,setup-classifier,Real Estate Brokerage / Agent,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,real estate office,add,setup-classifier,Real Estate Brokerage / Agent,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,legal counsel,add,setup-classifier,Law Firm,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,attorney office,add,setup-classifier,Law Firm,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,lawyer office,add,setup-classifier,Law Firm,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,divorce lawyer,add,setup-classifier,Law Firm,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,criminal defense firm,add,setup-classifier,Law Firm,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,legal practice,add,setup-classifier,Law Firm,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,mortgage company,add,setup-classifier,Mortgage Broker,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,loan broker,add,setup-classifier,Mortgage Broker,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,home loan broker,add,setup-classifier,Mortgage Broker,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,wealth management,add,setup-classifier,Financial Advisor,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,investment advisor,add,setup-classifier,Financial Advisor,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,financial planning,add,setup-classifier,Financial Advisor,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,financial planner,add,setup-classifier,Financial Advisor,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,insurance broker,add,setup-classifier,Insurance Agency,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,insurance office,add,setup-classifier,Insurance Agency,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,insurance company,add,setup-classifier,Insurance Agency,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,tax preparer,add,setup-classifier,Accounting / Bookkeeping / Tax Preparation,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,tax preparation service,add,setup-classifier,Accounting / Bookkeeping / Tax Preparation,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,bookkeeping service,add,setup-classifier,Accounting / Bookkeeping / Tax Preparation,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,accounting office,add,setup-classifier,Accounting / Bookkeeping / Tax Preparation,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,accounting firm,add,setup-classifier,Accounting / Bookkeeping / Tax Preparation,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,chemical plant,add,setup-classifier,Chemical Manufacturing,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,chemical factory,add,setup-classifier,Chemical Manufacturing,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,chemical works,add,setup-classifier,Chemical Manufacturing,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,machine shop,add,setup-classifier,Light Manufacturing,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,fabrication shop,add,setup-classifier,Light Manufacturing,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,assembly shop,add,setup-classifier,Light Manufacturing,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,manufacturing plant,add,setup-classifier,Heavy Manufacturing,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,industrial plant,add,setup-classifier,Heavy Manufacturing,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,steel mill,add,setup-classifier,Heavy Manufacturing,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,ship building,add,setup-classifier,Heavy Manufacturing,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,food processing plant,add,setup-classifier,Food Manufacturing,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,food factory,add,setup-classifier,Food Manufacturing,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,beverage manufacturer,add,setup-classifier,Food Manufacturing,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,day nursery,add,setup-classifier,Childcare Center / Daycare,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,child care center,add,setup-classifier,Childcare Center / Daycare,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,nursery school,add,setup-classifier,Childcare Center / Daycare,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,early learning center,add,setup-classifier,Childcare Center / Daycare,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,home day care,add,setup-classifier,Home Daycare,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,family daycare,add,setup-classifier,Home Daycare,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,in home daycare,add,setup-classifier,Home Daycare,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,independent school,add,setup-classifier,Private School,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,boarding school,add,setup-classifier,Private School,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,private academy,add,setup-classifier,Private School,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,test prep center,add,setup-classifier,Tutoring Center,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,learning center,add,setup-classifier,Tutoring Center,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,academic tutoring,add,setup-classifier,Tutoring Center,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,study center,add,setup-classifier,Tutoring Center,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,gun dealer,add,setup-classifier,Firearms Dealer,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,firearm shop,add,setup-classifier,Firearms Dealer,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,ammo shop,add,setup-classifier,Firearms Dealer,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,marijuana dispensary,add,setup-classifier,Cannabis Dispensary,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,cannabis shop,add,setup-classifier,Cannabis Dispensary,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,weed dispensary,add,setup-classifier,Cannabis Dispensary,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,package store,add,setup-classifier,Liquor Store,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,wine shop,add,setup-classifier,Liquor Store,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,beer store,add,setup-classifier,Liquor Store,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,retail shop,add,setup-classifier,Retail Store,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,specialty store,add,setup-classifier,Retail Store,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,general store,add,setup-classifier,Retail Store,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,thrift store,add,setup-classifier,Secondhand / Consignment Store,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,resale shop,add,setup-classifier,Secondhand / Consignment Store,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,consignment shop,add,setup-classifier,Secondhand / Consignment Store,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,pawnbroker shop,add,setup-classifier,Pawn Shop,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,pawn broker,add,setup-classifier,Pawn Shop,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,collateral lender,add,setup-classifier,Pawn Shop,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,craft shop,add,setup-classifier,Handmade / Craft Business,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,artisan studio,add,setup-classifier,Handmade / Craft Business,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,handmade goods,add,setup-classifier,Handmade / Craft Business,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,online shop,add,setup-classifier,E-commerce / Online Store,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,internet store,add,setup-classifier,E-commerce / Online Store,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,web store,add,setup-classifier,E-commerce / Online Store,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,drop shipper,add,setup-classifier,Dropshipping / Reselling,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,resale business,add,setup-classifier,Dropshipping / Reselling,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,online reseller,add,setup-classifier,Dropshipping / Reselling,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,custom printing,add,setup-classifier,Print on Demand,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,print shop,add,setup-classifier,Print on Demand,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,merch printing,add,setup-classifier,Print on Demand,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,subscription service,add,setup-classifier,Subscription Box Business,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,monthly box,add,setup-classifier,Subscription Box Business,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,curated box,add,setup-classifier,Subscription Box Business,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,freight forwarding,add,setup-classifier,Trucking / Freight / Transportation,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,trucking company,add,setup-classifier,Trucking / Freight / Transportation,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,transport company,add,setup-classifier,Trucking / Freight / Transportation,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,logistics company,add,setup-classifier,Trucking / Freight / Transportation,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,delivery carrier,add,setup-classifier,Trucking / Freight / Transportation,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,taxi service,add,setup-classifier,Taxi / Rideshare / Limo,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,cab company,add,setup-classifier,Taxi / Rideshare / Limo,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,limo service,add,setup-classifier,Taxi / Rideshare / Limo,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,car service,add,setup-classifier,Taxi / Rideshare / Limo,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,moving service,add,setup-classifier,Moving Company,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,relocation company,add,setup-classifier,Moving Company,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,furniture moving,add,setup-classifier,Moving Company,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,delivery service,add,setup-classifier,Courier / Delivery Service,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,courier company,add,setup-classifier,Courier / Delivery Service,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,parcel delivery,add,setup-classifier,Courier / Delivery Service,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,storage facility,add,setup-classifier,Warehousing / Self-Storage,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,warehouse storage,add,setup-classifier,Warehousing / Self-Storage,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,self storage facility,add,setup-classifier,Warehousing / Self-Storage,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,artificial intelligence consulting,add,setup-classifier,AI Services,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,machine learning services,add,setup-classifier,AI Services,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,ai consulting,add,setup-classifier,AI Services,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,automation platform,add,setup-classifier,AI Services,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,app development company,add,setup-classifier,Software Development,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,web development company,add,setup-classifier,Software Development,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,software consultancy,add,setup-classifier,Software Development,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,programming shop,add,setup-classifier,Software Development,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,mobile app developer,add,setup-classifier,Software Development,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,managed it services,add,setup-classifier,IT / Managed Services,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,computer support company,add,setup-classifier,IT / Managed Services,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,network support,add,setup-classifier,IT / Managed Services,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,it help desk,add,setup-classifier,IT / Managed Services,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,cyber security consulting,add,setup-classifier,Cybersecurity Services,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,security testing,add,setup-classifier,Cybersecurity Services,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,penetration testing company,add,setup-classifier,Cybersecurity Services,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,information security firm,add,setup-classifier,Cybersecurity Services,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,employment agency,add,setup-classifier,Staffing Agency,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,temp staffing,add,setup-classifier,Staffing Agency,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,recruiting firm,add,setup-classifier,Staffing Agency,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,recruitment firm,add,setup-classifier,Staffing Agency,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,guard service,add,setup-classifier,Security Guard Company,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,security patrol,add,setup-classifier,Security Guard Company,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,private security company,add,setup-classifier,Security Guard Company,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,cleaning company,add,setup-classifier,Cleaning / Janitorial Service,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,janitorial service,add,setup-classifier,Cleaning / Janitorial Service,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,maid company,add,setup-classifier,Cleaning / Janitorial Service,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,house cleaning service,add,setup-classifier,Cleaning / Janitorial Service,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,exterminating service,add,setup-classifier,Pest Control,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,termite control,add,setup-classifier,Pest Control,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,pest removal,add,setup-classifier,Pest Control,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,advertising agency,add,setup-classifier,Marketing Agency,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,digital agency,add,setup-classifier,Marketing Agency,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,media buying agency,add,setup-classifier,Marketing Agency,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,seo agency,add,setup-classifier,Marketing Agency,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,public relations firm,add,setup-classifier,PR / Public Relations,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,communications firm,add,setup-classifier,PR / Public Relations,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,press agency,add,setup-classifier,PR / Public Relations,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,social media agency,add,setup-classifier,Social Media Management,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,content management agency,add,setup-classifier,Social Media Management,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,community management service,add,setup-classifier,Social Media Management,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,remote assistant service,add,setup-classifier,Virtual Assistant Services,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,executive assistant service,add,setup-classifier,Virtual Assistant Services,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,administrative support service,add,setup-classifier,Virtual Assistant Services,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,language translation service,add,setup-classifier,Translation Services,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,interpreting service,add,setup-classifier,Translation Services,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,localization agency,add,setup-classifier,Translation Services,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,consulting company,add,setup-classifier,Consulting / Professional Services,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,advisory practice,add,setup-classifier,Consulting / Professional Services,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,professional services firm,add,setup-classifier,Consulting / Professional Services,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,business consulting firm,add,setup-classifier,Consulting / Professional Services,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,solar installation company,add,setup-classifier,Solar Energy Installer,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,solar contractor,add,setup-classifier,Solar Energy Installer,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,photovoltaic installer,add,setup-classifier,Solar Energy Installer,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,plant nursery,add,setup-classifier,Nursery / Greenhouse,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,garden centre,add,setup-classifier,Nursery / Greenhouse,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,plant store,add,setup-classifier,Nursery / Greenhouse,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,dairy farm,add,setup-classifier,Farm / Agricultural Operation,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,crop farm,add,setup-classifier,Farm / Agricultural Operation,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,livestock farm,add,setup-classifier,Farm / Agricultural Operation,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,organic farm,add,setup-classifier,Farm / Agricultural Operation,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,pipeline contractor,add,setup-classifier,Utility / Pipeline Contractor,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,utility construction company,add,setup-classifier,Utility / Pipeline Contractor,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,fiber optic contractor,add,setup-classifier,Utility / Pipeline Contractor,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,photo studio,add,setup-classifier,Photography / Videography,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,video production company,add,setup-classifier,Photography / Videography,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,wedding photographer,add,setup-classifier,Photography / Videography,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,design studio,add,setup-classifier,Graphic Design,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,branding agency,add,setup-classifier,Graphic Design,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,logo design studio,add,setup-classifier,Graphic Design,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,creator studio,add,setup-classifier,Content Creator,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,media creator,add,setup-classifier,Content Creator,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,video creator,add,setup-classifier,Content Creator,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,event planner,add,setup-classifier,Event Planning,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,event management company,add,setup-classifier,Event Planning,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,meeting planner,add,setup-classifier,Event Planning,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,wedding planner,add,setup-classifier,Wedding Services,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,bridal service,add,setup-classifier,Wedding Services,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,wedding coordinator,add,setup-classifier,Wedding Services,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,music studio,add,setup-classifier,Music / Entertainment,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,recording studio,add,setup-classifier,Music / Entertainment,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,entertainment company,add,setup-classifier,Music / Entertainment,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,funeral service,add,setup-classifier,Funeral Home,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,cremation service,add,setup-classifier,Funeral Home,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,mortuary service,add,setup-classifier,Funeral Home,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,charitable organization,add,setup-classifier,Nonprofit Organization,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,community foundation,add,setup-classifier,Nonprofit Organization,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,volunteer organization,add,setup-classifier,Nonprofit Organization,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,pet grooming service,add,setup-classifier,Pet Services,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,dog walking service,add,setup-classifier,Pet Services,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,pet boarding service,add,setup-classifier,Pet Services,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,customs broker,add,setup-classifier,Import / Export,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,import export company,add,setup-classifier,Import / Export,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,international trade company,add,setup-classifier,Import / Export,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,coin laundry,add,setup-classifier,Laundromat / Dry Cleaning,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,laundry service,add,setup-classifier,Laundromat / Dry Cleaning,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,dry cleaner,add,setup-classifier,Laundromat / Dry Cleaning,curated domain phrase promotion,Common business phrase or practitioner/service alias for this classifier target.
+yes,tax preparer,add,market-regex-licensed_trade_pattern,LICENSED_TRADE_PATTERN,curated market phrase promotion,Safe phrase-level market signal for this regex gate.
+yes,real estate broker,add,market-regex-licensed_trade_pattern,LICENSED_TRADE_PATTERN,curated market phrase promotion,Safe phrase-level market signal for this regex gate.
+yes,insurance broker,add,market-regex-licensed_trade_pattern,LICENSED_TRADE_PATTERN,curated market phrase promotion,Safe phrase-level market signal for this regex gate.
+yes,private security company,add,market-regex-licensed_trade_pattern,LICENSED_TRADE_PATTERN,curated market phrase promotion,Safe phrase-level market signal for this regex gate.
+yes,massage therapist,add,market-regex-licensed_trade_pattern,LICENSED_TRADE_PATTERN,curated market phrase promotion,Safe phrase-level market signal for this regex gate.
+yes,day nursery,add,market-regex-children_focus_pattern,CHILDREN_FOCUS_PATTERN,curated market phrase promotion,Safe phrase-level market signal for this regex gate.
+yes,nursery school,add,market-regex-children_focus_pattern,CHILDREN_FOCUS_PATTERN,curated market phrase promotion,Safe phrase-level market signal for this regex gate.
+yes,early learning center,add,market-regex-children_focus_pattern,CHILDREN_FOCUS_PATTERN,curated market phrase promotion,Safe phrase-level market signal for this regex gate.
+yes,child care center,add,market-regex-children_focus_pattern,CHILDREN_FOCUS_PATTERN,curated market phrase promotion,Safe phrase-level market signal for this regex gate.
+yes,senior home care,add,market-regex-senior_focus_pattern,SENIOR_FOCUS_PATTERN,curated market phrase promotion,Safe phrase-level market signal for this regex gate.
+yes,elder care,add,market-regex-senior_focus_pattern,SENIOR_FOCUS_PATTERN,curated market phrase promotion,Safe phrase-level market signal for this regex gate.
+yes,in home care,add,market-regex-senior_focus_pattern,SENIOR_FOCUS_PATTERN,curated market phrase promotion,Safe phrase-level market signal for this regex gate.
+yes,cab company,add,market-regex-vehicle_fit_relevant_pattern,VEHICLE_FIT_RELEVANT_PATTERN,curated market phrase promotion,Safe phrase-level market signal for this regex gate.
+yes,taxi service,add,market-regex-vehicle_fit_relevant_pattern,VEHICLE_FIT_RELEVANT_PATTERN,curated market phrase promotion,Safe phrase-level market signal for this regex gate.
+yes,limo service,add,market-regex-vehicle_fit_relevant_pattern,VEHICLE_FIT_RELEVANT_PATTERN,curated market phrase promotion,Safe phrase-level market signal for this regex gate.
+yes,freight forwarding,add,market-regex-vehicle_fit_relevant_pattern,VEHICLE_FIT_RELEVANT_PATTERN,curated market phrase promotion,Safe phrase-level market signal for this regex gate.
+yes,logistics company,add,market-regex-vehicle_fit_relevant_pattern,VEHICLE_FIT_RELEVANT_PATTERN,curated market phrase promotion,Safe phrase-level market signal for this regex gate.
+yes,delivery carrier,add,market-regex-vehicle_fit_relevant_pattern,VEHICLE_FIT_RELEVANT_PATTERN,curated market phrase promotion,Safe phrase-level market signal for this regex gate.
+yes,oil change shop,add,market-regex-vehicle_fit_relevant_pattern,VEHICLE_FIT_RELEVANT_PATTERN,curated market phrase promotion,Safe phrase-level market signal for this regex gate.
+yes,beer garden,add,market-regex-inherently_seasonal_business_pattern,INHERENTLY_SEASONAL_BUSINESS_PATTERN,curated market phrase promotion,Safe phrase-level market signal for this regex gate.
+yes,wine tasting room,add,market-regex-inherently_seasonal_business_pattern,INHERENTLY_SEASONAL_BUSINESS_PATTERN,curated market phrase promotion,Safe phrase-level market signal for this regex gate.
+yes,wedding planner,add,market-regex-inherently_seasonal_business_pattern,INHERENTLY_SEASONAL_BUSINESS_PATTERN,curated market phrase promotion,Safe phrase-level market signal for this regex gate.
+yes,event planner,add,market-regex-inherently_seasonal_business_pattern,INHERENTLY_SEASONAL_BUSINESS_PATTERN,curated market phrase promotion,Safe phrase-level market signal for this regex gate.
+yes,wealth management,add,market-regex-high_income_target_pattern,HIGH_INCOME_TARGET_PATTERN,curated market phrase promotion,Safe phrase-level market signal for this regex gate.
+yes,luxury service,add,market-regex-high_income_target_pattern,HIGH_INCOME_TARGET_PATTERN,curated market phrase promotion,Safe phrase-level market signal for this regex gate.
+yes,high net worth,add,market-regex-high_income_target_pattern,HIGH_INCOME_TARGET_PATTERN,curated market phrase promotion,Safe phrase-level market signal for this regex gate.
+yes,low cost,add,market-regex-budget_target_pattern,BUDGET_TARGET_PATTERN,curated market phrase promotion,Safe phrase-level market signal for this regex gate.
+yes,value priced,add,market-regex-budget_target_pattern,BUDGET_TARGET_PATTERN,curated market phrase promotion,Safe phrase-level market signal for this regex gate.
+yes,discount service,add,market-regex-budget_target_pattern,BUDGET_TARGET_PATTERN,curated market phrase promotion,Safe phrase-level market signal for this regex gate.
+yes,low cost,add,market-regex-budget_price_pattern,BUDGET_PRICE_PATTERN,curated market phrase promotion,Safe phrase-level market signal for this regex gate.
+yes,value priced,add,market-regex-budget_price_pattern,BUDGET_PRICE_PATTERN,curated market phrase promotion,Safe phrase-level market signal for this regex gate.
+yes,discount service,add,market-regex-budget_price_pattern,BUDGET_PRICE_PATTERN,curated market phrase promotion,Safe phrase-level market signal for this regex gate.
+yes,luxury service,add,market-regex-premium_price_pattern,PREMIUM_PRICE_PATTERN,curated market phrase promotion,Safe phrase-level market signal for this regex gate.
+yes,high end,add,market-regex-premium_price_pattern,PREMIUM_PRICE_PATTERN,curated market phrase promotion,Safe phrase-level market signal for this regex gate.
+yes,premium service,add,market-regex-premium_price_pattern,PREMIUM_PRICE_PATTERN,curated market phrase promotion,Safe phrase-level market signal for this regex gate.
+yes,cannabis shop,add,market-regex-special_federal_license_pattern,SPECIAL_FEDERAL_LICENSE_PATTERN,curated market phrase promotion,Safe phrase-level market signal for this regex gate.
+yes,marijuana dispensary,add,market-regex-special_federal_license_pattern,SPECIAL_FEDERAL_LICENSE_PATTERN,curated market phrase promotion,Safe phrase-level market signal for this regex gate.
+yes,weed dispensary,add,market-regex-special_federal_license_pattern,SPECIAL_FEDERAL_LICENSE_PATTERN,curated market phrase promotion,Safe phrase-level market signal for this regex gate.
+yes,gun dealer,add,market-regex-special_federal_license_pattern,SPECIAL_FEDERAL_LICENSE_PATTERN,curated market phrase promotion,Safe phrase-level market signal for this regex gate.
+yes,firearm shop,add,market-regex-special_federal_license_pattern,SPECIAL_FEDERAL_LICENSE_PATTERN,curated market phrase promotion,Safe phrase-level market signal for this regex gate.
+yes,ammo shop,add,market-regex-special_federal_license_pattern,SPECIAL_FEDERAL_LICENSE_PATTERN,curated market phrase promotion,Safe phrase-level market signal for this regex gate.
+yes,beer store,add,market-regex-special_federal_license_pattern,SPECIAL_FEDERAL_LICENSE_PATTERN,curated market phrase promotion,Safe phrase-level market signal for this regex gate.
+yes,wine shop,add,market-regex-special_federal_license_pattern,SPECIAL_FEDERAL_LICENSE_PATTERN,curated market phrase promotion,Safe phrase-level market signal for this regex gate.
+yes,package store,add,market-regex-special_federal_license_pattern,SPECIAL_FEDERAL_LICENSE_PATTERN,curated market phrase promotion,Safe phrase-level market signal for this regex gate.
+yes,brew pub,add,market-regex-special_federal_license_pattern,SPECIAL_FEDERAL_LICENSE_PATTERN,curated market phrase promotion,Safe phrase-level market signal for this regex gate.
+yes,building contractor,add,market-regex-housing_construction_relevant_pattern,HOUSING_CONSTRUCTION_RELEVANT_PATTERN,curated market phrase promotion,Safe phrase-level market signal for this regex gate.
+yes,construction company,add,market-regex-housing_construction_relevant_pattern,HOUSING_CONSTRUCTION_RELEVANT_PATTERN,curated market phrase promotion,Safe phrase-level market signal for this regex gate.
+yes,remodeling contractor,add,market-regex-housing_construction_relevant_pattern,HOUSING_CONSTRUCTION_RELEVANT_PATTERN,curated market phrase promotion,Safe phrase-level market signal for this regex gate.
+yes,home renovation contractor,add,market-regex-housing_construction_relevant_pattern,HOUSING_CONSTRUCTION_RELEVANT_PATTERN,curated market phrase promotion,Safe phrase-level market signal for this regex gate.
+yes,roof repair,add,market-regex-housing_construction_relevant_pattern,HOUSING_CONSTRUCTION_RELEVANT_PATTERN,curated market phrase promotion,Safe phrase-level market signal for this regex gate.
+yes,lawn service,add,market-regex-housing_construction_relevant_pattern,HOUSING_CONSTRUCTION_RELEVANT_PATTERN,curated market phrase promotion,Safe phrase-level market signal for this regex gate.
+yes,yard care,add,market-regex-housing_construction_relevant_pattern,HOUSING_CONSTRUCTION_RELEVANT_PATTERN,curated market phrase promotion,Safe phrase-level market signal for this regex gate.
+yes,property manager office,add,market-regex-housing_construction_relevant_pattern,HOUSING_CONSTRUCTION_RELEVANT_PATTERN,curated market phrase promotion,Safe phrase-level market signal for this regex gate.
+yes,estate agent,add,market-regex-housing_construction_relevant_pattern,HOUSING_CONSTRUCTION_RELEVANT_PATTERN,curated market phrase promotion,Safe phrase-level market signal for this regex gate.
+yes,real estate office,add,market-regex-housing_construction_relevant_pattern,HOUSING_CONSTRUCTION_RELEVANT_PATTERN,curated market phrase promotion,Safe phrase-level market signal for this regex gate.
+yes,loan broker,add,market-regex-housing_construction_relevant_pattern,HOUSING_CONSTRUCTION_RELEVANT_PATTERN,curated market phrase promotion,Safe phrase-level market signal for this regex gate.
+yes,home loan broker,add,market-regex-housing_construction_relevant_pattern,HOUSING_CONSTRUCTION_RELEVANT_PATTERN,curated market phrase promotion,Safe phrase-level market signal for this regex gate.
+yes,drain cleaning service,add,market-regex-housing_construction_relevant_pattern,HOUSING_CONSTRUCTION_RELEVANT_PATTERN,curated market phrase promotion,Safe phrase-level market signal for this regex gate.
+yes,fast food restaurant,add,overpass-osm-tag,restaurants,curated OSM phrase promotion,Phrase maps to an existing precise OpenStreetMap competition tag.
+yes,takeout restaurant,add,overpass-osm-tag,restaurants,curated OSM phrase promotion,Phrase maps to an existing precise OpenStreetMap competition tag.
+yes,family restaurant,add,overpass-osm-tag,restaurants,curated OSM phrase promotion,Phrase maps to an existing precise OpenStreetMap competition tag.
+yes,espresso bar,add,overpass-osm-tag,cafes/coffee shops,curated OSM phrase promotion,Phrase maps to an existing precise OpenStreetMap competition tag.
+yes,coffee roaster,add,overpass-osm-tag,cafes/coffee shops,curated OSM phrase promotion,Phrase maps to an existing precise OpenStreetMap competition tag.
+yes,coffee stand,add,overpass-osm-tag,cafes/coffee shops,curated OSM phrase promotion,Phrase maps to an existing precise OpenStreetMap competition tag.
+yes,bake shop,add,overpass-osm-tag,bakeries,curated OSM phrase promotion,Phrase maps to an existing precise OpenStreetMap competition tag.
+yes,cake shop,add,overpass-osm-tag,bakeries,curated OSM phrase promotion,Phrase maps to an existing precise OpenStreetMap competition tag.
+yes,pastry shop,add,overpass-osm-tag,bakeries,curated OSM phrase promotion,Phrase maps to an existing precise OpenStreetMap competition tag.
+yes,cocktail lounge,add,overpass-osm-tag,bars/pubs,curated OSM phrase promotion,Phrase maps to an existing precise OpenStreetMap competition tag.
+yes,beer bar,add,overpass-osm-tag,bars/pubs,curated OSM phrase promotion,Phrase maps to an existing precise OpenStreetMap competition tag.
+yes,wine lounge,add,overpass-osm-tag,bars/pubs,curated OSM phrase promotion,Phrase maps to an existing precise OpenStreetMap competition tag.
+yes,brew pub,add,overpass-osm-tag,bars/pubs,curated OSM phrase promotion,Phrase maps to an existing precise OpenStreetMap competition tag.
+yes,mechanic shop,add,overpass-osm-tag,auto repair shops,curated OSM phrase promotion,Phrase maps to an existing precise OpenStreetMap competition tag.
+yes,repair garage,add,overpass-osm-tag,auto repair shops,curated OSM phrase promotion,Phrase maps to an existing precise OpenStreetMap competition tag.
+yes,brake repair,add,overpass-osm-tag,auto repair shops,curated OSM phrase promotion,Phrase maps to an existing precise OpenStreetMap competition tag.
+yes,oil change shop,add,overpass-osm-tag,auto repair shops,curated OSM phrase promotion,Phrase maps to an existing precise OpenStreetMap competition tag.
+yes,beauty shop,add,overpass-osm-tag,hair salons/barbershops,curated OSM phrase promotion,Phrase maps to an existing precise OpenStreetMap competition tag.
+yes,barber shop,add,overpass-osm-tag,hair salons/barbershops,curated OSM phrase promotion,Phrase maps to an existing precise OpenStreetMap competition tag.
+yes,grooming studio,add,overpass-osm-tag,hair salons/barbershops,curated OSM phrase promotion,Phrase maps to an existing precise OpenStreetMap competition tag.
+yes,day spa,add,overpass-osm-tag,spas/beauty salons,curated OSM phrase promotion,Phrase maps to an existing precise OpenStreetMap competition tag.
+yes,massage spa,add,overpass-osm-tag,spas/beauty salons,curated OSM phrase promotion,Phrase maps to an existing precise OpenStreetMap competition tag.
+yes,food store,add,overpass-osm-tag,grocery stores/supermarkets,curated OSM phrase promotion,Phrase maps to an existing precise OpenStreetMap competition tag.
+yes,grocery market,add,overpass-osm-tag,grocery stores/supermarkets,curated OSM phrase promotion,Phrase maps to an existing precise OpenStreetMap competition tag.
+yes,fresh market,add,overpass-osm-tag,grocery stores/supermarkets,curated OSM phrase promotion,Phrase maps to an existing precise OpenStreetMap competition tag.
+yes,corner market,add,overpass-osm-tag,convenience stores,curated OSM phrase promotion,Phrase maps to an existing precise OpenStreetMap competition tag.
+yes,quick stop,add,overpass-osm-tag,convenience stores,curated OSM phrase promotion,Phrase maps to an existing precise OpenStreetMap competition tag.
+yes,bed breakfast,add,overpass-osm-tag,hotels/lodging,curated OSM phrase promotion,Phrase maps to an existing precise OpenStreetMap competition tag.
+yes,attorney office,add,overpass-osm-tag,law offices,curated OSM phrase promotion,Phrase maps to an existing precise OpenStreetMap competition tag.
+yes,lawyer office,add,overpass-osm-tag,law offices,curated OSM phrase promotion,Phrase maps to an existing precise OpenStreetMap competition tag.
+yes,legal practice,add,overpass-osm-tag,law offices,curated OSM phrase promotion,Phrase maps to an existing precise OpenStreetMap competition tag.
+yes,accounting office,add,overpass-osm-tag,accounting firms,curated OSM phrase promotion,Phrase maps to an existing precise OpenStreetMap competition tag.
+yes,accounting firm,add,overpass-osm-tag,accounting firms,curated OSM phrase promotion,Phrase maps to an existing precise OpenStreetMap competition tag.
+yes,tax preparer,add,overpass-osm-tag,accounting firms,curated OSM phrase promotion,Phrase maps to an existing precise OpenStreetMap competition tag.
+yes,estate agent,add,overpass-osm-tag,real estate agencies,curated OSM phrase promotion,Phrase maps to an existing precise OpenStreetMap competition tag.
+yes,realtor office,add,overpass-osm-tag,real estate agencies,curated OSM phrase promotion,Phrase maps to an existing precise OpenStreetMap competition tag.
+yes,real estate office,add,overpass-osm-tag,real estate agencies,curated OSM phrase promotion,Phrase maps to an existing precise OpenStreetMap competition tag.
+yes,insurance broker,add,overpass-osm-tag,insurance agencies,curated OSM phrase promotion,Phrase maps to an existing precise OpenStreetMap competition tag.
+yes,insurance office,add,overpass-osm-tag,insurance agencies,curated OSM phrase promotion,Phrase maps to an existing precise OpenStreetMap competition tag.
+yes,doctor office,add,overpass-osm-tag,doctors'/medical offices,curated OSM phrase promotion,Phrase maps to an existing precise OpenStreetMap competition tag.
+yes,physician office,add,overpass-osm-tag,doctors'/medical offices,curated OSM phrase promotion,Phrase maps to an existing precise OpenStreetMap competition tag.
+yes,primary care clinic,add,overpass-osm-tag,doctors'/medical offices,curated OSM phrase promotion,Phrase maps to an existing precise OpenStreetMap competition tag.
+yes,medical clinic,add,overpass-osm-tag,doctors'/medical offices,curated OSM phrase promotion,Phrase maps to an existing precise OpenStreetMap competition tag.
+yes,veterinary clinic,add,overpass-osm-tag,veterinary clinics,curated OSM phrase promotion,Phrase maps to an existing precise OpenStreetMap competition tag.
+yes,pet clinic,add,overpass-osm-tag,veterinary clinics,curated OSM phrase promotion,Phrase maps to an existing precise OpenStreetMap competition tag.
+yes,day nursery,add,overpass-osm-tag,childcare centers,curated OSM phrase promotion,Phrase maps to an existing precise OpenStreetMap competition tag.
+yes,child care center,add,overpass-osm-tag,childcare centers,curated OSM phrase promotion,Phrase maps to an existing precise OpenStreetMap competition tag.
+yes,nursery school,add,overpass-osm-tag,childcare centers,curated OSM phrase promotion,Phrase maps to an existing precise OpenStreetMap competition tag.
+yes,coin laundry,add,overpass-osm-tag,laundry/dry-cleaning shops,curated OSM phrase promotion,Phrase maps to an existing precise OpenStreetMap competition tag.
+yes,dry cleaner,add,overpass-osm-tag,laundry/dry-cleaning shops,curated OSM phrase promotion,Phrase maps to an existing precise OpenStreetMap competition tag.
+yes,laundry service,add,overpass-osm-tag,laundry/dry-cleaning shops,curated OSM phrase promotion,Phrase maps to an existing precise OpenStreetMap competition tag.
+yes,smoke shop,add,overpass-osm-tag,tobacco/vape shops,curated OSM phrase promotion,Phrase maps to an existing precise OpenStreetMap competition tag.
+yes,cigar shop,add,overpass-osm-tag,tobacco/vape shops,curated OSM phrase promotion,Phrase maps to an existing precise OpenStreetMap competition tag.
+yes,hardware shop,add,overpass-osm-tag,hardware stores,curated OSM phrase promotion,Phrase maps to an existing precise OpenStreetMap competition tag.
+yes,furniture shop,add,overpass-osm-tag,furniture stores,curated OSM phrase promotion,Phrase maps to an existing precise OpenStreetMap competition tag.
+yes,pet shop,add,overpass-osm-tag,pet stores,curated OSM phrase promotion,Phrase maps to an existing precise OpenStreetMap competition tag.
+yes,pet supply store,add,overpass-osm-tag,pet stores,curated OSM phrase promotion,Phrase maps to an existing precise OpenStreetMap competition tag.
+yes,book shop,add,overpass-osm-tag,bookstores,curated OSM phrase promotion,Phrase maps to an existing precise OpenStreetMap competition tag.
+yes,gift store,add,overpass-osm-tag,gift shops,curated OSM phrase promotion,Phrase maps to an existing precise OpenStreetMap competition tag.
+yes,apparel store,add,overpass-osm-tag,clothing/apparel stores,curated OSM phrase promotion,Phrase maps to an existing precise OpenStreetMap competition tag.
+yes,clothing store,add,overpass-osm-tag,clothing/apparel stores,curated OSM phrase promotion,Phrase maps to an existing precise OpenStreetMap competition tag.
+yes,tax preparer,add,compliance-business-type-synonym,accounting,curated Compliance-OS phrase promotion,Phrase helps match natural business descriptions to Compliance-OS taxonomy terms.
+yes,bookkeeping service,add,compliance-business-type-synonym,accounting,curated Compliance-OS phrase promotion,Phrase helps match natural business descriptions to Compliance-OS taxonomy terms.
+yes,legal counsel,add,compliance-business-type-synonym,law,curated Compliance-OS phrase promotion,Phrase helps match natural business descriptions to Compliance-OS taxonomy terms.
+yes,lawyer office,add,compliance-business-type-synonym,law,curated Compliance-OS phrase promotion,Phrase helps match natural business descriptions to Compliance-OS taxonomy terms.
+yes,attorney office,add,compliance-business-type-synonym,law,curated Compliance-OS phrase promotion,Phrase helps match natural business descriptions to Compliance-OS taxonomy terms.
+yes,estate agent,add,compliance-business-type-synonym,real estate,curated Compliance-OS phrase promotion,Phrase helps match natural business descriptions to Compliance-OS taxonomy terms.
+yes,insurance broker,add,compliance-business-type-synonym,insurance,curated Compliance-OS phrase promotion,Phrase helps match natural business descriptions to Compliance-OS taxonomy terms.
+yes,guard service,add,compliance-business-type-synonym,security,curated Compliance-OS phrase promotion,Phrase helps match natural business descriptions to Compliance-OS taxonomy terms.
+yes,private security company,add,compliance-business-type-synonym,security,curated Compliance-OS phrase promotion,Phrase helps match natural business descriptions to Compliance-OS taxonomy terms.
+yes,barber shop,add,compliance-business-type-synonym,barber,curated Compliance-OS phrase promotion,Phrase helps match natural business descriptions to Compliance-OS taxonomy terms.
+yes,beauty shop,add,compliance-business-type-synonym,salon,curated Compliance-OS phrase promotion,Phrase helps match natural business descriptions to Compliance-OS taxonomy terms.
+yes,day spa,add,compliance-business-type-synonym,spa,curated Compliance-OS phrase promotion,Phrase helps match natural business descriptions to Compliance-OS taxonomy terms.
+yes,mechanic shop,add,compliance-business-type-synonym,auto,curated Compliance-OS phrase promotion,Phrase helps match natural business descriptions to Compliance-OS taxonomy terms.
+yes,repair garage,add,compliance-business-type-synonym,auto,curated Compliance-OS phrase promotion,Phrase helps match natural business descriptions to Compliance-OS taxonomy terms.
+yes,lawn service,add,compliance-business-type-synonym,landscaping,curated Compliance-OS phrase promotion,Phrase helps match natural business descriptions to Compliance-OS taxonomy terms.
+yes,roof repair,add,compliance-business-type-synonym,roofing,curated Compliance-OS phrase promotion,Phrase helps match natural business descriptions to Compliance-OS taxonomy terms.
+yes,drain cleaning service,add,compliance-business-type-synonym,plumbing,curated Compliance-OS phrase promotion,Phrase helps match natural business descriptions to Compliance-OS taxonomy terms.
+yes,app development company,add,compliance-business-type-synonym,software,curated Compliance-OS phrase promotion,Phrase helps match natural business descriptions to Compliance-OS taxonomy terms.
+yes,web development company,add,compliance-business-type-synonym,software,curated Compliance-OS phrase promotion,Phrase helps match natural business descriptions to Compliance-OS taxonomy terms.
+yes,managed it services,add,compliance-business-type-synonym,it,curated Compliance-OS phrase promotion,Phrase helps match natural business descriptions to Compliance-OS taxonomy terms.
+yes,investment advisor,add,regulatory-status,Registered Investment Adviser,curated regulatory phrase promotion,"Phrase is a specific regulatory status trigger, not a broad general term."
+yes,investment adviser,add,regulatory-status,Registered Investment Adviser,curated regulatory phrase promotion,"Phrase is a specific regulatory status trigger, not a broad general term."
+yes,financial advisor,add,regulatory-status,Registered Investment Adviser,curated regulatory phrase promotion,"Phrase is a specific regulatory status trigger, not a broad general term."
+yes,guard service,add,regulatory-status,Private Security/Guard License,curated regulatory phrase promotion,"Phrase is a specific regulatory status trigger, not a broad general term."
+yes,private security company,add,regulatory-status,Private Security/Guard License,curated regulatory phrase promotion,"Phrase is a specific regulatory status trigger, not a broad general term."
+yes,security patrol,add,regulatory-status,Private Security/Guard License,curated regulatory phrase promotion,"Phrase is a specific regulatory status trigger, not a broad general term."
+yes,food processing plant,add,regulatory-status,Food Manufacturer,curated regulatory phrase promotion,"Phrase is a specific regulatory status trigger, not a broad general term."
+yes,food factory,add,regulatory-status,Food Manufacturer,curated regulatory phrase promotion,"Phrase is a specific regulatory status trigger, not a broad general term."
+yes,beverage manufacturer,add,regulatory-status,Food Manufacturer,curated regulatory phrase promotion,"Phrase is a specific regulatory status trigger, not a broad general term."
+yes,brew pub,add,regulatory-status,Alcohol Manufacturer,curated regulatory phrase promotion,"Phrase is a specific regulatory status trigger, not a broad general term."
+yes,craft brewery,add,regulatory-status,Alcohol Manufacturer,curated regulatory phrase promotion,"Phrase is a specific regulatory status trigger, not a broad general term."
+yes,beer garden,add,regulatory-status,Alcohol Manufacturer,curated regulatory phrase promotion,"Phrase is a specific regulatory status trigger, not a broad general term."
+yes,cannabis shop,add,regulatory-status,Licensed Cannabis Business,curated regulatory phrase promotion,"Phrase is a specific regulatory status trigger, not a broad general term."
+yes,marijuana dispensary,add,regulatory-status,Licensed Cannabis Business,curated regulatory phrase promotion,"Phrase is a specific regulatory status trigger, not a broad general term."
+yes,weed dispensary,add,regulatory-status,Licensed Cannabis Business,curated regulatory phrase promotion,"Phrase is a specific regulatory status trigger, not a broad general term."
+yes,gun dealer,add,regulatory-status,Federal Firearms Licensee,curated regulatory phrase promotion,"Phrase is a specific regulatory status trigger, not a broad general term."
+yes,firearm shop,add,regulatory-status,Federal Firearms Licensee,curated regulatory phrase promotion,"Phrase is a specific regulatory status trigger, not a broad general term."
+yes,ammo shop,add,regulatory-status,Federal Firearms Licensee,curated regulatory phrase promotion,"Phrase is a specific regulatory status trigger, not a broad general term."
+yes,federal contractor,add,regulatory-status,Government Contractor,curated regulatory phrase promotion,"Phrase is a specific regulatory status trigger, not a broad general term."
+yes,government vendor,add,regulatory-status,Government Contractor,curated regulatory phrase promotion,"Phrase is a specific regulatory status trigger, not a broad general term."
