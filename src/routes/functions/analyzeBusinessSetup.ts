@@ -13,6 +13,12 @@ interface Classification {
   additionalIndustries: string[];
   geographicScope: 'Local' | 'National';
   customerType: 'B2B' | 'B2C' | 'Both';
+  // Set only by the heuristic fallback() path, when nearestAllowedIndustry()
+  // had zero keyword signal to go on for the primary `industry` value above
+  // and picked the hardcoded generic default (or, failing that,
+  // industries[0]) instead of a real match against the idea text. Absent
+  // (not false) on the OpenAI-classification path, where it doesn't apply.
+  isGuess?: boolean;
 }
 
 interface MarketValidation {
@@ -96,14 +102,15 @@ export async function analyzeBusinessSetupHandler(request: FastifyRequest, reply
     const parsed =
       typeof content === 'string' ? (JSON.parse(content) as Record<string, unknown>) : {};
     const plausibility = normalizeIdeaPlausibility(parsed, businessIdea);
+    const { classification, substitutedFields } = normalizeClassification(
+      parsed.classification && typeof parsed.classification === 'object'
+        ? (parsed.classification as Record<string, unknown>)
+        : parsed,
+      businessIdea,
+      industries,
+    );
     return reply.send({
-      classification: normalizeClassification(
-        parsed.classification && typeof parsed.classification === 'object'
-          ? (parsed.classification as Record<string, unknown>)
-          : parsed,
-        businessIdea,
-        industries,
-      ),
+      classification,
       marketValidation: normalizeMarketValidation(
         parsed.marketValidation,
         businessIdea,
@@ -117,7 +124,16 @@ export async function analyzeBusinessSetupHandler(request: FastifyRequest, reply
       ),
       ideaIsPlausible: plausibility.isPlausible,
       ideaFeedback: plausibility.feedback,
+      // `source` deliberately stays 'openai' even on a partial substitution
+      // below — existing consumers checking `source === 'openai'` keep
+      // working unchanged. When OpenAI returned an invalid/empty value for
+      // one or more classification fields and this endpoint silently
+      // substituted the heuristic fallback()'s guess instead,
+      // classificationFieldsSubstituted lists exactly which ones, so a
+      // caller that cares can tell "fully OpenAI" apart from "OpenAI plus
+      // guessed field(s)" without us breaking the existing source contract.
       source: 'openai',
+      ...(substitutedFields.length > 0 ? { classificationFieldsSubstituted: substitutedFields } : {}),
     });
   } catch {
     return reply.send(fallbackEnrichment(businessIdea, industries, body));
@@ -131,28 +147,55 @@ function cleanList(value: unknown): string[] {
   return [...new Set(value.map((item) => String(item).trim()).filter(Boolean))];
 }
 
+interface NormalizedClassification {
+  classification: Classification;
+  // Which of industry/geographicScope/customerType/targetMarket OpenAI
+  // returned an invalid (or, for targetMarket, empty) value for, so this
+  // function silently substituted the heuristic fallback()'s guess instead.
+  // Empty when every field came from OpenAI's response as-is.
+  substitutedFields: Array<'industry' | 'geographicScope' | 'customerType' | 'targetMarket'>;
+}
+
 function normalizeClassification(
   input: Record<string, unknown>,
   idea: string,
   industries: string[],
-): Classification {
+): NormalizedClassification {
   const fb = fallback(idea, industries);
-  const industry = industries.includes(String(input.industry ?? ''))
-    ? String(input.industry)
-    : fb.industry;
+  const substitutedFields: NormalizedClassification['substitutedFields'] = [];
+
+  const industryValid = industries.includes(String(input.industry ?? ''));
+  const industry = industryValid ? String(input.industry) : fb.industry;
+  if (!industryValid) substitutedFields.push('industry');
+
   const additionalIndustries = normalizeAdditionalIndustries(
     input.additionalIndustries,
     industries,
     industry,
   );
+
   const gs = input.geographicScope;
-  const geographicScope: 'Local' | 'National' =
-    gs === 'National' ? 'National' : gs === 'Local' ? 'Local' : fb.geographicScope;
+  const geographicScopeValid = gs === 'National' || gs === 'Local';
+  const geographicScope: 'Local' | 'National' = geographicScopeValid
+    ? (gs as 'Local' | 'National')
+    : fb.geographicScope;
+  if (!geographicScopeValid) substitutedFields.push('geographicScope');
+
   const ct = input.customerType;
-  const customerType: 'B2B' | 'B2C' | 'Both' =
-    ct === 'B2B' || ct === 'B2C' || ct === 'Both' ? ct : fb.customerType;
-  const targetMarket = String(input.targetMarket ?? '').trim() || fb.targetMarket;
-  return { targetMarket, industry, additionalIndustries, geographicScope, customerType };
+  const customerTypeValid = ct === 'B2B' || ct === 'B2C' || ct === 'Both';
+  const customerType: 'B2B' | 'B2C' | 'Both' = customerTypeValid
+    ? (ct as 'B2B' | 'B2C' | 'Both')
+    : fb.customerType;
+  if (!customerTypeValid) substitutedFields.push('customerType');
+
+  const targetMarketRaw = String(input.targetMarket ?? '').trim();
+  const targetMarket = targetMarketRaw || fb.targetMarket;
+  if (!targetMarketRaw) substitutedFields.push('targetMarket');
+
+  return {
+    classification: { targetMarket, industry, additionalIndustries, geographicScope, customerType },
+    substitutedFields,
+  };
 }
 
 function normalizeAdditionalIndustries(
@@ -190,10 +233,11 @@ function fallback(idea: string, industries: string[]): Classification {
     .filter((match) => match.score > 0)
     .sort((a, b) => b.score - a.score);
   const rule = matches[0]?.rule;
-  const industry = nearestAllowedIndustry(rule?.industry, lower, industries);
+  const primaryMatch = nearestAllowedIndustry(rule?.industry, lower, industries);
+  const industry = primaryMatch.industry;
   const additionalIndustries = matches
     .slice(1)
-    .map((match) => nearestAllowedIndustry(match.rule.industry, lower, industries))
+    .map((match) => nearestAllowedIndustry(match.rule.industry, lower, industries).industry)
     .filter(
       (candidate, index, list) =>
         candidate.toLowerCase() !== industry.toLowerCase() &&
@@ -229,6 +273,7 @@ function fallback(idea: string, industries: string[]): Classification {
     additionalIndustries,
     geographicScope,
     customerType,
+    isGuess: primaryMatch.isGuess,
   };
 }
 
@@ -2913,23 +2958,35 @@ const classificationRules: FallbackClassificationRule[] = [
   },
 ];
 
+interface IndustryMatch {
+  industry: string;
+  // True when none of the keyword signals (the caller-supplied `preferred`
+  // rule match, or this function's own food/software/consult/shop/home
+  // substring checks against the idea text) matched anything — the
+  // returned industry came only from the hardcoded
+  // 'Consulting / Professional Services' default (or, failing even that,
+  // industries[0]), not from any evidence in the business idea text.
+  isGuess: boolean;
+}
+
 function nearestAllowedIndustry(
   preferred: string | undefined,
   lower: string,
   industries: string[],
-): string {
-  const candidates = [
+): IndustryMatch {
+  const signalCandidates = [
     preferred,
     lower.includes('food') ? 'Restaurant' : undefined,
     lower.includes('software') || lower.includes('app') ? 'Software Development' : undefined,
     lower.includes('consult') ? 'Consulting / Professional Services' : undefined,
     lower.includes('shop') || lower.includes('retail') ? 'Retail Store' : undefined,
     lower.includes('home') || lower.includes('clean') ? 'Cleaning / Janitorial Service' : undefined,
-    'Consulting / Professional Services',
   ].filter((value): value is string => Boolean(value));
+  const isGuess = signalCandidates.length === 0;
+  const candidates = [...signalCandidates, 'Consulting / Professional Services'];
   for (const candidate of candidates) {
     const exact = industries.find((industry) => industry.toLowerCase() === candidate.toLowerCase());
-    if (exact) return exact;
+    if (exact) return { industry: exact, isGuess };
     const candidateTokens = candidate
       .toLowerCase()
       .split(/[^a-z0-9]+/)
@@ -2938,9 +2995,9 @@ function nearestAllowedIndustry(
       const lowerIndustry = industry.toLowerCase();
       return candidateTokens.some((token) => lowerIndustry.includes(token));
     });
-    if (fuzzy) return fuzzy;
+    if (fuzzy) return { industry: fuzzy, isGuess };
   }
-  return industries[0] ?? 'Consulting / Professional Services';
+  return { industry: industries[0] ?? 'Consulting / Professional Services', isGuess: true };
 }
 
 function targetMarketForIndustry(industry: string): string {
