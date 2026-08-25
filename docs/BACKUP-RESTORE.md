@@ -1,175 +1,123 @@
 # Backup and Restore
 
----
+This describes the **current** Fastify/TypeScript/PostgreSQL architecture
+(see git history around commit `aceb5e8` for the earlier Cloudflare
+Workers/D1/R2 build this replaced — that backup story no longer applies).
 
-## Cloudflare D1 (current deployment)
+PostgreSQL (accessed via the `pg` package, `src/db.ts`; schema tracked in
+`schema_migrations` via `migrations/*.sql`) is the only stateful datastore
+this service owns. Redis (`REDIS_URL`) holds only rate-limit counters —
+disposable, not something that needs backing up (see the table at the
+bottom of this doc).
 
-### Automatic backups
+This service is **not currently deployed** anywhere (see `README.md`) —
+`docker-compose.yml` starts Postgres + Redis for local development only.
 
-Cloudflare D1 takes automatic daily snapshots. These are accessible in the
-Cloudflare Dashboard under **D1 → desk-api-db → Backups**.
-
-Retention and recovery options are managed by Cloudflare; there is no manual
-action required to enable them.
-
-### Manual export
-
-For an on-demand export of the full database:
-
-```bash
-# Export to a local SQL dump
-npx wrangler d1 export desk-api-db --output backup-$(date +%Y%m%d).sql
-
-# Export specific table
-npx wrangler d1 export desk-api-db --table users --output users-$(date +%Y%m%d).sql
-```
-
-Schedule a weekly manual export and store the dump file in a safe location
-(e.g., a separate R2 bucket or encrypted cloud storage).
-
-### Restore from SQL dump
-
-```bash
-# WARNING: This overwrites existing data in the target database.
-# Verify the dump contents first.
-npx wrangler d1 execute desk-api-db --remote --file backup-20260101.sql
-```
-
-For a full restore, apply in this order:
-1. `migrations/001_initial_schema.sql` (recreate schema)
-2. The data dump (restore rows)
-
-### Local D1 (development)
-
-Local D1 state is stored in `.wrangler/state/`. To reset:
-```bash
-rm -rf .wrangler/state
-npm run migrate:local
-```
+**Current gap:** no automated backup — scheduled `pg_dump` or WAL-based
+continuous backup — is wired up anywhere in this repo yet. There is no such
+script in `scripts/` (only `apply-migrations.ts` and `export-openapi.ts`
+exist there) and no backup service defined in `docker-compose.yml`. This is
+tracked in `docs/KNOWN-LIMITATIONS.md`. The manual procedure below is what
+to use in the meantime, and an automated version of it (cron + off-host
+storage, or a managed Postgres provider's built-in backups) should be set
+up before this service holds any real user data.
 
 ---
 
-## Cloudflare R2 (current deployment)
+## Local development (`docker-compose.yml`)
 
-R2 does not have automatic versioning by default. To protect against accidental
-deletion, enable object versioning on the bucket:
-
-```bash
-npx wrangler r2 bucket object-versioning enable desk-api-storage
-```
-
-### Manual R2 backup
-
-Use `rclone` to sync the bucket to a secondary location:
+### Manual backup
 
 ```bash
-# Configure rclone with your Cloudflare R2 credentials (use API token, not account key)
-rclone sync r2:desk-api-storage backup-location:desk-api-storage-backup
-```
+# From the repo root, with the local stack running (docker compose up -d)
+docker compose exec -T postgres pg_dump -U postgres desk_api > backup-$(date +%Y%m%d-%H%M).sql
 
-Run this on a schedule (weekly or daily depending on upload volume).
-
-### R2 restore
-
-```bash
-rclone sync backup-location:desk-api-storage-backup r2:desk-api-storage
-```
-
----
-
-## Self-hosted — PostgreSQL (future deployment)
-
-When running the self-hosted stack from `compose.yaml`:
-
-### Continuous backup with pg_dump
-
-```bash
-# Dump all data (run from the Docker host)
-docker exec desk-api-postgres pg_dump -U deskapi deskapi > backup-$(date +%Y%m%d-%H%M).sql
-
-# Compress and store off-host
+# Compress for storage
 gzip backup-$(date +%Y%m%d-%H%M).sql
-rclone copy backup-*.sql.gz remote:desk-api-backups/
 ```
 
-Add this to a cron job:
-```
-0 3 * * * /opt/desk-api/scripts/backup-postgres.sh
-```
-
-### WAL-based continuous backup (recommended for production)
-
-For point-in-time recovery, configure one of:
-- **pgBackRest** — preferred for production, supports WAL archiving and full+incremental backups
-- **Barman** — Postgres-native backup server
-
-Both integrate with the `postgres:16-alpine` image used in `compose.yaml`.
-
-### Restore from pg_dump
+### Restore
 
 ```bash
-# Stop desk-api to prevent writes during restore
-docker compose stop desk-api
+# WARNING: this overwrites existing data in the target database.
+# Stop the app first so nothing writes during the restore.
 
-# Drop and recreate the database
-docker exec desk-api-postgres psql -U deskapi -c "DROP DATABASE deskapi;"
-docker exec desk-api-postgres psql -U deskapi -c "CREATE DATABASE deskapi;"
+# Drop and recreate
+docker compose exec -T postgres psql -U postgres -c "DROP DATABASE desk_api;"
+docker compose exec -T postgres psql -U postgres -c "CREATE DATABASE desk_api;"
 
-# Restore
-gunzip < backup-20260101.sql.gz | docker exec -i desk-api-postgres psql -U deskapi deskapi
+# Restore schema + data
+gunzip -c backup-20260101-0000.sql.gz | docker compose exec -T postgres psql -U postgres desk_api
 
-# Restart
-docker compose start desk-api
+# Re-apply any migrations newer than the dump (a no-op if the dump already
+# includes every row of schema_migrations up to the current HEAD)
+npm run migrate
+```
+
+### Reset local state entirely (throwaway dev data, no backup needed)
+
+```bash
+docker compose down -v   # -v also drops the postgres_data named volume
+docker compose up -d
+npm run migrate
 ```
 
 ---
 
-## Self-hosted — MinIO (future deployment)
+## Production (once this service is actually deployed)
 
-### Backup with rclone
+No production backup process exists yet, because there is no production
+database yet — this build has not been cut over from the live Cloudflare
+Worker (see `README.md`, `docs/KNOWN-LIMITATIONS.md`). Before cutover, set
+up one of:
+
+- **Scheduled `pg_dump`** — simplest. Run on a cron against `DATABASE_URL`,
+  compress, and ship the file off-host (e.g. `rclone`, an S3-compatible
+  bucket, or whatever the eventual hosting provider offers). Acceptable
+  data-loss window with this approach = time since the last dump.
+- **WAL-based continuous backup** (pgBackRest, Barman, or a managed
+  Postgres provider's built-in point-in-time recovery) — needed if the
+  acceptable data-loss window is smaller than "since last daily dump."
+  Recommended once this service holds real user data (accounts,
+  business-setup drafts, businesses, memberships) rather than only local
+  test data.
+
+Whichever is chosen, verify it with an actual restore rehearsal — not just
+confirming the dump file exists — before relying on it in an incident.
+
+### Example: scheduled `pg_dump` against a running instance
 
 ```bash
-rclone sync minio:desk-api-storage backup-location:desk-api-storage
+pg_dump "$DATABASE_URL" | gzip > backup-$(date +%Y%m%d-%H%M).sql.gz
+# ship backup-*.sql.gz off-host on the same schedule
 ```
 
-### MinIO native backup
+### Example: restore from a `pg_dump`
 
-MinIO supports bucket replication. Configure a replication target in the MinIO
-Console (`http://localhost:9001`) under **Buckets → desk-api-storage → Replication**.
+```bash
+# Stop the app first — no writes during restore
+gunzip -c backup-20260101-0000.sql.gz | psql "$DATABASE_URL"
+```
 
 ---
 
-## Pre-migration export (D1 → PostgreSQL)
+## What's covered / not covered
 
-Before migrating to self-hosted PostgreSQL:
-
-```bash
-# 1. Export D1 to SQL
-npx wrangler d1 export desk-api-db --output d1-full-export.sql
-
-# 2. Convert SQLite timestamps and types to PostgreSQL
-# The D1 schema uses ISO-8601 strings and INTEGER booleans —
-# see docs/POSTGRES-ADAPTER-PLAN.md for the full mapping.
-
-# 3. Apply PostgreSQL schema
-psql $DATABASE_URL -f migrations/001_postgres.sql
-
-# 4. Import converted data
-psql $DATABASE_URL -f d1-full-export-converted.sql
-
-# 5. Verify row counts
-psql $DATABASE_URL -c "SELECT 'users', COUNT(*) FROM users UNION ALL SELECT 'sessions', COUNT(*) FROM sessions;"
-```
+| Data | Backed up by the above? |
+|---|---|
+| `users`, `sessions`, `password_reset_tokens`, `email_confirmation_tokens` | Yes — in Postgres |
+| `business_setup_drafts`, `businesses`, `business_memberships` | Yes — in Postgres |
+| `mutation_audit_log`, `idempotency_keys` | Yes — in Postgres |
+| `schema_migrations` | Yes — in Postgres (a dump/restore preserves migration history) |
+| Redis rate-limit counters | No — and shouldn't need to be. These are disposable, short-TTL sliding-window counters (`src/middleware/api-protection.ts`), not a source of truth for anything; losing them just means rate-limit windows reset. |
+| registry-api / compliance-os / market-validation-api data | No — each sibling service owns and is responsible for backing up its own database independently. |
 
 ---
 
-## Retention policy (recommended)
+## Related
 
-| Backup type | Frequency | Retention |
-|---|---|---|
-| D1 export (Cloudflare) | Daily (automatic) | 30 days (Cloudflare managed) |
-| D1 manual export | Weekly | 12 weeks |
-| R2 sync | Weekly | 12 weeks |
-| PostgreSQL pg_dump | Daily | 30 days |
-| PostgreSQL WAL | Continuous | 7 days |
-| MinIO replication | Continuous | — |
+- `docs/KNOWN-LIMITATIONS.md` — tracks the "no automated backup configured
+  yet" gap, and the pending D1 → Postgres data migration needed before
+  cutover.
+- `migrations/*.sql` — schema, applied via `npm run migrate`
+  (`scripts/apply-migrations.ts`), tracked in `schema_migrations`.
