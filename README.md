@@ -61,8 +61,8 @@ client, `desk_business/lib/core/api_client.dart`) and under `/v1` — see
 | Method | Path | Auth | Description |
 |---|---|---|---|
 | `GET` | `/health`, `/health/live`, `/health/ready` | — | Health checks |
-| `GET` | `/metrics` | — | Prometheus metrics |
-| `GET` | `/docs`, `/docs/openapi.json` | — | Swagger UI / OpenAPI spec |
+| `GET` | `/metrics` | Optional `x-api-key`* | Prometheus metrics |
+| `GET` | `/docs`, `/docs/openapi.json` | Optional `x-api-key`* | Swagger UI / OpenAPI spec |
 | `POST` | `/auth/signup` | — | Create account (email confirmation required) |
 | `POST` | `/auth/signin` | — | Sign in |
 | `POST` | `/auth/signout` | Bearer | Sign out |
@@ -80,6 +80,13 @@ client, `desk_business/lib/core/api_client.dart`) and under `/v1` — see
 | `GET` | `/integrations/compliance/business-types` \| `/requirements/search` \| `/jurisdictions` | — | → compliance-os (fallback catalog when unconfigured) |
 | `POST` | `/integrations/market-research/analyze` | — | → market-validation-api (503 on failure, see above) |
 | `ANY` | `/compliance/*`, `/registry/*` | — | Transparent proxy gateway |
+
+\* `/metrics` and `/docs` (+ `/docs/openapi.json`) are fully public by
+default, matching common practice for diagnostic/docs endpoints. Setting
+`METRICS_DOCS_API_KEY` requires a matching `x-api-key` header on all three;
+leaving it unset keeps today's behavior unchanged. Recommended for
+production — set this, or restrict network access to these paths at the
+firewall/reverse-proxy level, since neither is needed by the Flutter client.
 
 ---
 

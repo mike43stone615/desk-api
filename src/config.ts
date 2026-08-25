@@ -63,6 +63,12 @@ const schema = z.object({
   RESEND_API_KEY: z.string().optional(),
   EMAIL_FROM: z.string().default('noreply@deskbusiness.co'),
   APP_BASE_URL: z.string().default('https://deskbusiness.co'),
+
+  // Optional — when set, requires a matching `x-api-key` header to reach
+  // GET /metrics and GET /docs (+ /docs/openapi.json). Both stay exactly as
+  // public as they are today when this is left unset — see
+  // middleware/auth.ts's requireMetricsDocsKey() and .env.example.
+  METRICS_DOCS_API_KEY: z.string().optional(),
 });
 
 const parsed = schema.safeParse(process.env);
@@ -117,6 +123,7 @@ export interface AppConfig {
   resendApiKey: string | undefined;
   emailFrom: string;
   appBaseUrl: string;
+  metricsDocsApiKey: string | undefined;
 }
 
 export const config: AppConfig = {
@@ -149,4 +156,5 @@ export const config: AppConfig = {
   resendApiKey: env.RESEND_API_KEY,
   emailFrom: env.EMAIL_FROM,
   appBaseUrl: env.APP_BASE_URL,
+  metricsDocsApiKey: env.METRICS_DOCS_API_KEY,
 };

@@ -2,6 +2,7 @@
 // requireAuth() (Hono MiddlewareHandler) to a Fastify preHandler, plus a new
 // requireAdmin() split out of what was previously inlined at the top of
 // api/routes/admin.ts (`router.use('*', requireAuth(), requireAdmin())`).
+import { timingSafeEqual } from 'crypto';
 import type { FastifyReply, FastifyRequest } from 'fastify';
 import { HttpError } from './http-error';
 import { authService } from '../infrastructure/auth';
@@ -40,4 +41,31 @@ export async function requireAdmin(request: FastifyRequest, _reply: FastifyReply
   if (!user) throw new HttpError(401, 'Authentication required.');
   const email = user.email.trim().toLowerCase();
   if (!config.adminEmails.includes(email)) throw new HttpError(403, 'Admin access required.');
+}
+
+/**
+ * Optional Fastify preHandler gating GET /metrics and GET /docs (+
+ * /docs/openapi.json) behind a shared secret sent as `x-api-key`. This is a
+ * deploy-time opt-in, not a default: when METRICS_DOCS_API_KEY is unset
+ * (the default), this is a no-op and both routes stay exactly as public as
+ * they always have been. Set METRICS_DOCS_API_KEY to require a matching
+ * header — recommended for production, alongside or instead of
+ * network-level firewalling (see README.md / .env.example).
+ */
+export async function requireMetricsDocsKey(
+  request: FastifyRequest,
+  _reply: FastifyReply,
+): Promise<void> {
+  const expected = config.metricsDocsApiKey;
+  if (!expected) return;
+
+  const provided = request.headers['x-api-key'];
+  const providedStr = typeof provided === 'string' ? provided : '';
+  const expectedBuf = Buffer.from(expected);
+  const providedBuf = Buffer.from(providedStr);
+  const matches =
+    expectedBuf.length === providedBuf.length && timingSafeEqual(expectedBuf, providedBuf);
+  if (!matches) {
+    throw new HttpError(401, 'A valid x-api-key header is required to access this endpoint.');
+  }
 }

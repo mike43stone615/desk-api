@@ -22,6 +22,7 @@ import { getRedis } from './middleware/redis-client';
 import { registerErrorHandler } from './middleware/http-error';
 import { registerApiProtection } from './middleware/api-protection';
 import { registerIdempotency } from './middleware/idempotency';
+import { requireMetricsDocsKey } from './middleware/auth';
 import { OPENAPI_SPEC } from './openapi';
 import { metricsRegistry, httpRequestsTotal, httpRequestDurationMs, normalizeRoute } from './modules/metrics';
 
@@ -93,9 +94,15 @@ export async function buildApp(): Promise<FastifyInstance> {
     credentials: true,
   });
 
-  // OpenAPI spec + Swagger UI
-  app.get('/docs/openapi.json', async (_req, reply) => reply.send(OPENAPI_SPEC));
-  app.get('/docs', async (_req, reply) => {
+  // OpenAPI spec + Swagger UI — publicly reachable by default, optionally
+  // gated behind METRICS_DOCS_API_KEY (see middleware/auth.ts's
+  // requireMetricsDocsKey, a no-op unless that env var is set).
+  app.get(
+    '/docs/openapi.json',
+    { preHandler: requireMetricsDocsKey },
+    async (_req, reply) => reply.send(OPENAPI_SPEC),
+  );
+  app.get('/docs', { preHandler: requireMetricsDocsKey }, async (_req, reply) => {
     reply.header('Content-Type', 'text/html; charset=utf-8');
     return reply.send(`<!DOCTYPE html>
 <html lang="en">
@@ -147,7 +154,7 @@ export async function buildApp(): Promise<FastifyInstance> {
   // client depends on it reflecting DB health specifically.
   app.get('/health', async (_req, reply) => reply.send({ ok: true, service: 'desk-api', ts: new Date().toISOString() }));
 
-  app.get('/metrics', async (_req, reply) => {
+  app.get('/metrics', { preHandler: requireMetricsDocsKey }, async (_req, reply) => {
     reply.header('Content-Type', metricsRegistry.contentType);
     return reply.send(await metricsRegistry.metrics());
   });
