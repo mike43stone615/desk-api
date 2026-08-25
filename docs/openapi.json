@@ -750,6 +750,291 @@
         }
       }
     },
+    "/functions/v1/check-business-name-availability": {
+      "post": {
+        "tags": [
+          "Integrations"
+        ],
+        "summary": "Proxies to registry-api's POST /functions/v1/check-business-name-availability",
+        "description": "Falls back to a local heuristic name check if REGISTRY_API_URL is not configured.",
+        "responses": {
+          "200": {
+            "description": "Availability result"
+          }
+        }
+      }
+    },
+    "/functions/v1/check-dba-name-availability": {
+      "post": {
+        "tags": [
+          "Integrations"
+        ],
+        "summary": "Proxies to registry-api's POST /functions/v1/check-dba-name-availability",
+        "description": "Falls back to a local heuristic name check if REGISTRY_API_URL is not configured.",
+        "responses": {
+          "200": {
+            "description": "Availability result"
+          }
+        }
+      }
+    },
+    "/functions/v1/check-trademark-availability": {
+      "post": {
+        "tags": [
+          "Integrations"
+        ],
+        "summary": "Proxies to registry-api's POST /functions/v1/check-trademark-availability",
+        "description": "Falls back to a local heuristic name check if REGISTRY_API_URL is not configured.",
+        "responses": {
+          "200": {
+            "description": "Availability result"
+          }
+        }
+      }
+    },
+    "/functions/v1/check-name-multi-state": {
+      "post": {
+        "tags": [
+          "Integrations"
+        ],
+        "summary": "Proxies to registry-api's POST /functions/v1/check-name-multi-state",
+        "description": "Checks the same business name across multiple states in one call. Falls back to a local heuristic name check per state if REGISTRY_API_URL is not configured.",
+        "responses": {
+          "200": {
+            "description": "Per-state availability results"
+          }
+        }
+      }
+    },
+    "/functions/v1/check-names-batch": {
+      "post": {
+        "tags": [
+          "Integrations"
+        ],
+        "summary": "Proxies to registry-api's POST /functions/v1/check-names-batch",
+        "description": "Checks up to 10 deduplicated names in one call. Falls back to a local heuristic name check per name if REGISTRY_API_URL is not configured.",
+        "responses": {
+          "200": {
+            "description": "Per-name availability results"
+          }
+        }
+      }
+    },
+    "/functions/v1/registry-sync-status": {
+      "get": {
+        "tags": [
+          "Integrations"
+        ],
+        "summary": "Proxies to registry-api's GET /functions/v1/registry-sync-status",
+        "description": "Falls back to a locally-derived sync-status summary if REGISTRY_API_URL is not configured.",
+        "responses": {
+          "200": {
+            "description": "Registry sync status"
+          }
+        }
+      }
+    },
+    "/functions/v1/business-structures": {
+      "get": {
+        "tags": [
+          "Integrations"
+        ],
+        "summary": "Proxies to registry-api's GET /business-structures",
+        "description": "Falls back to a local business-structures catalog if REGISTRY_API_URL is not configured.",
+        "parameters": [
+          {
+            "name": "category",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "family",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "country",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "q",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "List of business structures"
+          }
+        }
+      }
+    },
+    "/functions/v1/business-structures/{slug}": {
+      "get": {
+        "tags": [
+          "Integrations"
+        ],
+        "summary": "Proxies to registry-api's GET /business-structures/{slug}",
+        "description": "Falls back to a local business-structures catalog if REGISTRY_API_URL is not configured.",
+        "parameters": [
+          {
+            "name": "slug",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Business structure detail"
+          },
+          "404": {
+            "description": "Business structure not found"
+          }
+        }
+      }
+    },
+    "/functions/v1/business-structures/recommend": {
+      "post": {
+        "tags": [
+          "Integrations"
+        ],
+        "summary": "Proxies to registry-api's POST /business-structures/recommend",
+        "description": "Falls back to a local recommendation engine if REGISTRY_API_URL is not configured.",
+        "responses": {
+          "200": {
+            "description": "Recommended business structures"
+          }
+        }
+      }
+    },
+    "/integrations/compliance/business-types": {
+      "get": {
+        "tags": [
+          "Integrations"
+        ],
+        "summary": "Proxies to compliance-os's GET /business-types",
+        "description": "Falls back to a local business-types catalog if COMPLIANCE_OS_URL is not configured.",
+        "parameters": [
+          {
+            "name": "q",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "List of business types"
+          }
+        }
+      }
+    },
+    "/integrations/compliance/requirements/search": {
+      "get": {
+        "tags": [
+          "Integrations"
+        ],
+        "summary": "Proxies to compliance-os's POST /compliance/check",
+        "description": "Condition-aware requirements search — evaluates each requirement's conditions against the supplied facts (state, business type, entity/tax-election facts) rather than a plain filtered search. Falls back to a local fallback catalog if COMPLIANCE_OS_URL is not configured or the upstream call fails/errors.",
+        "parameters": [
+          {
+            "name": "stateCode",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "businessTypeSlug",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "legalEntity",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "taxElection",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "ownerCount",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "name": "operatesInterstate",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "default": 50,
+              "maximum": 100
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Matching compliance requirements"
+          }
+        }
+      }
+    },
+    "/integrations/compliance/jurisdictions": {
+      "get": {
+        "tags": [
+          "Integrations"
+        ],
+        "summary": "Proxies to compliance-os's GET /jurisdictions",
+        "description": "Falls back to a local jurisdictions catalog if COMPLIANCE_OS_URL is not configured.",
+        "responses": {
+          "200": {
+            "description": "List of jurisdictions"
+          }
+        }
+      }
+    },
     "/integrations/market-research/analyze": {
       "post": {
         "tags": [
@@ -763,6 +1048,270 @@
           },
           "503": {
             "description": "Market validation is temporarily unavailable."
+          }
+        }
+      }
+    },
+    "/compliance/{proxyPath}": {
+      "get": {
+        "tags": [
+          "Integrations"
+        ],
+        "summary": "Transparent proxy to compliance-os",
+        "description": "Forwards the request (any method) to COMPLIANCE_OS_URL with the /compliance prefix stripped. Returns 503 if COMPLIANCE_OS_URL is not configured.",
+        "parameters": [
+          {
+            "name": "proxyPath",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Full remaining path, forwarded as-is."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Upstream response, forwarded as-is"
+          },
+          "503": {
+            "description": "Compliance service is not configured."
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Integrations"
+        ],
+        "summary": "Transparent proxy to compliance-os",
+        "description": "Forwards the request (any method) to COMPLIANCE_OS_URL with the /compliance prefix stripped. Returns 503 if COMPLIANCE_OS_URL is not configured.",
+        "parameters": [
+          {
+            "name": "proxyPath",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Full remaining path, forwarded as-is."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Upstream response, forwarded as-is"
+          },
+          "503": {
+            "description": "Compliance service is not configured."
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "Integrations"
+        ],
+        "summary": "Transparent proxy to compliance-os",
+        "description": "Forwards the request (any method) to COMPLIANCE_OS_URL with the /compliance prefix stripped. Returns 503 if COMPLIANCE_OS_URL is not configured.",
+        "parameters": [
+          {
+            "name": "proxyPath",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Full remaining path, forwarded as-is."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Upstream response, forwarded as-is"
+          },
+          "503": {
+            "description": "Compliance service is not configured."
+          }
+        }
+      },
+      "patch": {
+        "tags": [
+          "Integrations"
+        ],
+        "summary": "Transparent proxy to compliance-os",
+        "description": "Forwards the request (any method) to COMPLIANCE_OS_URL with the /compliance prefix stripped. Returns 503 if COMPLIANCE_OS_URL is not configured.",
+        "parameters": [
+          {
+            "name": "proxyPath",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Full remaining path, forwarded as-is."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Upstream response, forwarded as-is"
+          },
+          "503": {
+            "description": "Compliance service is not configured."
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "Integrations"
+        ],
+        "summary": "Transparent proxy to compliance-os",
+        "description": "Forwards the request (any method) to COMPLIANCE_OS_URL with the /compliance prefix stripped. Returns 503 if COMPLIANCE_OS_URL is not configured.",
+        "parameters": [
+          {
+            "name": "proxyPath",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Full remaining path, forwarded as-is."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Upstream response, forwarded as-is"
+          },
+          "503": {
+            "description": "Compliance service is not configured."
+          }
+        }
+      }
+    },
+    "/registry/{proxyPath}": {
+      "get": {
+        "tags": [
+          "Integrations"
+        ],
+        "summary": "Transparent proxy to registry-api",
+        "description": "Forwards the request (any method) to REGISTRY_API_URL with the /registry prefix stripped. Returns 503 if REGISTRY_API_URL is not configured.",
+        "parameters": [
+          {
+            "name": "proxyPath",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Full remaining path, forwarded as-is."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Upstream response, forwarded as-is"
+          },
+          "503": {
+            "description": "Registry service is not configured."
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Integrations"
+        ],
+        "summary": "Transparent proxy to registry-api",
+        "description": "Forwards the request (any method) to REGISTRY_API_URL with the /registry prefix stripped. Returns 503 if REGISTRY_API_URL is not configured.",
+        "parameters": [
+          {
+            "name": "proxyPath",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Full remaining path, forwarded as-is."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Upstream response, forwarded as-is"
+          },
+          "503": {
+            "description": "Registry service is not configured."
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "Integrations"
+        ],
+        "summary": "Transparent proxy to registry-api",
+        "description": "Forwards the request (any method) to REGISTRY_API_URL with the /registry prefix stripped. Returns 503 if REGISTRY_API_URL is not configured.",
+        "parameters": [
+          {
+            "name": "proxyPath",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Full remaining path, forwarded as-is."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Upstream response, forwarded as-is"
+          },
+          "503": {
+            "description": "Registry service is not configured."
+          }
+        }
+      },
+      "patch": {
+        "tags": [
+          "Integrations"
+        ],
+        "summary": "Transparent proxy to registry-api",
+        "description": "Forwards the request (any method) to REGISTRY_API_URL with the /registry prefix stripped. Returns 503 if REGISTRY_API_URL is not configured.",
+        "parameters": [
+          {
+            "name": "proxyPath",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Full remaining path, forwarded as-is."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Upstream response, forwarded as-is"
+          },
+          "503": {
+            "description": "Registry service is not configured."
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "Integrations"
+        ],
+        "summary": "Transparent proxy to registry-api",
+        "description": "Forwards the request (any method) to REGISTRY_API_URL with the /registry prefix stripped. Returns 503 if REGISTRY_API_URL is not configured.",
+        "parameters": [
+          {
+            "name": "proxyPath",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Full remaining path, forwarded as-is."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Upstream response, forwarded as-is"
+          },
+          "503": {
+            "description": "Registry service is not configured."
           }
         }
       }
