@@ -95,7 +95,7 @@ export function listFallbackBusinessTypes(q?: string) {
         [item.slug, item.name, item.description].join(' ').toLowerCase().includes(search),
       )
     : BUSINESS_TYPES;
-  return { items };
+  return { items, isFallback: true, source: 'desk_api_static_fallback' };
 }
 
 export function searchFallbackRequirements(params: URLSearchParams) {
@@ -153,7 +153,14 @@ export function searchFallbackRequirements(params: URLSearchParams) {
     },
   ];
 
-  return { items: items.slice(0, limit), nextCursor: null, hasMore: false, total: Math.min(items.length, limit) };
+  return {
+    items: items.slice(0, limit),
+    nextCursor: null,
+    hasMore: false,
+    total: Math.min(items.length, limit),
+    isFallback: true,
+    source: 'desk_api_static_fallback',
+  };
 }
 
 export function listFallbackJurisdictions(params: URLSearchParams) {
@@ -170,7 +177,7 @@ export function listFallbackJurisdictions(params: URLSearchParams) {
       stateCode: code,
       fipsCode: null,
     }));
-  return { items: states.slice(0, limit), nextCursor: null, limit };
+  return { items: states.slice(0, limit), nextCursor: null, limit, isFallback: true, source: 'desk_api_static_fallback' };
 }
 
 function normalizeState(value: string): string | null {

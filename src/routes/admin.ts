@@ -376,23 +376,32 @@ async function proxyUpstreamJson<T = unknown>(
   return data as T;
 }
 
-async function listUpstreamTables(source: Exclude<AdminSource, 'desk'>) {
+// Returns the upstream's tables, or (on any failure — misconfigured,
+// unreachable, non-2xx) a distinct error marker. Callers must surface the
+// error rather than treat it as "this source legitimately has zero tables" —
+// silently collapsing both cases to [] would show an admin a misleadingly
+// clean picture when a sibling service is actually down or misconfigured.
+async function listUpstreamTables(
+  source: Exclude<AdminSource, 'desk'>,
+): Promise<{ tables: UpstreamTableSummary[] } | { error: string }> {
   let upstream: { tables?: UpstreamTableSummary[] };
   try {
     upstream = await proxyUpstreamJson<{ tables?: UpstreamTableSummary[] }>(
       source,
       '/admin/tables',
     );
-  } catch {
-    return [];
+  } catch (err) {
+    return { error: err instanceof HttpError ? err.message : `${source} admin table list request failed.` };
   }
-  return (upstream.tables ?? []).map((table) => ({
-    ...table,
-    source,
-    rawName: table.name,
-    name: tableKey(source, table.name),
-    deletable: table.deletable === true,
-  }));
+  return {
+    tables: (upstream.tables ?? []).map((table) => ({
+      ...table,
+      source,
+      rawName: table.name,
+      name: tableKey(source, table.name),
+      deletable: table.deletable === true,
+    })),
+  };
 }
 
 async function proxyUpstreamRows(
@@ -436,6 +445,14 @@ async function guard(request: FastifyRequest, reply: FastifyReply): Promise<void
 
 export async function adminTablesHandler(request: FastifyRequest, reply: FastifyReply) {
   await guard(request, reply);
+  const [registryResult, complianceResult] = await Promise.all([
+    listUpstreamTables('registry'),
+    listUpstreamTables('compliance'),
+  ]);
+  const sourceErrors: Record<string, string> = {};
+  if ('error' in registryResult) sourceErrors.registry = registryResult.error;
+  if ('error' in complianceResult) sourceErrors.compliance = complianceResult.error;
+
   const tables = [
     ...Object.entries(TABLES).map(([name, table]) => ({
       source: 'desk' as const,
@@ -448,10 +465,12 @@ export async function adminTablesHandler(request: FastifyRequest, reply: Fastify
       columnOptions: columnOptionsFor(table),
       deletable: table.deletable === true,
     })),
-    ...(await listUpstreamTables('registry')),
-    ...(await listUpstreamTables('compliance')),
+    ...('tables' in registryResult ? registryResult.tables : []),
+    ...('tables' in complianceResult ? complianceResult.tables : []),
   ];
-  return reply.send({ tables });
+  // sourceErrors is only present when non-empty, so existing consumers that
+  // only read `tables` see no shape change on the happy path.
+  return reply.send(Object.keys(sourceErrors).length > 0 ? { tables, sourceErrors } : { tables });
 }
 
 export async function adminTableRowsHandler(request: FastifyRequest, reply: FastifyReply) {
