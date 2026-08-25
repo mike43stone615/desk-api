@@ -28,6 +28,11 @@ RUN npm ci --omit=dev && npm cache clean --force
 
 COPY --from=build /app/dist ./dist
 
+# Run as the non-root user baked into the node:20-alpine base image rather
+# than the default root, per standard container-hardening practice.
+RUN chown -R node:node /app
+USER node
+
 # Health check matches the GET /health route registered in src/app.ts
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
   CMD wget -qO- http://localhost:${PORT:-3458}/health || exit 1

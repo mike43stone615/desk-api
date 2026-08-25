@@ -37,6 +37,16 @@ export const OPENAPI_SPEC = {
     description:
       'Desk business-management API — self-service email/password auth, business-setup drafts/businesses/memberships, and an admin table browser aggregating this service plus registry-api and compliance-os. Rewritten from the original Hono/Cloudflare Workers/D1 implementation onto Fastify/TypeScript/Postgres.',
   },
+  // Every path below is registered twice in src/app.ts — once unprefixed
+  // (legacy, kept working identically for the current Flutter client) and
+  // once under /v1 (registerLegacyAndVersionedRoutes runs twice, the second
+  // time with { prefix: '/v1' }) — both mounts serve an identical surface,
+  // so the two servers below let a client/docs-viewer pick either base
+  // instead of this spec needing every path duplicated under /v1/*.
+  servers: [
+    { url: '/', description: 'Legacy unprefixed routes (unchanged for the current Flutter client)' },
+    { url: '/v1', description: 'Versioned routes — identical surface to the unprefixed routes above' },
+  ],
   tags: [
     { name: 'Auth', description: 'Self-service email/password authentication' },
     { name: 'Setup', description: 'Business-setup drafts, completed businesses, and memberships' },

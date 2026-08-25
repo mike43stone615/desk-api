@@ -5,6 +5,16 @@
     "version": "2.0.0",
     "description": "Desk business-management API — self-service email/password auth, business-setup drafts/businesses/memberships, and an admin table browser aggregating this service plus registry-api and compliance-os. Rewritten from the original Hono/Cloudflare Workers/D1 implementation onto Fastify/TypeScript/Postgres."
   },
+  "servers": [
+    {
+      "url": "/",
+      "description": "Legacy unprefixed routes (unchanged for the current Flutter client)"
+    },
+    {
+      "url": "/v1",
+      "description": "Versioned routes — identical surface to the unprefixed routes above"
+    }
+  ],
   "tags": [
     {
       "name": "Auth",
