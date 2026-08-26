@@ -38,18 +38,17 @@ Tunnel/DNS/watchdog over to this service.
 ### 2. No automated database backup exists yet
 
 **Impact:** if this Postgres instance held real user data today, there is
-no scheduled backup protecting it. `docker-compose.yml` runs Postgres with
-a local named volume only; no `pg_dump`/WAL-archiving job exists anywhere
-in this repo (`scripts/` only has `apply-migrations.ts` and
-`export-openapi.ts`).
+no scheduled backup protecting it.
 
-**Current mitigation:** none automated — see `docs/BACKUP-RESTORE.md` for
-the manual procedure.
+**Current mitigation:** `npm run backup` (`scripts/backup-database.ts`)
+wraps `pg_dump` with gzip compression and generation pruning — live-tested
+against the dev database. Not yet wired into an actual scheduler, since
+there's no deployment target to schedule against yet (see `README.md`).
 
-**Resolution:** before this service holds any real user data, set up
-scheduled `pg_dump` (or WAL-based continuous backup via pgBackRest/Barman,
-or a managed Postgres provider's built-in backups) and verify a real
-restore, not just that a dump file exists.
+**Resolution:** once a real deployment exists, put `npm run backup` on
+cron/systemd-timer/the platform's scheduled-job feature, and — the part
+that still hasn't been done — verify a real restore from one of its
+outputs, not just that a dump file gets written.
 
 ---
 
@@ -74,37 +73,11 @@ Redis configured (the common case); revisit if/when this runs as multiple
 replicas without Redis, or if fail-closed behavior becomes a requirement
 for a specific route.
 
-### 4. Outbound email silently no-ops without `RESEND_API_KEY`
-
-**Impact:** if `RESEND_API_KEY` is unset in a real deployment,
-`POST /auth/password-reset/request` and the email-confirmation endpoints
-still return `200` (by design — this prevents account enumeration) but no
-email actually sends; `src/infrastructure/email/resend.ts` logs a warning
-and returns instead of throwing. There is currently no startup check that
-fails loudly if this is unset outside local dev, where it's the expected
-default (pull the token straight out of the database for local testing).
-
-**Resolution:** consider a startup check that warns (or refuses to start)
-when `ENVIRONMENT=production` and `RESEND_API_KEY` is unset.
-
-### 5. Secret rotation procedure not documented
-
-No runbook exists for rotating `OPENAI_API_KEY`, `GOOGLE_PLACES_API_KEY`,
-`REGISTRY_API_SECRET`, `REGISTRY_API_ADMIN_KEY`, `COMPLIANCE_OS_API_KEY`,
-`RESEND_API_KEY`, or `METRICS_DOCS_API_KEY`. Rotation today just means
-updating `.env` (or whatever env-injection mechanism the eventual
-deployment uses) and restarting the process — there's no atomic,
-zero-downtime rotation; a restart briefly drops the process.
-
-**Resolution:** document rotation steps once a real deployment target
-(and its env-injection mechanism — Docker secrets, a platform's env-var
-UI, etc.) is chosen.
-
 ---
 
 ## Medium
 
-### 6. Registry/compliance local fallback catalogs are real but static
+### 4. Registry/compliance local fallback catalogs are real but static
 
 **Impact:** when `REGISTRY_API_URL` / `COMPLIANCE_OS_URL` are unset, or the
 upstream call fails, the relevant routes fall back to an in-repo static
@@ -118,7 +91,7 @@ live registry-api/compliance-os data over time.
 **Resolution:** periodically diff the fallback catalog against the live
 services' data; no process currently enforces this.
 
-### 7. OpenAPI spec is hand-written, not generated from request validation
+### 5. OpenAPI spec is hand-written, not generated from request validation
 
 `src/openapi.ts` is hand-maintained. It documents this service's own routes
 plus every proxy/integration route, but it is not derived from the Zod
@@ -132,7 +105,7 @@ validators (e.g. `zod-to-json-schema`) instead of hand-duplicating them, or
 add a lint/CI check that flags routes with no corresponding `openapi.ts`
 entry.
 
-### 8. `/metrics` and `/docs` are public by default
+### 6. `/metrics` and `/docs` are public by default
 
 Both are reachable with no authentication unless `METRICS_DOCS_API_KEY` is
 set (see `README.md` / `.env.example`) — common practice for
@@ -149,11 +122,13 @@ reachable from an untrusted network.
 
 | Item | Resolved |
 |------|----------|
-| Email sending (password reset + confirmation) | Yes — Resend integrated (`src/infrastructure/email/resend.ts`); degrades to a logged no-op without `RESEND_API_KEY` (see #4 above) |
+| Email sending (password reset + confirmation) | Yes — Resend integrated (`src/infrastructure/email/resend.ts`); degrades to a logged no-op without `RESEND_API_KEY`, now with a startup warning in production if it's unset |
 | Supabase Auth → Cloudflare D1 password migration (bcrypt vs PBKDF2) | Yes — resolved in an earlier migration, before this rewrite; see `docs/SUPABASE-MIGRATION.md` (historical) |
 | Passwords hashed securely | Yes — PBKDF2 via Node's `crypto` module, 310k iterations, self-describing stored format |
 | Rate limiting enforced at the application level | Yes — 4-tier (minute/hour/day/month) limiter in `src/middleware/api-protection.ts`, Redis-backed with in-memory fallback (see #3 above for its remaining edge cases) |
-| Machine-readable API spec | Yes — `src/openapi.ts`, served at `GET /docs` (Swagger UI) and `GET /docs/openapi.json`; covers this service's own routes and every proxy/integration route (see #7 above for its remaining gap) |
+| Machine-readable API spec | Yes — `src/openapi.ts`, served at `GET /docs` (Swagger UI) and `GET /docs/openapi.json`; covers this service's own routes and every proxy/integration route (see #5 above for its remaining gap) |
+| Secret rotation runbook | Yes — `docs/SECRET-ROTATION.md`, covers every secret including the two shared with sibling services |
+| Backup script | Yes — `npm run backup` (`scripts/backup-database.ts`); not yet wired into a scheduler or restore-rehearsed (see #2 above) |
 | Session/token cleanup | Yes — `node-cron` in-process job, daily at 02:00 UTC (`src/jobs/cron.ts`), replacing the earlier Cloudflare Cron Trigger |
 | CORS narrowed to configured origins | Yes — `CORS_ORIGINS` env var, defaults to `https://app.deskbusiness.co` |
 | Correlation IDs on all requests | Yes — `x-request-id` header, generated per-request in `src/app.ts` |
