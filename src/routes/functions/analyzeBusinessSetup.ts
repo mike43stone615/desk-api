@@ -38,6 +38,8 @@ interface IdeaPlausibility {
   feedback: string | null;
 }
 
+type TargetMarketPlausibility = IdeaPlausibility;
+
 export async function analyzeBusinessSetupHandler(request: FastifyRequest, reply: FastifyReply) {
   const body = (request.body ?? {}) as Record<string, unknown>;
 
@@ -60,6 +62,7 @@ export async function analyzeBusinessSetupHandler(request: FastifyRequest, reply
     numberOfPartners: Number(body.numberOfPartners ?? 1),
     formationCity: String(body.formationCity ?? '').trim(),
     formationState: String(body.formationState ?? '').trim(),
+    targetMarket: String(body.targetMarket ?? '').trim(),
     allowedIndustries: industries,
     allowedGeographicScopes: ['Local', 'National'],
     allowedCustomerTypes: ['B2B', 'B2C', 'Both'],
@@ -80,12 +83,13 @@ export async function analyzeBusinessSetupHandler(request: FastifyRequest, reply
           {
             role: 'system',
             content:
-              'Analyze an unregistered business setup. Return JSON only with classification, marketValidation, businessPlanSections, ideaIsPlausible, ideaFeedback. classification must contain targetMarket, industry, additionalIndustries, geographicScope, customerType. industry must exactly match one allowedIndustries value. additionalIndustries must be an array of zero to four extra allowedIndustries values when the business clearly operates in multiple industries; exclude the primary industry and avoid speculative extras. geographicScope must be Local or National. customerType must be B2B, B2C, or Both. ' +
+              'Analyze an unregistered business setup. Return JSON only with classification, marketValidation, businessPlanSections, ideaIsPlausible, ideaFeedback, targetMarketIsPlausible, targetMarketFeedback. classification must contain targetMarket, industry, additionalIndustries, geographicScope, customerType. industry must exactly match one allowedIndustries value. additionalIndustries must be an array of zero to four extra allowedIndustries values when the business clearly operates in multiple industries; exclude the primary industry and avoid speculative extras. geographicScope must be Local or National. customerType must be B2B, B2C, or Both. ' +
               'targetMarket must name a specific customer segment by role, need, occasion, or organization type — never just a location, and never a restatement of businessIdea. The caller already has formationCity/formationState and businessIdea as separate fields, so targetMarket must not repeat the city/state name or re-describe what the business does; it must add NEW information about WHO buys, not WHAT is sold or WHERE. Also drop any qualifier that\'s already implied by the business type itself (e.g. do not add "for infrastructure projects" after a transportation-design business — that\'s implied by "transportation design"; do not add "who need coffee" after a coffee shop). ' +
               'Bad: "residents and businesses in Denver, CO" (only a location). Bad: "local government agencies and private developers in Boise, ID who require specialized transportation civil engineering design services for infrastructure projects" (repeats the city, restates the business idea, and the infrastructure-projects qualifier is redundant). Good fix for that same example: "State departments of transportation, county/city public works or engineering departments, and private land developers bidding infrastructure projects" — or, when confident of the real agency for the given formationState (most states have one, consistently named), name it directly, e.g. "The Idaho Transportation Department, county highway districts, and private land developers." ' +
               'More good examples across other business types: "Local commuters, students, and remote workers who want a fast coffee order on the way to work or class", "Small landlords managing 1-10 rental units who need bookkeeping without hiring full-time staff", "Local residents and members eligible to join who want member-owned banking with lower fees than a national bank". ' +
-              'When the business idea implies institutional, government, or professional buyers, name the specific class of buyer (department type, licensing board, school district, hospital system, franchise type, property type, etc.) instead of a vague word like "businesses", "organizations", or "clients". This rule applies the same way regardless of industry or location — always ask what you can name about WHO buys that isn\'t already captured elsewhere in the form. ' +
-              'marketValidation must contain customerProblem, competitors, validationPlan, pricingHypothesis. businessPlanSections must be an array of comprehensive editable sections with title and content, using placeholders for unknown future setup details. ideaIsPlausible is a boolean: true when businessIdea is a coherent, at-least-vaguely-describable business concept, false when it is empty, keyboard-mash gibberish, or otherwise not describable as a business idea. ideaFeedback is a short one-sentence explanation for the user when ideaIsPlausible is false, and null when ideaIsPlausible is true.',
+              'When the business idea implies institutional, government, professional, manufacturer, wholesale, distributor, supplier, or trade buyers, name the specific class of buyer (department type, licensing board, school district, hospital system, franchise type, property type, operator type, distributor type, retailer type, trade customer, etc.) instead of a vague word like "businesses", "organizations", or "clients". This rule applies the same way regardless of industry or location — always ask what you can name about WHO buys that isn\'t already captured elsewhere in the form. ' +
+              'For manufacturer/supplier ideas, targetMarket should be the buyer of the manufactured goods, not a generic consulting audience and not just end consumers of a related service. Example: for "a car wash company that manufactures car wash chemicals", use "Car wash operators, auto detailing businesses, fleet cleaners, and distributors buying vehicle-cleaning chemicals." ' +
+              'marketValidation must contain customerProblem, competitors, validationPlan, pricingHypothesis. businessPlanSections must be an array of comprehensive editable sections with title and content, using placeholders for unknown future setup details. ideaIsPlausible is a boolean: true when businessIdea is a coherent, at-least-vaguely-describable business concept, false when it is empty, keyboard-mash gibberish, or otherwise not describable as a business idea. ideaFeedback is a short one-sentence explanation for the user when ideaIsPlausible is false, and null when ideaIsPlausible is true. targetMarketIsPlausible is a boolean judging the caller targetMarket field: true only when it describes a coherent likely customer segment, buyer role, audience, organization type, or client group for this business idea; false when it is empty, keyboard-mash gibberish, profanity or insults, a single vague person like "a bad man" or "some guy", random readable words, or otherwise not a plausible target market/clientele. targetMarketFeedback is a short one-sentence explanation for the user when targetMarketIsPlausible is false, and null when true.',
           },
           { role: 'user', content: JSON.stringify(prompt) },
         ],
@@ -102,6 +106,10 @@ export async function analyzeBusinessSetupHandler(request: FastifyRequest, reply
     const parsed =
       typeof content === 'string' ? (JSON.parse(content) as Record<string, unknown>) : {};
     const plausibility = normalizeIdeaPlausibility(parsed, businessIdea);
+    const targetMarketPlausibility = normalizeTargetMarketPlausibility(
+      parsed,
+      String(body.targetMarket ?? ''),
+    );
     const { classification, substitutedFields } = normalizeClassification(
       parsed.classification && typeof parsed.classification === 'object'
         ? (parsed.classification as Record<string, unknown>)
@@ -124,6 +132,8 @@ export async function analyzeBusinessSetupHandler(request: FastifyRequest, reply
       ),
       ideaIsPlausible: plausibility.isPlausible,
       ideaFeedback: plausibility.feedback,
+      targetMarketIsPlausible: targetMarketPlausibility.isPlausible,
+      targetMarketFeedback: targetMarketPlausibility.feedback,
       // `source` deliberately stays 'openai' even on a partial substitution
       // below — existing consumers checking `source === 'openai'` keep
       // working unchanged. When OpenAI returned an invalid/empty value for
@@ -133,7 +143,9 @@ export async function analyzeBusinessSetupHandler(request: FastifyRequest, reply
       // caller that cares can tell "fully OpenAI" apart from "OpenAI plus
       // guessed field(s)" without us breaking the existing source contract.
       source: 'openai',
-      ...(substitutedFields.length > 0 ? { classificationFieldsSubstituted: substitutedFields } : {}),
+      ...(substitutedFields.length > 0
+        ? { classificationFieldsSubstituted: substitutedFields }
+        : {}),
     });
   } catch {
     return reply.send(fallbackEnrichment(businessIdea, industries, body));
@@ -286,6 +298,28 @@ interface FallbackClassificationRule {
 }
 
 const classificationRules: FallbackClassificationRule[] = [
+  {
+    keywords: [
+      'car wash chemical',
+      'car wash chemicals',
+      'car wash soap',
+      'car wash detergent',
+      'auto detailing chemical',
+      'auto detailing chemicals',
+      'vehicle wash chemical',
+      'vehicle wash chemicals',
+      'vehicle cleaning chemical',
+      'vehicle cleaning chemicals',
+      'manufactures',
+      'manufacturing',
+      'manufacturer',
+    ],
+    industry: 'Chemical Manufacturing',
+    targetMarket:
+      'Car wash operators, auto detailing businesses, fleet cleaners, and distributors buying vehicle-cleaning chemicals',
+    geographicScope: 'National',
+    customerType: 'B2B',
+  },
   {
     keywords: [
       'food truck',
@@ -3020,6 +3054,9 @@ function fallbackEnrichment(idea: string, industries: string[], body: Record<str
   const classification = fallback(idea, industries);
   const marketValidation = fallbackMarketValidation(idea, classification);
   const plausibility = assessIdeaPlausibilityHeuristic(idea);
+  const targetMarketPlausibility = assessTargetMarketPlausibilityHeuristic(
+    String(body.targetMarket ?? ''),
+  );
   return {
     classification,
     marketValidation,
@@ -3031,6 +3068,8 @@ function fallbackEnrichment(idea: string, industries: string[], body: Record<str
     ),
     ideaIsPlausible: plausibility.isPlausible,
     ideaFeedback: plausibility.feedback,
+    targetMarketIsPlausible: targetMarketPlausibility.isPlausible,
+    targetMarketFeedback: targetMarketPlausibility.feedback,
     source: 'fallback',
   };
 }
@@ -3071,6 +3110,65 @@ function normalizeIdeaPlausibility(input: Record<string, unknown>, idea: string)
   return { isPlausible: false, feedback };
 }
 
+function normalizeTargetMarketPlausibility(
+  input: Record<string, unknown>,
+  targetMarket: string,
+): TargetMarketPlausibility {
+  const heuristic = assessTargetMarketPlausibilityHeuristic(targetMarket);
+  if (typeof input.targetMarketIsPlausible !== 'boolean') return heuristic;
+  const isPlausible = input.targetMarketIsPlausible;
+  if (isPlausible) return { isPlausible: true, feedback: null };
+  const feedback =
+    typeof input.targetMarketFeedback === 'string' && input.targetMarketFeedback.trim()
+      ? input.targetMarketFeedback.trim()
+      : heuristic.feedback;
+  return { isPlausible: false, feedback };
+}
+
+function assessTargetMarketPlausibilityHeuristic(targetMarket: string): TargetMarketPlausibility {
+  const trimmed = targetMarket.trim();
+  if (trimmed.length < 3) {
+    return {
+      isPlausible: false,
+      feedback: 'Describe the people or businesses you expect to serve.',
+    };
+  }
+  const lower = trimmed.toLowerCase();
+  const tokens = lower.match(/[a-z]+/g) ?? [];
+  const letters = tokens.join('');
+  if (letters.length < 4) {
+    return {
+      isPlausible: false,
+      feedback: 'Describe the people or businesses you expect to serve.',
+    };
+  }
+  const punctuationCount = (lower.match(/[^a-z0-9\s]/g) ?? []).length;
+  const consonantRuns = /[bcdfghjklmnpqrstvwxyz]{5,}/;
+  const weakTokens = tokens.filter((token) => {
+    const vowelCount = (token.match(/[aeiou]/g) ?? []).length;
+    return token.length <= 2 || vowelCount / token.length < 0.25;
+  }).length;
+  if (
+    tokens.some((token) => consonantRuns.test(token)) ||
+    (punctuationCount >= 2 && weakTokens > 0)
+  ) {
+    return {
+      isPlausible: false,
+      feedback:
+        'That does not look like a customer segment yet. Describe the people or businesses you expect to serve.',
+    };
+  }
+  const bannedVague =
+    /^(a|an|some|one|the)?\s*(bad|good|random|weird)?\s*(man|woman|person|guy|girl|people|someone|anyone)s?$/i;
+  if (bannedVague.test(trimmed)) {
+    return {
+      isPlausible: false,
+      feedback:
+        'Describe a real customer group, role, organization type, or audience rather than a vague person.',
+    };
+  }
+  return { isPlausible: true, feedback: null };
+}
 function normalizeMarketValidation(
   input: unknown,
   idea: string,

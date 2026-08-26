@@ -107,6 +107,25 @@ describe('POST /functions/v1/analyze-business-setup fallback classification', ()
     expect(classification.industry).toBe('Coffee Shop / Cafe');
     expect(classification.additionalIndustries).not.toContain('Coffee Shop / Cafe');
   });
+  it('returns a target-market plausibility verdict in the same analysis response', async () => {
+    const res = await app.inject({
+      method: 'POST',
+      url: '/functions/v1/analyze-business-setup',
+      payload: {
+        action: 'classify_unregistered_business',
+        businessIdea: 'auto repair shop',
+        targetMarket: 'a bad man',
+        industries,
+      },
+    });
+    expect(res.statusCode).toBe(200);
+    const body = JSON.parse(res.body) as {
+      targetMarketIsPlausible: boolean;
+      targetMarketFeedback: string | null;
+    };
+    expect(body.targetMarketIsPlausible).toBe(false);
+    expect(body.targetMarketFeedback).toContain('customer group');
+  });
 });
 
 describe('POST /setup/drafts', () => {
@@ -265,5 +284,32 @@ describe('auth is required', () => {
   it('returns 401 without a session token', async () => {
     const res = await app.inject({ method: 'GET', url: '/setup/drafts' });
     expect(res.statusCode).toBe(401);
+  });
+
+  it('classifies vehicle-wash chemical manufacturing as B2B chemical manufacturing in fallback', async () => {
+    const res = await app.inject({
+      method: 'POST',
+      url: '/functions/v1/analyze-business-setup',
+      payload: {
+        action: 'classify_unregistered_business',
+        businessIdea: 'a vehicle wash business that manufactures vehicle cleaning chemicals',
+        targetMarket: 'car wash operators and distributors',
+        industries: ['Car Wash', 'Chemical Manufacturing', 'Consulting / Professional Services'],
+      },
+    });
+    expect(res.statusCode).toBe(200);
+    const body = JSON.parse(res.body) as {
+      classification: {
+        targetMarket: string;
+        industry: string;
+        geographicScope: string;
+        customerType: string;
+      };
+    };
+    expect(body.classification.industry).toBe('Chemical Manufacturing');
+    expect(body.classification.geographicScope).toBe('National');
+    expect(body.classification.customerType).toBe('B2B');
+    expect(body.classification.targetMarket).toContain('Car wash operators');
+    expect(body.classification.targetMarket).toContain('distributors');
   });
 });
