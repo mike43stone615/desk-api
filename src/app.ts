@@ -87,6 +87,18 @@ export async function buildApp(): Promise<FastifyInstance> {
     reply.header('x-request-id', request.id);
   });
 
+  // Password-reset and email-confirmation requests intentionally return 200
+  // even when this is unset (src/infrastructure/email/resend.ts logs a
+  // warning and no-ops, to avoid account enumeration) -- there is no
+  // request-time signal that email silently isn't sending. A startup
+  // warning is the only place this gets surfaced. See
+  // docs/KNOWN-LIMITATIONS.md #4.
+  if (!config.resendApiKey && config.environment === 'production') {
+    app.log.warn(
+      'RESEND_API_KEY is not set in production — password-reset and email-confirmation requests will return 200 but no email will actually send.',
+    );
+  }
+
   await app.register(cors, {
     origin: config.corsOrigins,
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
