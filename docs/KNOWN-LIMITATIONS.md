@@ -13,27 +13,37 @@ separate, later, deliberately-decoupled step (see `README.md`).
 
 ## Critical — Must Resolve Before Cutover
 
-### 1. Live cutover requires a D1 → Postgres data migration that hasn't happened yet
+### 1. D1 → Postgres data migration — done; live cutover itself still isn't
 
-**Impact:** this Postgres database currently has no real user data — cutting
-over to this service means migrating existing users/sessions/businesses
-from the live Cloudflare D1 database first.
+**Resolved (2026-08-26):** `scripts/migrate-from-d1.ts` exports the 7 real
+user-data tables (`users`, `sessions`, `password_reset_tokens`,
+`email_confirmation_tokens`, `business_setup_drafts`, `businesses`,
+`business_memberships`) from the live D1 database via `wrangler d1 execute
+--json` and inserts them here — a straight `INSERT`, no type coercion
+needed, confirmed live (both sides use the same PBKDF2 hash format and
+TEXT/ISO-8601 columns; see `docs/SUPABASE-MIGRATION.md` for the earlier,
+separately-resolved bcrypt/PBKDF2 migration). Deliberately excludes the D1
+database's `market_*` tables (oews/commuter-density/sba-lending caches) —
+those are obsolete leftovers from before market-validation-api became its
+own service with its own database.
 
-The good news: the password-hash-format mismatch that made earlier
-Supabase-era migrations hard is **not** a problem here. Both the live D1
-database and this Postgres schema already use the same PBKDF2-based hash
-format (`src/domain/auth/password.ts`, ported unchanged apart from bumping
-100k → 310k iterations in a self-describing format that doesn't invalidate
-existing hashes) — see `docs/SUPABASE-MIGRATION.md` for that earlier,
-already-resolved migration. This schema's column types intentionally mirror
-the D1 shape 1:1 (TEXT/ISO-8601 rather than native `timestamptz`) so a
-straight `INSERT` from a D1 export should work without type coercion (see
-`migrations/0002_auth.sql`'s header comment) — but that export/import has
-not been written or run yet.
+Run against the real live D1 database on 2026-08-26: 1 user, 6 sessions, 1
+email-confirmation token, and 1 business-setup draft (this account has no
+completed businesses yet) migrated and row-count-verified against the
+source. The local Postgres had 8 unrelated dev/test users beforehand
+(including a same-email, different-id collision with the real account,
+from earlier local testing) — cleared first (`--clear-first`) per an
+explicit decision to keep the real D1 data as source of truth rather than
+the local test signups.
 
-**Resolution:** write a one-time D1 → Postgres export/import script, verify
-row counts against the source, and only then cut the Cloudflare
-Tunnel/DNS/watchdog over to this service.
+**Still not done: the actual cutover.** This service's Postgres now has
+real data, but `deskbusiness.co` still points at the Cloudflare Worker —
+switching the Tunnel/DNS/watchdog over to this service is a separate,
+deliberately-decoupled, later step (see `README.md`), not something this
+migration does on its own. Re-run `migrate-from-d1.ts` (without
+`--clear-first`, since `ON CONFLICT (id) DO NOTHING` makes re-running
+safe) right before actually cutting over, to catch anything written to D1
+between now and then.
 
 ### 2. No automated database backup exists yet
 
