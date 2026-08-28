@@ -86,6 +86,14 @@ const STATE_NAMES: Record<string, string> = {
   WV: 'West Virginia',
   WI: 'Wisconsin',
   WY: 'Wyoming',
+  // Territories -- added 2026-08-26 after check-fallback-drift.ts found
+  // compliance-os has real STATE-type jurisdictions for all five that
+  // this map didn't know about.
+  AS: 'American Samoa',
+  GU: 'Guam',
+  MP: 'Northern Mariana Islands',
+  PR: 'Puerto Rico',
+  VI: 'U.S. Virgin Islands',
 };
 
 export function listFallbackBusinessTypes(q?: string) {

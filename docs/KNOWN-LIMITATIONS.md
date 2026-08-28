@@ -45,20 +45,30 @@ migration does on its own. Re-run `migrate-from-d1.ts` (without
 safe) right before actually cutting over, to catch anything written to D1
 between now and then.
 
-### 2. No automated database backup exists yet
+### 2. ~~No automated database backup exists yet~~ — resolved 2026-08-26
 
-**Impact:** if this Postgres instance held real user data today, there is
-no scheduled backup protecting it.
+This service turned out to already be live in production (see the
+correction at the top of `README.md`/the desk-api-postgres-rewrite
+memory — the DNS/Tunnel cutover had already happened, undocumented).
+`npm run backup` (`scripts/backup-database.ts`, wraps `pg_dump` with
+gzip compression and 14-generation pruning) is now wired into a real
+Windows Scheduled Task — `Desk API Database Backup`, daily at 3:30 AM,
+running `scripts/run-backup-task.ps1` — registered and live-verified
+(ran once manually, produced a real `.sql.gz` file in `backups/`).
 
-**Current mitigation:** `npm run backup` (`scripts/backup-database.ts`)
-wraps `pg_dump` with gzip compression and generation pruning — live-tested
-against the dev database. Not yet wired into an actual scheduler, since
-there's no deployment target to schedule against yet (see `README.md`).
+**Restore rehearsal done 2026-08-26**: restored the latest `.sql.gz` into
+a scratch database (`desk_api_restore_test`) via `psql`, compared row
+counts against the live database across all 4 non-empty tables (`users`,
+`sessions`, `schema_migrations`, `businesses`) — exact match. Scratch
+database dropped after verification; this isn't a standing fixture, just
+a one-time proof the mechanism works end-to-end, not just that a dump
+file gets written.
 
-**Resolution:** once a real deployment exists, put `npm run backup` on
-cron/systemd-timer/the platform's scheduled-job feature, and — the part
-that still hasn't been done — verify a real restore from one of its
-outputs, not just that a dump file gets written.
+**Still open:** off-host storage of the dump files — they currently only
+live in `backups/` on the same machine as the database itself, so a disk
+failure takes out both the live data and every backup simultaneously.
+Needs `rclone`/an S3-compatible bucket/etc. once a hosting decision is
+made; no credentials for any such target exist in this environment yet.
 
 ---
 
@@ -87,7 +97,7 @@ for a specific route.
 
 ## Medium
 
-### 4. Registry/compliance local fallback catalogs are real but static
+### 4. ~~Registry/compliance local fallback catalogs are real but static~~ — diff process added 2026-08-26
 
 **Impact:** when `REGISTRY_API_URL` / `COMPLIANCE_OS_URL` are unset, or the
 upstream call fails, the relevant routes fall back to an in-repo static
@@ -98,8 +108,28 @@ setup wizard usable even when a sibling service is down — but the fallback
 content is hand-maintained in this repo and can drift out of sync with the
 live registry-api/compliance-os data over time.
 
-**Resolution:** periodically diff the fallback catalog against the live
-services' data; no process currently enforces this.
+**Resolution:** `npm run check-fallback-drift`
+(`scripts/check-fallback-drift.ts`) fetches the live
+`/business-types` and `/jurisdictions` endpoints from compliance-os and
+`/business-structures` from registry-api, and diffs each against the
+corresponding hardcoded fallback list. Wired into a weekly Windows
+Scheduled Task (`Desk API Fallback Catalog Drift Check`, Mondays 4 AM,
+logs to `logs/fallback-drift-<date>.log`).
+
+**First real run found genuine drift, not yet acted on** (a report, not
+an auto-fixer — deciding what to update is a human call):
+- `business-structures.ts` vs registry-api's live `/business-structures`:
+  **no drift** — all 72 slugs match.
+- `fallback-catalog.ts`'s `STATE_NAMES` (50 states + DC) is missing 5 real
+  US territories that compliance-os has real `STATE`-type jurisdictions
+  for: AS, GU, MP, PR, VI.
+- `fallback-catalog.ts`'s `BUSINESS_TYPES` (10 broad categories like
+  "Retail", "Technology") and compliance-os's live `/business-types` (86
+  specific slugs like `retail-store`, `software-company`) were never the
+  same taxonomy — this isn't "drift" from a shared baseline so much as a
+  structural mismatch worth a deliberate decision (keep the 10 broad
+  categories as a coarser generic fallback, or narrow the gap), not an
+  oversight to silently patch.
 
 ### 5. OpenAPI spec is hand-written, not generated from request validation
 

@@ -89,7 +89,7 @@ export async function analyzeBusinessSetupHandler(request: FastifyRequest, reply
               'More good examples across other business types: "Local commuters, students, and remote workers who want a fast coffee order on the way to work or class", "Small landlords managing 1-10 rental units who need bookkeeping without hiring full-time staff", "Local residents and members eligible to join who want member-owned banking with lower fees than a national bank". ' +
               'When the business idea implies institutional, government, professional, manufacturer, wholesale, distributor, supplier, or trade buyers, name the specific class of buyer (department type, licensing board, school district, hospital system, franchise type, property type, operator type, distributor type, retailer type, trade customer, etc.) instead of a vague word like "businesses", "organizations", or "clients". This rule applies the same way regardless of industry or location — always ask what you can name about WHO buys that isn\'t already captured elsewhere in the form. ' +
               'For manufacturer/supplier ideas, targetMarket should be the buyer of the manufactured goods, not a generic consulting audience and not just end consumers of a related service. Example: for "a car wash company that manufactures car wash chemicals", use "Car wash operators, auto detailing businesses, fleet cleaners, and distributors buying vehicle-cleaning chemicals." ' +
-              'marketValidation must contain customerProblem, competitors, validationPlan, pricingHypothesis. businessPlanSections must be an array of comprehensive editable sections with title and content, using placeholders for unknown future setup details. ideaIsPlausible is a boolean: true when businessIdea is a coherent, at-least-vaguely-describable business concept, false when it is empty, keyboard-mash gibberish, or otherwise not describable as a business idea. ideaFeedback is a short one-sentence explanation for the user when ideaIsPlausible is false, and null when ideaIsPlausible is true. targetMarketIsPlausible is a boolean judging the caller targetMarket field: true only when it describes a coherent likely customer segment, buyer role, audience, organization type, or client group for this business idea; false when it is empty, keyboard-mash gibberish, profanity or insults, a single vague person like "a bad man" or "some guy", random readable words, or otherwise not a plausible target market/clientele. targetMarketFeedback is a short one-sentence explanation for the user when targetMarketIsPlausible is false, and null when true.',
+              'marketValidation must contain customerProblem, competitors, validationPlan, pricingHypothesis. businessPlanSections must be an array of comprehensive editable sections with title and content, using placeholders for unknown future setup details. ideaIsPlausible is a boolean: true when businessIdea is a coherent, at-least-vaguely-describable business concept, including modern service, professional, creator, media, solo-practice, or nonprofit concepts such as "an architect content creator"; false when it is empty, keyboard-mash gibberish, random readable words, or otherwise not describable as a business idea. ideaFeedback is a short one-sentence explanation for the user when ideaIsPlausible is false, and null when ideaIsPlausible is true. targetMarketIsPlausible is a boolean judging the caller targetMarket field: true only when it describes a coherent likely customer segment, buyer role, audience, organization type, or client group for this business idea; false when it is empty, keyboard-mash gibberish, profanity or insults, a single vague person like "a bad man" or "some guy", random readable words, or otherwise not a plausible target market/clientele. targetMarketFeedback is a short one-sentence explanation for the user when targetMarketIsPlausible is false, and null when true.',
           },
           { role: 'user', content: JSON.stringify(prompt) },
         ],
@@ -312,6 +312,8 @@ const classificationRules: FallbackClassificationRule[] = [
       'vehicle cleaning chemicals',
       'manufactures',
       'manufacturing',
+      'media',
+      'newsletter',
       'manufacturer',
     ],
     industry: 'Chemical Manufacturing',
@@ -1697,6 +1699,8 @@ const classificationRules: FallbackClassificationRule[] = [
   {
     keywords: [
       'manufacturing',
+      'media',
+      'newsletter',
       'manufacturer',
       'factory production',
       'production facility',
@@ -1710,7 +1714,10 @@ const classificationRules: FallbackClassificationRule[] = [
   {
     keywords: [
       'daycare',
+      'designer',
+      'educator',
       'childcare',
+      'coach',
       'preschool',
       'child care center',
       'after school program',
@@ -2900,6 +2907,7 @@ const classificationRules: FallbackClassificationRule[] = [
   {
     keywords: [
       'nonprofit',
+      'podcast',
       'charity',
       'foundation',
       '501c3',
@@ -3074,21 +3082,281 @@ function fallbackEnrichment(idea: string, industries: string[], body: Record<str
   };
 }
 
-const GIBBERISH_MIN_LETTERS = 6;
-const GIBBERISH_VOWEL_RATIO = 0.2;
+const BUSINESS_IDEA_SINGLE_WORDS = new Set([
+  'architect',
+  'artist',
+  'blogger',
+  'photographer',
+  'bakery',
+  'barbershop',
+  'cafe',
+  'cleaning',
+  'content',
+  'creator',
+  'consulting',
+  'daycare',
+  'designer',
+  'educator',
+  'gym',
+  'landscaping',
+  'nonprofit',
+  'podcast',
+  'restaurant',
+  'retail',
+  'salon',
+  'software',
+  'writer',
+  'tutoring',
+]);
 
-function assessIdeaPlausibilityHeuristic(idea: string): IdeaPlausibility {
+const BUSINESS_IDEA_SIGNALS = new Set([
+  'accounting',
+  'agency',
+  'architect',
+  'architecture',
+  'artist',
+  'author',
+  'blogger',
+  'channel',
+  'content',
+  'creator',
+  'influencer',
+  'photographer',
+  'streamer',
+  'app',
+  'bakery',
+  'bank',
+  'barber',
+  'barbershop',
+  'bookkeeping',
+  'boutique',
+  'business',
+  'cafe',
+  'charity',
+  'childcare',
+  'coach',
+  'church',
+  'clinic',
+  'club',
+  'company',
+  'construction',
+  'consultant',
+  'consulting',
+  'contractor',
+  'credit',
+  'daycare',
+  'designer',
+  'educator',
+  'dental',
+  'developer',
+  'distributor',
+  'ecommerce',
+  'engineering',
+  'firm',
+  'food',
+  'foundation',
+  'grooming',
+  'gym',
+  'landscaping',
+  'law',
+  'legal',
+  'manufactures',
+  'manufacturing',
+  'media',
+  'newsletter',
+  'medical',
+  'nonprofit',
+  'podcast',
+  'practice',
+  'product',
+  'products',
+  'property',
+  'repair',
+  'restaurant',
+  'retail',
+  'salon',
+  'school',
+  'service',
+  'services',
+  'shop',
+  'software',
+  'writer',
+  'store',
+  'teacher',
+  'studio',
+  'supplier',
+  'tax',
+  'therapy',
+  'transportation',
+  'truck',
+  'tutoring',
+  'union',
+  'wholesale',
+]);
+
+const BUSINESS_IDEA_PHRASES = [
+  'real estate',
+  'mobile food',
+  'food truck',
+  'pet care',
+  'car wash',
+  'auto repair',
+  'coffee cart',
+];
+
+const TARGET_MARKET_SINGLE_WORDS = new Set([
+  'adults',
+  'architects',
+  'firms',
+  'followers',
+  'readers',
+  'subscribers',
+  'viewers',
+  'athletes',
+  'businesses',
+  'children',
+  'commuters',
+  'contractors',
+  'families',
+  'homeowners',
+  'landlords',
+  'parents',
+  'patients',
+  'professionals',
+  'renters',
+  'restaurants',
+  'retailers',
+  'seniors',
+  'students',
+  'tenants',
+  'travelers',
+  'veterans',
+]);
+
+const TARGET_MARKET_SIGNALS = new Set([
+  'adults',
+  'agencies',
+  'audience',
+  'architects',
+  'architecture',
+  'audiences',
+  'content',
+  'fans',
+  'firm',
+  'firms',
+  'followers',
+  'readers',
+  'subscribers',
+  'viewers',
+  'buyers',
+  'businesses',
+  'children',
+  'clients',
+  'commuters',
+  'companies',
+  'contractors',
+  'customers',
+  'departments',
+  'developers',
+  'diners',
+  'distributors',
+  'donors',
+  'families',
+  'founders',
+  'homeowners',
+  'hospitals',
+  'investors',
+  'landlords',
+  'managers',
+  'members',
+  'operators',
+  'organizations',
+  'owners',
+  'parents',
+  'patients',
+  'professionals',
+  'renters',
+  'residents',
+  'restaurants',
+  'retailers',
+  'schools',
+  'seniors',
+  'shoppers',
+  'students',
+  'suppliers',
+  'tenants',
+  'travelers',
+  'users',
+  'veterans',
+  'volunteers',
+  'workers',
+]);
+
+function semanticTokens(value: string): string[] {
+  return value.toLowerCase().match(/[a-z]+/g) ?? [];
+}
+
+function looksLikeKeyboardMash(value: string, tokens: string[]): boolean {
+  const lower = value.toLowerCase();
+  const letters = tokens.join('');
+  if (letters.length < 4) return true;
+  const punctuationCount = (lower.match(/[^a-z0-9\s]/g) ?? []).length;
+  const weakTokens = tokens.filter((token) => {
+    const vowelCount = (token.match(/[aeiou]/g) ?? []).length;
+    return token.length <= 2 || vowelCount / token.length < 0.25;
+  }).length;
+  const hasLongConsonantRun = tokens.some((token) => /[bcdfghjklmnpqrstvwxyz]{5,}/.test(token));
+  return (
+    hasLongConsonantRun ||
+    (punctuationCount >= 2 && weakTokens > 0) ||
+    (tokens.length >= 3 && weakTokens / tokens.length >= 0.67)
+  );
+}
+
+function hasBusinessIdeaSignal(value: string, tokens: string[]): boolean {
+  const lower = value.toLowerCase();
+  return (
+    tokens.some((token) => BUSINESS_IDEA_SIGNALS.has(token)) ||
+    tokens.some((token) => token.startsWith('manufactur')) ||
+    BUSINESS_IDEA_PHRASES.some((phrase) => lower.includes(phrase))
+  );
+}
+
+function hasTargetMarketSignal(tokens: string[]): boolean {
+  return tokens.some((token) => TARGET_MARKET_SIGNALS.has(token));
+}
+
+function assessIdeaHardStop(idea: string): IdeaPlausibility {
   const trimmed = idea.trim();
   if (trimmed.length < 3) {
-    return { isPlausible: false, feedback: 'Enter a short description of the business idea.' };
+    return {
+      isPlausible: false,
+      feedback: 'Enter a short description of the business idea.',
+    };
   }
-  const letters = trimmed.toLowerCase().replace(/[^a-z]/g, '');
-  const vowels = (letters.match(/[aeiou]/g) ?? []).length;
-  const looksLikeGibberish =
-    !trimmed.includes(' ') &&
-    letters.length >= GIBBERISH_MIN_LETTERS &&
-    vowels / letters.length < GIBBERISH_VOWEL_RATIO;
-  if (looksLikeGibberish) {
+  const tokens = semanticTokens(trimmed);
+  if (looksLikeKeyboardMash(trimmed, tokens)) {
+    return {
+      isPlausible: false,
+      feedback:
+        "This doesn't look like a business idea yet. Describe what the business would do in a few words.",
+    };
+  }
+  if (tokens.length === 1 && !BUSINESS_IDEA_SINGLE_WORDS.has(tokens[0])) {
+    return {
+      isPlausible: false,
+      feedback:
+        "This doesn't look like a business idea yet. Describe what the business would do in a few words.",
+    };
+  }
+  return { isPlausible: true, feedback: null };
+}
+
+function assessIdeaPlausibilityHeuristic(idea: string): IdeaPlausibility {
+  const hardStop = assessIdeaHardStop(idea);
+  if (!hardStop.isPlausible) return hardStop;
+  const tokens = semanticTokens(idea.trim());
+  if (!hasBusinessIdeaSignal(idea, tokens)) {
     return {
       isPlausible: false,
       feedback:
@@ -3099,6 +3367,8 @@ function assessIdeaPlausibilityHeuristic(idea: string): IdeaPlausibility {
 }
 
 function normalizeIdeaPlausibility(input: Record<string, unknown>, idea: string): IdeaPlausibility {
+  const hardStop = assessIdeaHardStop(idea);
+  if (!hardStop.isPlausible) return hardStop;
   const heuristic = assessIdeaPlausibilityHeuristic(idea);
   if (typeof input.ideaIsPlausible !== 'boolean') return heuristic;
   const isPlausible = input.ideaIsPlausible;
@@ -3114,6 +3384,8 @@ function normalizeTargetMarketPlausibility(
   input: Record<string, unknown>,
   targetMarket: string,
 ): TargetMarketPlausibility {
+  const hardStop = assessTargetMarketHardStop(targetMarket);
+  if (!hardStop.isPlausible) return hardStop;
   const heuristic = assessTargetMarketPlausibilityHeuristic(targetMarket);
   if (typeof input.targetMarketIsPlausible !== 'boolean') return heuristic;
   const isPlausible = input.targetMarketIsPlausible;
@@ -3125,6 +3397,42 @@ function normalizeTargetMarketPlausibility(
   return { isPlausible: false, feedback };
 }
 
+function assessTargetMarketHardStop(targetMarket: string): TargetMarketPlausibility {
+  const trimmed = targetMarket.trim();
+  if (trimmed.length < 3) {
+    return {
+      isPlausible: false,
+      feedback: 'Describe the people or businesses you expect to serve.',
+    };
+  }
+  const tokens = semanticTokens(trimmed);
+  if (looksLikeKeyboardMash(trimmed, tokens)) {
+    return {
+      isPlausible: false,
+      feedback:
+        'That does not look like a customer segment yet. Describe the people or businesses you expect to serve.',
+    };
+  }
+  const normalized = tokens.join(' ');
+  const bannedVague =
+    /^(a|an|some|one|the)?\s*(bad|good|random|weird)?\s*(man|woman|person|guy|girl|people|someone|anyone)s?$/i;
+  if (bannedVague.test(normalized)) {
+    return {
+      isPlausible: false,
+      feedback:
+        'Describe a real customer group, role, organization type, or audience rather than a vague person.',
+    };
+  }
+  if (tokens.length === 1 && !TARGET_MARKET_SINGLE_WORDS.has(tokens[0])) {
+    return {
+      isPlausible: false,
+      feedback:
+        'Describe a specific customer group, role, organization type, or audience in a few words.',
+    };
+  }
+  return { isPlausible: true, feedback: null };
+}
+
 function assessTargetMarketPlausibilityHeuristic(targetMarket: string): TargetMarketPlausibility {
   const trimmed = targetMarket.trim();
   if (trimmed.length < 3) {
@@ -3133,38 +3441,38 @@ function assessTargetMarketPlausibilityHeuristic(targetMarket: string): TargetMa
       feedback: 'Describe the people or businesses you expect to serve.',
     };
   }
-  const lower = trimmed.toLowerCase();
-  const tokens = lower.match(/[a-z]+/g) ?? [];
-  const letters = tokens.join('');
-  if (letters.length < 4) {
-    return {
-      isPlausible: false,
-      feedback: 'Describe the people or businesses you expect to serve.',
-    };
-  }
-  const punctuationCount = (lower.match(/[^a-z0-9\s]/g) ?? []).length;
-  const consonantRuns = /[bcdfghjklmnpqrstvwxyz]{5,}/;
-  const weakTokens = tokens.filter((token) => {
-    const vowelCount = (token.match(/[aeiou]/g) ?? []).length;
-    return token.length <= 2 || vowelCount / token.length < 0.25;
-  }).length;
-  if (
-    tokens.some((token) => consonantRuns.test(token)) ||
-    (punctuationCount >= 2 && weakTokens > 0)
-  ) {
+  const tokens = semanticTokens(trimmed);
+  if (looksLikeKeyboardMash(trimmed, tokens)) {
     return {
       isPlausible: false,
       feedback:
         'That does not look like a customer segment yet. Describe the people or businesses you expect to serve.',
     };
   }
+  const normalized = tokens.join(' ');
   const bannedVague =
     /^(a|an|some|one|the)?\s*(bad|good|random|weird)?\s*(man|woman|person|guy|girl|people|someone|anyone)s?$/i;
-  if (bannedVague.test(trimmed)) {
+  if (bannedVague.test(normalized)) {
     return {
       isPlausible: false,
       feedback:
         'Describe a real customer group, role, organization type, or audience rather than a vague person.',
+    };
+  }
+  if (tokens.length === 1) {
+    return TARGET_MARKET_SINGLE_WORDS.has(tokens[0])
+      ? { isPlausible: true, feedback: null }
+      : {
+          isPlausible: false,
+          feedback:
+            'Describe a specific customer group, role, organization type, or audience in a few words.',
+        };
+  }
+  if (!hasTargetMarketSignal(tokens)) {
+    return {
+      isPlausible: false,
+      feedback:
+        'Describe a specific customer group, role, organization type, or audience in a few words.',
     };
   }
   return { isPlausible: true, feedback: null };

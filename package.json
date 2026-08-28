@@ -14,6 +14,7 @@
     "test:coverage": "vitest run --coverage",
     "migrate": "tsx scripts/apply-migrations.ts",
     "backup": "tsx scripts/backup-database.ts",
+    "check-fallback-drift": "tsx scripts/check-fallback-drift.ts",
     "generate:openapi": "tsx scripts/export-openapi.ts",
     "generate:client": "npm run generate:openapi && openapi-typescript docs/openapi.json -o packages/desk-client/src/openapi-types.ts",
     "lint": "eslint src --ext .ts",

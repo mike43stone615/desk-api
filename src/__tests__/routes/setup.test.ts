@@ -286,6 +286,37 @@ describe('auth is required', () => {
     expect(res.statusCode).toBe(401);
   });
 
+  it('rejects thin one-word target markets but accepts a specific phrase', async () => {
+    const thin = await app.inject({
+      url: '/functions/v1/analyze-business-setup',
+      method: 'POST',
+      payload: {
+        action: 'classify_unregistered_business',
+        businessIdea: 'accounting service',
+        targetMarket: 'angels',
+        industries: ['Accounting Firm', 'Consulting / Professional Services'],
+      },
+    });
+    expect(thin.statusCode).toBe(200);
+    const thinBody = JSON.parse(thin.payload) as Record<string, unknown>;
+    expect(thinBody.targetMarketIsPlausible).toBe(false);
+    expect(thinBody.targetMarketFeedback).toContain('specific customer group');
+
+    const specific = await app.inject({
+      url: '/functions/v1/analyze-business-setup',
+      method: 'POST',
+      payload: {
+        action: 'classify_unregistered_business',
+        businessIdea: 'accounting service',
+        targetMarket: 'angel investors and startup founders',
+        industries: ['Accounting Firm', 'Consulting / Professional Services'],
+      },
+    });
+    expect(specific.statusCode).toBe(200);
+    const specificBody = JSON.parse(specific.payload) as Record<string, unknown>;
+    expect(specificBody.targetMarketIsPlausible).toBe(true);
+    expect(specificBody.targetMarketFeedback).toBeNull();
+  });
   it('classifies vehicle-wash chemical manufacturing as B2B chemical manufacturing in fallback', async () => {
     const res = await app.inject({
       method: 'POST',

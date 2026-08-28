@@ -16,6 +16,7 @@ coverage/
 *.pgdump
 !migrations/*.sql
 backups/
+logs/
 
 # Real user data exported for scripts/migrate-from-d1.ts — password
 # hashes, session tokens. Never commit.
