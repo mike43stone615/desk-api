@@ -8,9 +8,9 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: '20'
           cache: 'npm'
@@ -55,7 +55,7 @@ jobs:
       # runner's own service account already has full access to — unlike
       # C:\Users\User\desk-api, which NT AUTHORITY\NetworkService (the
       # identity this runner service runs as) cannot read at all.
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       # .env is gitignored, so it never comes down with checkout — without
       # it the service starts with no DATABASE_URL/API keys/PORT and never
