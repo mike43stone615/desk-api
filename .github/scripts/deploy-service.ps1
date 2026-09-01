@@ -42,7 +42,12 @@ Start-Process -FilePath 'npm.cmd' -ArgumentList @('run', $StartCommand) -Working
   -RedirectStandardError (Join-Path $temp "$(Split-Path $RepoPath -Leaf).err.log") `
   -WindowStyle Hidden
 
-$deadline = (Get-Date).AddSeconds(30)
+# 30s was too tight: confirmed live that a service started right after a
+# fresh `npm ci` under this account can take well over 30s to bind (likely
+# Windows Defender scanning the just-written node_modules) even though the
+# same code starts in ~12s from a warm directory — the process was healthy
+# and serving fine within minutes, the deploy just gave up on it too early.
+$deadline = (Get-Date).AddSeconds(90)
 do {
   Start-Sleep -Seconds 2
   try {
@@ -54,4 +59,4 @@ do {
   } catch {}
 } while ((Get-Date) -lt $deadline)
 
-throw "Service did not report healthy on port $Port within 30s of restart."
+throw "Service did not report healthy on port $Port within 90s of restart."

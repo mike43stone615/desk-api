@@ -35,6 +35,21 @@ jobs:
     runs-on: [self-hosted, windows, deploy]
 
     steps:
+      # A previous run's live process can still be holding files open (e.g.
+      # esbuild.exe), which makes actions/checkout's directory-clean step
+      # fail with EPERM — confirmed live. deploy-service.ps1 also stops and
+      # restarts the service later, but by then checkout has already tried
+      # and failed, so it has to happen here too, first.
+      - name: Stop the previous run of the live service
+        shell: powershell
+        run: |
+          $owner = (Get-NetTCPConnection -LocalPort 3458 -State Listen -ErrorAction SilentlyContinue | Select-Object -First 1 -ExpandProperty OwningProcess)
+          if ($owner) {
+            Write-Output "Stopping process on port 3458 (PID $owner) before checkout"
+            Stop-Process -Id $owner -Force
+            Start-Sleep -Seconds 2
+          }
+
       # actions/checkout authenticates with GitHub's own ephemeral
       # GITHUB_TOKEN and checks out into $env:GITHUB_WORKSPACE, a path the
       # runner's own service account already has full access to — unlike
