@@ -65,20 +65,22 @@ export class PgDatabaseAdapter implements DatabaseRepository {
   }
 
   async markUserEmailConfirmed(userId: string, confirmedAt: string): Promise<void> {
-    await this.pool.query(`UPDATE users SET email_confirmed_at = $1, updated_at = $2 WHERE id = $3`, [
-      confirmedAt,
-      nowUtc(),
-      userId,
-    ]);
+    await this.pool.query(
+      `UPDATE users SET email_confirmed_at = $1, updated_at = $2 WHERE id = $3`,
+      [confirmedAt, nowUtc(), userId],
+    );
   }
 
-  async createSession(id: string, userId: string, token: string, expiresAt: string): Promise<Session> {
-    await this.pool.query(`INSERT INTO sessions (id, user_id, token, expires_at) VALUES ($1, $2, $3, $4)`, [
-      id,
-      userId,
-      token,
-      expiresAt,
-    ]);
+  async createSession(
+    id: string,
+    userId: string,
+    token: string,
+    expiresAt: string,
+  ): Promise<Session> {
+    await this.pool.query(
+      `INSERT INTO sessions (id, user_id, token, expires_at) VALUES ($1, $2, $3, $4)`,
+      [id, userId, token, expiresAt],
+    );
     const session = await this.findSessionByToken(token);
     if (!session) throw new Error('Session not found after insert.');
     return session;
@@ -104,8 +106,12 @@ export class PgDatabaseAdapter implements DatabaseRepository {
     await this.pool.query(`DELETE FROM sessions WHERE expires_at < $1`, [nowUtc()]);
   }
 
-  async createResetToken(id: string, userId: string, token: string, expiresAt: string): Promise<void> {
-    await this.pool.query(`DELETE FROM password_reset_tokens WHERE user_id = $1 AND used_at IS NULL`, [userId]);
+  async createResetToken(
+    id: string,
+    userId: string,
+    token: string,
+    expiresAt: string,
+  ): Promise<void> {
     await this.pool.query(
       `INSERT INTO password_reset_tokens (id, user_id, token, expires_at) VALUES ($1, $2, $3, $4)`,
       [id, userId, token, expiresAt],
@@ -130,15 +136,33 @@ export class PgDatabaseAdapter implements DatabaseRepository {
   }
 
   async markResetTokenUsed(token: string, usedAt: string): Promise<void> {
-    await this.pool.query(`UPDATE password_reset_tokens SET used_at = $1 WHERE token = $2`, [usedAt, token]);
+    await this.pool.query(`UPDATE password_reset_tokens SET used_at = $1 WHERE token = $2`, [
+      usedAt,
+      token,
+    ]);
+  }
+
+  async markUnusedResetTokensUsedForUser(userId: string, usedAt: string): Promise<void> {
+    await this.pool.query(
+      `UPDATE password_reset_tokens SET used_at = $2 WHERE user_id = $1 AND used_at IS NULL`,
+      [userId, usedAt],
+    );
   }
 
   async deleteExpiredPasswordResetTokens(): Promise<void> {
     await this.pool.query(`DELETE FROM password_reset_tokens WHERE expires_at < $1`, [nowUtc()]);
   }
 
-  async createEmailConfirmationToken(id: string, userId: string, token: string, expiresAt: string): Promise<void> {
-    await this.pool.query(`DELETE FROM email_confirmation_tokens WHERE user_id = $1 AND used_at IS NULL`, [userId]);
+  async createEmailConfirmationToken(
+    id: string,
+    userId: string,
+    token: string,
+    expiresAt: string,
+  ): Promise<void> {
+    await this.pool.query(
+      `DELETE FROM email_confirmation_tokens WHERE user_id = $1 AND used_at IS NULL`,
+      [userId],
+    );
     await this.pool.query(
       `INSERT INTO email_confirmation_tokens (id, user_id, token, expires_at) VALUES ($1, $2, $3, $4)`,
       [id, userId, token, expiresAt],
@@ -153,7 +177,9 @@ export class PgDatabaseAdapter implements DatabaseRepository {
     return rows[0] ? mapEmailConfirmationToken(rows[0]) : null;
   }
 
-  async findLatestEmailConfirmationTokenForUser(userId: string): Promise<EmailConfirmationToken | null> {
+  async findLatestEmailConfirmationTokenForUser(
+    userId: string,
+  ): Promise<EmailConfirmationToken | null> {
     const { rows } = await this.pool.query<EmailConfirmationTokenRow>(
       `SELECT id, user_id, token, expires_at, used_at, created_at
        FROM email_confirmation_tokens WHERE user_id = $1 ORDER BY created_at DESC LIMIT 1`,
@@ -163,11 +189,16 @@ export class PgDatabaseAdapter implements DatabaseRepository {
   }
 
   async markEmailConfirmationTokenUsed(token: string, usedAt: string): Promise<void> {
-    await this.pool.query(`UPDATE email_confirmation_tokens SET used_at = $1 WHERE token = $2`, [usedAt, token]);
+    await this.pool.query(`UPDATE email_confirmation_tokens SET used_at = $1 WHERE token = $2`, [
+      usedAt,
+      token,
+    ]);
   }
 
   async deleteExpiredEmailConfirmationTokens(): Promise<void> {
-    await this.pool.query(`DELETE FROM email_confirmation_tokens WHERE expires_at < $1`, [nowUtc()]);
+    await this.pool.query(`DELETE FROM email_confirmation_tokens WHERE expires_at < $1`, [
+      nowUtc(),
+    ]);
   }
 }
 

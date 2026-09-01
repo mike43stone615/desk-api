@@ -56,6 +56,29 @@ export async function sendEmailConfirmationEmail(
   });
 }
 
+export async function sendAccountAlreadyExistsEmail(
+  config: AppConfig,
+  to: string,
+  requestId: string,
+): Promise<void> {
+  const signInUrl = `${config.appBaseUrl}/login`;
+  await sendEmail(config, {
+    to,
+    subject: 'You already have a Desk account',
+    html: themedEmailHtml({
+      title: 'You already have an account',
+      body: 'Someone (hopefully you) just tried to sign up for a Desk account with this email address, but one already exists. If this was you, sign in below — or use "Forgot password" on the sign-in page if you don\'t remember your password.',
+      actionLabel: 'Sign in',
+      actionUrl: signInUrl,
+      note: 'If you did not try to sign up, you can safely ignore this email — no changes were made to your account.',
+    }),
+    requestId,
+    skippedEvent: 'account_already_exists_email_skipped',
+    failedEvent: 'account_already_exists_email_failed',
+    sentEvent: 'account_already_exists_email_sent',
+  });
+}
+
 interface EmailRequest {
   to: string;
   subject: string;

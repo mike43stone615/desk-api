@@ -48,6 +48,13 @@ const schema = z.object({
   // ported unchanged from the Hono version's config.adminEmails.
   ADMIN_EMAILS: z.string().optional(),
 
+  // Optional alternate admin auth for /admin/* (src/routes/admin.ts's guard()):
+  // a request with a matching x-api-key header is treated as admin without a
+  // session, same pattern as registry-api/compliance-os/market-validation-api's
+  // admin routes. Session + ADMIN_EMAILS keeps working unchanged either way —
+  // this is an additional path in, not a replacement.
+  ADMIN_API_KEY: z.string().optional(),
+
   COMPLIANCE_OS_URL: z.string().optional(),
   COMPLIANCE_OS_API_KEY: z.string().optional(),
   REGISTRY_API_URL: z.string().optional(),
@@ -110,6 +117,7 @@ export interface AppConfig {
   confirmationTokenDurationMinutes: number;
   resendCooldownSeconds: number;
   adminEmails: string[];
+  adminApiKey: string | undefined;
   complianceOsUrl: string | undefined;
   complianceOsApiKey: string | undefined;
   registryApiUrl: string | undefined;
@@ -143,6 +151,7 @@ export const config: AppConfig = {
   confirmationTokenDurationMinutes: env.CONFIRMATION_TOKEN_DURATION_MINUTES,
   resendCooldownSeconds: env.RESEND_COOLDOWN_SECONDS,
   adminEmails: splitCsv(env.ADMIN_EMAILS).map((e) => e.toLowerCase()),
+  adminApiKey: env.ADMIN_API_KEY,
   complianceOsUrl: env.COMPLIANCE_OS_URL,
   complianceOsApiKey: env.COMPLIANCE_OS_API_KEY,
   registryApiUrl: env.REGISTRY_API_URL,

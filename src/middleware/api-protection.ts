@@ -136,7 +136,20 @@ async function redisCheck(key: string): Promise<RateLimitResult> {
  * number of trusted reverse-proxy hops (TRUSTED_PROXY_COUNT). With the
  * default of 0, X-Forwarded-For is ignored entirely and request.ip is used.
  */
-function getClientIp(request: FastifyRequest): string {
+export function getClientIp(request: FastifyRequest): string {
+  // cf-connecting-ip is set by Cloudflare's edge itself for every request
+  // that actually passes through Cloudflare, and it overwrites (rather than
+  // appends to) any value a client tries to send under that same header
+  // name — so unlike X-Forwarded-For, no hop-counting is needed to avoid
+  // trusting a caller-supplied value. This is why request.ip alone
+  // (cross-31) collapsed every visitor to the same address behind this
+  // platform's Cloudflare Tunnel: the raw TCP connection Fastify sees is
+  // always the local cloudflared process, never the real visitor.
+  const cfConnectingIp = request.headers['cf-connecting-ip'];
+  if (typeof cfConnectingIp === 'string' && cfConnectingIp.length > 0) {
+    return cfConnectingIp;
+  }
+
   const trustedHops = config.trustedProxyCount;
   if (trustedHops > 0) {
     const fwd = request.headers['x-forwarded-for'];

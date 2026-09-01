@@ -1,7 +1,9 @@
 // Compliance-OS / registry-api integration proxies — covers the
 // fallback-catalog behavior when the upstream URL isn't configured (as in
 // this test process — COMPLIANCE_OS_URL/REGISTRY_API_URL are unset) and the
-// api-gateway's fail-closed 503 for the same reason.
+// registry api-gateway's fail-closed 503 for the same reason. The equivalent
+// compliance-os gateway (/compliance/*) was removed — see cross-20 in the
+// audit — so its would-be 503 test is now a 404 test confirming it's gone.
 import { describe, it, expect, vi, beforeAll } from 'vitest';
 
 vi.mock('../../db', async () => {
@@ -55,14 +57,14 @@ describe('registry integration — falls back to local name-availability heurist
   });
 });
 
-describe('api gateway (/compliance/*, /registry/*) — fails closed when unconfigured', () => {
-  it('GET /compliance/anything returns 503', async () => {
-    const res = await app.inject({ method: 'GET', url: '/compliance/anything' });
-    expect(res.statusCode).toBe(503);
-  });
-
+describe('api gateway (/registry/*) — fails closed when unconfigured', () => {
   it('GET /registry/anything returns 503', async () => {
     const res = await app.inject({ method: 'GET', url: '/registry/anything' });
     expect(res.statusCode).toBe(503);
+  });
+
+  it('GET /compliance/anything no longer exists (removed — see cross-20 in the audit)', async () => {
+    const res = await app.inject({ method: 'GET', url: '/compliance/anything' });
+    expect(res.statusCode).toBe(404);
   });
 });

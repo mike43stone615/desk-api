@@ -1,6 +1,11 @@
-// Transparent proxy to compliance-os (/compliance/*) and registry-api
-// (/registry/*) — ported as-is from the original api/routes/api-gateway.ts
-// (Hono). Registered as wildcard routes in app.ts.
+// Transparent proxy to registry-api (/registry/*) — ported as-is from the
+// original api/routes/api-gateway.ts (Hono). Registered as a wildcard route
+// in app.ts. The equivalent compliance-os proxy (/compliance/*) was removed
+// (see cross-20 in the audit): unauthenticated, forwarded the caller's own
+// API key verbatim, and exposed compliance-os's known SSRF/DoS issues to the
+// public internet with no real product ever calling it — the app talks to
+// compliance-os through the separately-authenticated /integrations/compliance/*
+// routes instead.
 import type { FastifyReply, FastifyRequest } from 'fastify';
 import { HttpError } from '../middleware/http-error';
 import { config } from '../config';
@@ -45,12 +50,6 @@ async function proxyUpstream(request: FastifyRequest, reply: FastifyReply, targe
   const contentType = upstreamResp.headers.get('content-type');
   if (contentType) reply.header('content-type', contentType);
   return reply.send(buffer);
-}
-
-export async function complianceGatewayHandler(request: FastifyRequest, reply: FastifyReply) {
-  if (!config.complianceOsUrl) throw new HttpError(503, 'Compliance service is not configured.');
-  const path = stripMountedPrefix(request.url.split('?')[0], '/compliance');
-  return proxyUpstream(request, reply, config.complianceOsUrl, path);
 }
 
 export async function registryGatewayHandler(request: FastifyRequest, reply: FastifyReply) {

@@ -3,11 +3,13 @@
 // Runs on port 3458 (3456=registry-api, 3457=market-validation-api,
 // 3000=compliance-os are already taken in this local fleet).
 //
-// This service is NOT wired into the Cloudflare Tunnel/DNS/watchdog — it
-// runs standalone here for local development and review. Cutover is a
-// separate, later step done by someone else.
+// Live: the Cloudflare Tunnel routes api.deskbusiness.co to
+// http://localhost:3458, i.e. this process. Bind loopback-only — the
+// tunnel always connects via localhost on this same machine.
 
-// tracing MUST be first — patches modules before they are loaded
+// Sentry MUST be first — captures errors during the imports/setup below too.
+import { Sentry } from './sentry';
+// tracing MUST come right after Sentry — patches modules before they are loaded
 import './tracing';
 import './config';
 import { buildApp } from './app';
@@ -19,9 +21,10 @@ import { startCleanupCron, stopCleanupCron } from './jobs/cron';
 async function main() {
   await connectRedis();
   const app = await buildApp();
+  Sentry.setupFastifyErrorHandler(app);
 
   try {
-    await app.listen({ port: config.port, host: '0.0.0.0' });
+    await app.listen({ port: config.port, host: '127.0.0.1' });
   } catch (error) {
     app.log.error(error);
     process.exitCode = 1;

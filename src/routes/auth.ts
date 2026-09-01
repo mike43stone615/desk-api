@@ -11,7 +11,13 @@ import { HttpError } from '../middleware/http-error';
 import { authService } from '../infrastructure/auth';
 import { AuthError } from '../infrastructure/auth/auth-service';
 import { requireAuth, extractBearerToken } from '../middleware/auth';
-import { sendEmailConfirmationEmail, sendPasswordResetEmail } from '../infrastructure/email/resend';
+import { getClientIp } from '../middleware/api-protection';
+import { checkSignupRateLimit } from '../middleware/signup-limiter';
+import {
+  sendEmailConfirmationEmail,
+  sendPasswordResetEmail,
+  sendAccountAlreadyExistsEmail,
+} from '../infrastructure/email/resend';
 import { config } from '../config';
 import { authEventsTotal } from '../modules/metrics';
 import {
@@ -95,15 +101,33 @@ export async function signInHandler(request: FastifyRequest, reply: FastifyReply
 }
 
 export async function signUpHandler(request: FastifyRequest, reply: FastifyReply) {
+  if (!checkSignupRateLimit(getClientIp(request))) {
+    throw new HttpError(429, 'Too many signup attempts. Please try again later.');
+  }
   const parsed = SignUpSchema.safeParse(request.body ?? {});
   if (!parsed.success) throw new HttpError(400, parsed.error.issues.map((i) => i.message).join('; '));
   const { email, password, firstName, lastName } = parsed.data;
 
+  const trimmedEmail = email.trim();
   try {
-    const result = await authService.signUp(email.trim(), password, firstName.trim(), lastName.trim());
-    await sendEmailConfirmationEmail(config, result.user.email, result.confirmationToken, request.id);
-    audit(request, 'signup_success', 'ok', { userId: result.user.id });
-    return reply.status(201).send({ user: result.user, emailConfirmationRequired: true });
+    const result = await authService.signUp(trimmedEmail, password, firstName.trim(), lastName.trim());
+    if (result) {
+      await sendEmailConfirmationEmail(config, result.user.email, result.confirmationToken, request.id);
+      audit(request, 'signup_success', 'ok', { userId: result.user.id });
+    } else {
+      // Email already registered — notify the real account owner instead of
+      // telling the caller, so this endpoint can't be used to check whether
+      // an email has an account (same shape as requestPasswordReset()).
+      await sendAccountAlreadyExistsEmail(config, trimmedEmail, request.id);
+      audit(request, 'signup_already_exists', 'ok');
+    }
+    // Response is identical either way, including status code and body
+    // shape — see the comment above.
+    return reply.status(201).send({
+      ok: true,
+      emailConfirmationRequired: true,
+      message: 'Check your email to confirm your account before signing in.',
+    });
   } catch (err) {
     if (err instanceof AuthError) {
       audit(request, 'signup_failed', 'error', { code: err.code });

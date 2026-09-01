@@ -11,14 +11,23 @@
 //     (see its src/domain/market-research/oews-cache.ts).
 //  2. PATCH/DELETE handlers now call logMutation() (modules/audit/
 //     mutation-audit.ts) — new mutation_audit_log table, actor = the admin
-//     user's email (this route group is session-authenticated, not
-//     API-key-authenticated, unlike the sibling services' admin routes).
+//     user's email when authenticated by session, or the literal string
+//     'admin-api-key' when authenticated by ADMIN_API_KEY (see guard()) —
+//     that path has no session user to attribute the mutation to.
+//
+// guard() also accepts a matching ADMIN_API_KEY via x-api-key as an
+// alternative to session + ADMIN_EMAILS, same pattern as registry-api's,
+// compliance-os's, and market-validation-api's admin routes. Added so this
+// service's admin surface can be checked/scripted the same way as its
+// siblings without a real login; the session + email-allowlist path is
+// unchanged and still works exactly as before.
 import type { FastifyReply, FastifyRequest } from 'fastify';
 import { HttpError } from '../middleware/http-error';
 import { requireAuth, requireAdmin } from '../middleware/auth';
 import { pool } from '../db';
 import { config } from '../config';
 import { logMutation, requestIp, requestUserAgent } from '../modules/audit/mutation-audit';
+import { timingSafeEqualString } from '../utils/timing-safe-compare';
 
 type AdminSource = 'desk' | 'registry' | 'compliance';
 
@@ -439,6 +448,14 @@ async function proxyUpstreamMutation(
 }
 
 async function guard(request: FastifyRequest, reply: FastifyReply): Promise<void> {
+  const provided = request.headers['x-api-key'];
+  if (
+    config.adminApiKey &&
+    typeof provided === 'string' &&
+    timingSafeEqualString(provided, config.adminApiKey)
+  ) {
+    return;
+  }
   await requireAuth(request, reply);
   await requireAdmin(request, reply);
 }
@@ -580,10 +597,9 @@ export async function adminTableUpdateRowHandler(request: FastifyRequest, reply:
   const row = rowResult.rows[0];
   if (!row) throw new HttpError(404, 'Row not found.');
 
-  const admin = request.currentUser!;
   logMutation({
-    userId: admin.id,
-    userEmail: admin.email,
+    userId: request.currentUser?.id ?? null,
+    userEmail: request.currentUser?.email ?? 'admin-api-key',
     action: 'admin_table.update',
     entityType: tableName,
     entityId: id,
@@ -622,10 +638,9 @@ export async function adminTableDeleteRowHandler(request: FastifyRequest, reply:
     [id],
   );
 
-  const admin = request.currentUser!;
   logMutation({
-    userId: admin.id,
-    userEmail: admin.email,
+    userId: request.currentUser?.id ?? null,
+    userEmail: request.currentUser?.email ?? 'admin-api-key',
     action: 'admin_table.delete',
     entityType: tableName,
     entityId: id,

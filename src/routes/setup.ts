@@ -12,7 +12,7 @@
 // registered against these exact two routes.
 import type { FastifyReply, FastifyRequest } from 'fastify';
 import { HttpError } from '../middleware/http-error';
-import { requireAuth } from '../middleware/auth';
+import { requireAuth, requireConfirmedEmail } from '../middleware/auth';
 import { generateId, nowUtc } from '../domain/auth/tokens';
 import { pool } from '../db';
 import { DraftPatchSchema, MemberInviteSchema } from '../validators/setup';
@@ -107,6 +107,7 @@ function formatMemberRow(row: Record<string, unknown>) {
 
 export async function listDraftsHandler(request: FastifyRequest, reply: FastifyReply) {
   await requireAuth(request, reply);
+  await requireConfirmedEmail(request, reply);
   const user = request.currentUser!;
   const { rows } = await pool.query<DraftRow>(
     `SELECT id, draft_json, created_at, updated_at FROM business_setup_drafts WHERE user_id = $1 ORDER BY updated_at DESC`,
@@ -117,6 +118,7 @@ export async function listDraftsHandler(request: FastifyRequest, reply: FastifyR
 
 export async function getDraftHandler(request: FastifyRequest, reply: FastifyReply) {
   await requireAuth(request, reply);
+  await requireConfirmedEmail(request, reply);
   const user = request.currentUser!;
   const { id } = request.params as { id: string };
   const { rows } = await pool.query<DraftRow>(
@@ -130,6 +132,7 @@ export async function getDraftHandler(request: FastifyRequest, reply: FastifyRep
 
 export async function createDraftHandler(request: FastifyRequest, reply: FastifyReply) {
   await requireAuth(request, reply);
+  await requireConfirmedEmail(request, reply);
   const user = request.currentUser!;
 
   const { rows: countRows } = await pool.query<{ count: string }>(
@@ -152,6 +155,7 @@ export async function createDraftHandler(request: FastifyRequest, reply: Fastify
 
 export async function patchDraftHandler(request: FastifyRequest, reply: FastifyReply) {
   await requireAuth(request, reply);
+  await requireConfirmedEmail(request, reply);
   const user = request.currentUser!;
   const { id } = request.params as { id: string };
 
@@ -173,6 +177,7 @@ export async function patchDraftHandler(request: FastifyRequest, reply: FastifyR
 
 export async function deleteDraftHandler(request: FastifyRequest, reply: FastifyReply) {
   await requireAuth(request, reply);
+  await requireConfirmedEmail(request, reply);
   const user = request.currentUser!;
   const { id } = request.params as { id: string };
   const result = await pool.query(`DELETE FROM business_setup_drafts WHERE id = $1 AND user_id = $2`, [id, user.id]);
@@ -182,6 +187,7 @@ export async function deleteDraftHandler(request: FastifyRequest, reply: Fastify
 
 export async function completeDraftHandler(request: FastifyRequest, reply: FastifyReply) {
   await requireAuth(request, reply);
+  await requireConfirmedEmail(request, reply);
   const user = request.currentUser!;
   const { id } = request.params as { id: string };
 
@@ -229,6 +235,7 @@ export async function completeDraftHandler(request: FastifyRequest, reply: Fasti
 
 export async function listBusinessesHandler(request: FastifyRequest, reply: FastifyReply) {
   await requireAuth(request, reply);
+  await requireConfirmedEmail(request, reply);
   const user = request.currentUser!;
   const { rows } = await pool.query<{ id: string; name: string; industry: string | null; role: BusinessMemberRole }>(
     `SELECT b.id, b.name, b.industry, bm.role
@@ -251,6 +258,7 @@ export async function listBusinessesHandler(request: FastifyRequest, reply: Fast
 
 export async function listBusinessMembersHandler(request: FastifyRequest, reply: FastifyReply) {
   await requireAuth(request, reply);
+  await requireConfirmedEmail(request, reply);
   const user = request.currentUser!;
   const { id: businessId } = request.params as { id: string };
   await requireBusinessMembership(businessId, user.id);
@@ -270,6 +278,7 @@ export async function listBusinessMembersHandler(request: FastifyRequest, reply:
 
 export async function inviteBusinessMemberHandler(request: FastifyRequest, reply: FastifyReply) {
   await requireAuth(request, reply);
+  await requireConfirmedEmail(request, reply);
   const user = request.currentUser!;
   const { id: businessId } = request.params as { id: string };
   const requester = await requireBusinessMembership(businessId, user.id);
@@ -309,6 +318,7 @@ export async function inviteBusinessMemberHandler(request: FastifyRequest, reply
 
 export async function removeBusinessMemberHandler(request: FastifyRequest, reply: FastifyReply) {
   await requireAuth(request, reply);
+  await requireConfirmedEmail(request, reply);
   const user = request.currentUser!;
   const { id: businessId, membershipId } = request.params as { id: string; membershipId: string };
   const requester = await requireBusinessMembership(businessId, user.id);

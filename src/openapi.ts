@@ -381,49 +381,15 @@ export const OPENAPI_SPEC = {
       },
     },
     // ── api.deskbusiness.co gateway — transparent proxy to upstream services ─
-    // Registered as a Fastify wildcard route (`instance.all('/compliance/*', ...)`),
+    // Registered as a Fastify wildcard route (`instance.all('/registry/*', ...)`),
     // so every HTTP method and every sub-path is forwarded byte-for-byte (JSON
     // bodies re-serialized, all other content passed through) to
-    // COMPLIANCE_OS_URL with the /compliance prefix stripped. {proxyPath}
+    // REGISTRY_API_URL with the /registry prefix stripped. {proxyPath}
     // below stands in for the full wildcard remainder of the path, which
-    // OpenAPI 3.0 has no native catch-all syntax for.
-    '/compliance/{proxyPath}': {
-      get: {
-        tags: ['Integrations'],
-        summary: 'Transparent proxy to compliance-os',
-        description: 'Forwards the request (any method) to COMPLIANCE_OS_URL with the /compliance prefix stripped. Returns 503 if COMPLIANCE_OS_URL is not configured.',
-        parameters: [{ name: 'proxyPath', in: 'path', required: true, schema: { type: 'string' }, description: 'Full remaining path, forwarded as-is.' }],
-        responses: { '200': { description: 'Upstream response, forwarded as-is' }, '503': { description: 'Compliance service is not configured.' } },
-      },
-      post: {
-        tags: ['Integrations'],
-        summary: 'Transparent proxy to compliance-os',
-        description: 'Forwards the request (any method) to COMPLIANCE_OS_URL with the /compliance prefix stripped. Returns 503 if COMPLIANCE_OS_URL is not configured.',
-        parameters: [{ name: 'proxyPath', in: 'path', required: true, schema: { type: 'string' }, description: 'Full remaining path, forwarded as-is.' }],
-        responses: { '200': { description: 'Upstream response, forwarded as-is' }, '503': { description: 'Compliance service is not configured.' } },
-      },
-      put: {
-        tags: ['Integrations'],
-        summary: 'Transparent proxy to compliance-os',
-        description: 'Forwards the request (any method) to COMPLIANCE_OS_URL with the /compliance prefix stripped. Returns 503 if COMPLIANCE_OS_URL is not configured.',
-        parameters: [{ name: 'proxyPath', in: 'path', required: true, schema: { type: 'string' }, description: 'Full remaining path, forwarded as-is.' }],
-        responses: { '200': { description: 'Upstream response, forwarded as-is' }, '503': { description: 'Compliance service is not configured.' } },
-      },
-      patch: {
-        tags: ['Integrations'],
-        summary: 'Transparent proxy to compliance-os',
-        description: 'Forwards the request (any method) to COMPLIANCE_OS_URL with the /compliance prefix stripped. Returns 503 if COMPLIANCE_OS_URL is not configured.',
-        parameters: [{ name: 'proxyPath', in: 'path', required: true, schema: { type: 'string' }, description: 'Full remaining path, forwarded as-is.' }],
-        responses: { '200': { description: 'Upstream response, forwarded as-is' }, '503': { description: 'Compliance service is not configured.' } },
-      },
-      delete: {
-        tags: ['Integrations'],
-        summary: 'Transparent proxy to compliance-os',
-        description: 'Forwards the request (any method) to COMPLIANCE_OS_URL with the /compliance prefix stripped. Returns 503 if COMPLIANCE_OS_URL is not configured.',
-        parameters: [{ name: 'proxyPath', in: 'path', required: true, schema: { type: 'string' }, description: 'Full remaining path, forwarded as-is.' }],
-        responses: { '200': { description: 'Upstream response, forwarded as-is' }, '503': { description: 'Compliance service is not configured.' } },
-      },
-    },
+    // OpenAPI 3.0 has no native catch-all syntax for. The equivalent
+    // compliance-os proxy (/compliance/*) was removed — see cross-20 in the
+    // audit — since it was unauthenticated, forwarded the caller's own API
+    // key verbatim, and nothing in the real product used it.
     '/registry/{proxyPath}': {
       get: {
         tags: ['Integrations'],

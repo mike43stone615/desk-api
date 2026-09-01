@@ -33,6 +33,23 @@ export async function requireAuth(request: FastifyRequest, _reply: FastifyReply)
 
 /**
  * Fastify preHandler — must run after requireAuth (relies on
+ * request.currentUser). Blocks business-setup actions until the account's
+ * email is confirmed, so emailConfirmedAt is an enforced gate rather than a
+ * tracked-but-unused field.
+ */
+export async function requireConfirmedEmail(
+  request: FastifyRequest,
+  _reply: FastifyReply,
+): Promise<void> {
+  const user = request.currentUser;
+  if (!user) throw new HttpError(401, 'Authentication required.');
+  if (!user.emailConfirmedAt) {
+    throw new HttpError(403, 'Please confirm your email address before continuing.');
+  }
+}
+
+/**
+ * Fastify preHandler — must run after requireAuth (relies on
  * request.currentUser). Gated by email allowlist (config.adminEmails), same
  * as the original's inline requireAdmin() in api/routes/admin.ts.
  */

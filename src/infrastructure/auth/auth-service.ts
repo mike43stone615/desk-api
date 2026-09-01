@@ -44,14 +44,18 @@ export class DeskAuthService implements AuthService {
     return verifyPassword(password, hash);
   }
 
+  // Returns null (rather than throwing) when the email is already
+  // registered, so the caller can respond identically either way instead of
+  // confirming account existence — same enumeration-safe shape as
+  // requestPasswordReset().
   async signUp(
     email: string,
     password: string,
     firstName: string,
     lastName: string,
-  ): Promise<SignupResult> {
+  ): Promise<SignupResult | null> {
     const existing = await this.db.findUserByEmail(email);
-    if (existing) throw new AuthError('email_in_use');
+    if (existing) return null;
 
     validateName(firstName, 'first_name_required');
     validateName(lastName, 'last_name_required');
@@ -68,7 +72,7 @@ export class DeskAuthService implements AuthService {
         lastName.trim(),
       );
     } catch (error) {
-      if (isDuplicateEmailError(error)) throw new AuthError('email_in_use');
+      if (isDuplicateEmailError(error)) return null;
       throw error;
     }
     const confirmationToken = await this.createEmailConfirmationToken(user.id);
@@ -132,7 +136,9 @@ export class DeskAuthService implements AuthService {
 
     const passwordHash = await hashPassword(newPassword);
     await this.db.updateUserPassword(record.userId, passwordHash);
-    await this.db.markResetTokenUsed(token, nowUtc());
+    const resetAt = nowUtc();
+    await this.db.markResetTokenUsed(token, resetAt);
+    await this.db.markUnusedResetTokensUsedForUser(record.userId, resetAt);
     // Revoke every existing session for this user — see this file's header
     // comment. A password reset should invalidate any already-issued session,
     // not just future sign-ins with the old password.

@@ -30,7 +30,10 @@ export function createFakeDb() {
     return [...users.values()].find((u) => u.email === email);
   }
 
-  async function query(sql: string, params: unknown[] = []): Promise<{ rows: FakeRow[]; rowCount: number }> {
+  async function query(
+    sql: string,
+    params: unknown[] = [],
+  ): Promise<{ rows: FakeRow[]; rowCount: number }> {
     const s = sql.replace(/\s+/g, ' ').trim();
     const p = params as string[];
 
@@ -56,7 +59,9 @@ export function createFakeDb() {
     if (s.startsWith('INSERT INTO users')) {
       const [id, email, password_hash, first_name, last_name] = p;
       if (findUserByEmail(email)) {
-        const err = new Error('duplicate key value violates unique constraint "idx_users_email"') as Error & {
+        const err = new Error(
+          'duplicate key value violates unique constraint "idx_users_email"',
+        ) as Error & {
           code?: string;
         };
         err.code = '23505';
@@ -137,9 +142,6 @@ export function createFakeDb() {
     }
 
     // ── password reset tokens ────────────────────────────────────────────
-    if (s.startsWith('DELETE FROM password_reset_tokens WHERE user_id')) {
-      return { rows: [], rowCount: 0 };
-    }
     if (s.startsWith('INSERT INTO password_reset_tokens')) {
       const [id, user_id, token, expires_at] = p;
       const row: FakeRow = { id, user_id, token, expires_at, used_at: null, created_at: nowIso() };
@@ -155,6 +157,17 @@ export function createFakeDb() {
         .filter((r) => r.user_id === p[0])
         .sort((a, b) => (b.created_at as string).localeCompare(a.created_at as string));
       return { rows: matches[0] ? [matches[0]] : [], rowCount: matches[0] ? 1 : 0 };
+    }
+    if (s.startsWith('UPDATE password_reset_tokens SET used_at = $2 WHERE user_id')) {
+      const [userId, usedAt] = p;
+      let count = 0;
+      for (const row of passwordResetTokens.values()) {
+        if (row.user_id === userId && !row.used_at) {
+          row.used_at = usedAt;
+          count++;
+        }
+      }
+      return { rows: [], rowCount: count };
     }
     if (s.startsWith('UPDATE password_reset_tokens SET used_at')) {
       const [usedAt, token] = p;
@@ -195,16 +208,28 @@ export function createFakeDb() {
       const count = [...drafts.values()].filter((d) => d.user_id === p[0]).length;
       return { rows: [{ count: String(count) }], rowCount: 1 };
     }
-    if (s.startsWith('SELECT id, draft_json, created_at, updated_at FROM business_setup_drafts WHERE user_id = $1')) {
+    if (
+      s.startsWith(
+        'SELECT id, draft_json, created_at, updated_at FROM business_setup_drafts WHERE user_id = $1',
+      )
+    ) {
       const rows = [...drafts.values()].filter((d) => d.user_id === p[0]);
       return { rows, rowCount: rows.length };
     }
-    if (s.startsWith('SELECT id, draft_json, created_at, updated_at FROM business_setup_drafts WHERE id = $1 AND user_id = $2')) {
+    if (
+      s.startsWith(
+        'SELECT id, draft_json, created_at, updated_at FROM business_setup_drafts WHERE id = $1 AND user_id = $2',
+      )
+    ) {
       const row = drafts.get(p[0]);
       const match = row && row.user_id === p[1] ? row : undefined;
       return { rows: match ? [match] : [], rowCount: match ? 1 : 0 };
     }
-    if (s.startsWith('SELECT id, draft_json FROM business_setup_drafts WHERE id = $1 AND user_id = $2')) {
+    if (
+      s.startsWith(
+        'SELECT id, draft_json FROM business_setup_drafts WHERE id = $1 AND user_id = $2',
+      )
+    ) {
       const row = drafts.get(p[0]);
       const match = row && row.user_id === p[1] ? row : undefined;
       return { rows: match ? [match] : [], rowCount: match ? 1 : 0 };
@@ -241,7 +266,15 @@ export function createFakeDb() {
     // ── businesses ────────────────────────────────────────────────────────
     if (s.startsWith('INSERT INTO businesses')) {
       const [id, user_id, name, industry, business_json, created_at] = p;
-      businesses.set(id, { id, user_id, name, industry, business_json, created_at, updated_at: created_at });
+      businesses.set(id, {
+        id,
+        user_id,
+        name,
+        industry,
+        business_json,
+        created_at,
+        updated_at: created_at,
+      });
       return { rows: [], rowCount: 1 };
     }
     if (s.startsWith('SELECT b.id, b.name, b.industry, bm.role')) {
@@ -259,7 +292,9 @@ export function createFakeDb() {
     if (s.startsWith('INSERT INTO business_memberships')) {
       if (s.includes('ON CONFLICT')) {
         const [id, business_id, user_id, role, invited_by_user_id, now] = p;
-        const existing = [...memberships.values()].find((m) => m.business_id === business_id && m.user_id === user_id);
+        const existing = [...memberships.values()].find(
+          (m) => m.business_id === business_id && m.user_id === user_id,
+        );
         if (existing) {
           existing.role = role;
           existing.invited_by_user_id = invited_by_user_id;
@@ -295,7 +330,11 @@ export function createFakeDb() {
       }
       return { rows: [], rowCount: 1 };
     }
-    if (s.startsWith('SELECT id, role FROM business_memberships WHERE business_id = $1 AND user_id = $2')) {
+    if (
+      s.startsWith(
+        'SELECT id, role FROM business_memberships WHERE business_id = $1 AND user_id = $2',
+      )
+    ) {
       const row = [...memberships.values()].find(
         (m) => m.business_id === p[0] && m.user_id === p[1] && m.accepted_at,
       );
@@ -307,13 +346,23 @@ export function createFakeDb() {
         .map((m) => ({ ...m, ...users.get(m.user_id as string) }));
       return { rows, rowCount: rows.length };
     }
-    if (s.startsWith('SELECT id, user_id, role FROM business_memberships WHERE id = $1 AND business_id = $2')) {
+    if (
+      s.startsWith(
+        'SELECT id, user_id, role FROM business_memberships WHERE id = $1 AND business_id = $2',
+      )
+    ) {
       const row = memberships.get(p[0]);
       const match = row && row.business_id === p[1] ? row : undefined;
       return { rows: match ? [match] : [], rowCount: match ? 1 : 0 };
     }
-    if (s.startsWith("SELECT COUNT(*)::text AS count FROM business_memberships WHERE business_id = $1 AND role = 'owner'")) {
-      const count = [...memberships.values()].filter((m) => m.business_id === p[0] && m.role === 'owner').length;
+    if (
+      s.startsWith(
+        "SELECT COUNT(*)::text AS count FROM business_memberships WHERE business_id = $1 AND role = 'owner'",
+      )
+    ) {
+      const count = [...memberships.values()].filter(
+        (m) => m.business_id === p[0] && m.role === 'owner',
+      ).length;
       return { rows: [{ count: String(count) }], rowCount: 1 };
     }
     if (s.startsWith('DELETE FROM business_memberships WHERE id = $1 AND business_id = $2')) {
@@ -323,8 +372,31 @@ export function createFakeDb() {
 
     // ── mutation audit log ────────────────────────────────────────────────
     if (s.startsWith('INSERT INTO mutation_audit_log')) {
-      const [id, user_id, user_email, action, entity_type, entity_id, before, after, ip_address, user_agent] = p;
-      mutationAuditLog.push({ id, user_id, user_email, action, entity_type, entity_id, before, after, ip_address, user_agent, created_at: nowIso() });
+      const [
+        id,
+        user_id,
+        user_email,
+        action,
+        entity_type,
+        entity_id,
+        before,
+        after,
+        ip_address,
+        user_agent,
+      ] = p;
+      mutationAuditLog.push({
+        id,
+        user_id,
+        user_email,
+        action,
+        entity_type,
+        entity_id,
+        before,
+        after,
+        ip_address,
+        user_agent,
+        created_at: nowIso(),
+      });
       return { rows: [], rowCount: 1 };
     }
 

@@ -26,7 +26,9 @@ describe('POST /auth/signup', () => {
     expect(signup.statusCode).toBe(201);
     const signupBody = JSON.parse(signup.body);
     expect(signupBody.emailConfirmationRequired).toBe(true);
-    expect(signupBody.user.email).toBe('alice@example.com');
+    // Response body is intentionally generic (no `user` object) — see the
+    // next test — so this only checks the account was actually created via
+    // its real, separate effect: signing in is blocked until confirmed.
 
     const signinBeforeConfirm = await app.inject({
       method: 'POST',
@@ -36,9 +38,17 @@ describe('POST /auth/signup', () => {
     expect(signinBeforeConfirm.statusCode).toBe(403);
   });
 
-  it('rejects a duplicate signup with 409', async () => {
+  it('responds identically to a duplicate signup as to a new one (enumeration-safe)', async () => {
     const res = await app.inject({ method: 'POST', url: '/auth/signup', payload: SIGNUP_BODY });
-    expect(res.statusCode).toBe(409);
+    expect(res.statusCode).toBe(201);
+    const body = JSON.parse(res.body);
+    expect(body).toEqual({
+      ok: true,
+      emailConfirmationRequired: true,
+      message: 'Check your email to confirm your account before signing in.',
+    });
+    // No second account was actually created — still exactly the one user.
+    expect(fakeDb.users.size).toBe(1);
   });
 
   it('rejects a weak password with a 400 RFC 7807 body', async () => {

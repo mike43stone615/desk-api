@@ -26,8 +26,15 @@ class InMemoryDatabaseRepository implements DatabaseRepository {
   async findUserByEmail(email: string) {
     return [...this.users.values()].find((u) => u.email === email.toLowerCase()) ?? null;
   }
-  async createUser(id: string, email: string, passwordHash: string, firstName: string, lastName: string) {
-    if (await this.findUserByEmail(email)) throw new Error('duplicate email (unique constraint on users.email)');
+  async createUser(
+    id: string,
+    email: string,
+    passwordHash: string,
+    firstName: string,
+    lastName: string,
+  ) {
+    if (await this.findUserByEmail(email))
+      throw new Error('duplicate email (unique constraint on users.email)');
     const user: User = {
       id,
       email: email.toLowerCase(),
@@ -64,10 +71,18 @@ class InMemoryDatabaseRepository implements DatabaseRepository {
     for (const [token, s] of this.sessions) if (s.userId === userId) this.sessions.delete(token);
   }
   async deleteExpiredSessions() {
-    for (const [token, s] of this.sessions) if (new Date(s.expiresAt) <= new Date()) this.sessions.delete(token);
+    for (const [token, s] of this.sessions)
+      if (new Date(s.expiresAt) <= new Date()) this.sessions.delete(token);
   }
   async createResetToken(id: string, userId: string, token: string, expiresAt: string) {
-    this.resetTokens.set(token, { id, userId, token, expiresAt, usedAt: null, createdAt: nowUtc() });
+    this.resetTokens.set(token, {
+      id,
+      userId,
+      token,
+      expiresAt,
+      usedAt: null,
+      createdAt: nowUtc(),
+    });
   }
   async findResetToken(token: string) {
     return this.resetTokens.get(token) ?? null;
@@ -81,11 +96,24 @@ class InMemoryDatabaseRepository implements DatabaseRepository {
     const t = this.resetTokens.get(token);
     if (t) t.usedAt = usedAt;
   }
+  async markUnusedResetTokensUsedForUser(userId: string, usedAt: string) {
+    for (const t of this.resetTokens.values()) {
+      if (t.userId === userId && !t.usedAt) t.usedAt = usedAt;
+    }
+  }
   async deleteExpiredPasswordResetTokens() {
-    for (const [k, t] of this.resetTokens) if (new Date(t.expiresAt) <= new Date()) this.resetTokens.delete(k);
+    for (const [k, t] of this.resetTokens)
+      if (new Date(t.expiresAt) <= new Date()) this.resetTokens.delete(k);
   }
   async createEmailConfirmationToken(id: string, userId: string, token: string, expiresAt: string) {
-    this.confirmationTokens.set(token, { id, userId, token, expiresAt, usedAt: null, createdAt: nowUtc() });
+    this.confirmationTokens.set(token, {
+      id,
+      userId,
+      token,
+      expiresAt,
+      usedAt: null,
+      createdAt: nowUtc(),
+    });
   }
   async findEmailConfirmationToken(token: string) {
     return this.confirmationTokens.get(token) ?? null;
@@ -100,7 +128,8 @@ class InMemoryDatabaseRepository implements DatabaseRepository {
     if (t) t.usedAt = usedAt;
   }
   async deleteExpiredEmailConfirmationTokens() {
-    for (const [k, t] of this.confirmationTokens) if (new Date(t.expiresAt) <= new Date()) this.confirmationTokens.delete(k);
+    for (const [k, t] of this.confirmationTokens)
+      if (new Date(t.expiresAt) <= new Date()) this.confirmationTokens.delete(k);
   }
 }
 
@@ -115,15 +144,14 @@ beforeEach(() => {
 describe('signUp', () => {
   it('creates an unconfirmed user and a confirmation token', async () => {
     const result = await service.signUp('new@example.com', 'Str0ng!Pass', 'New', 'User');
-    expect(result.user.emailConfirmedAt).toBeNull();
-    expect(result.confirmationToken).toHaveLength(64); // 32 bytes hex
+    expect(result).not.toBeNull();
+    expect(result!.user.emailConfirmedAt).toBeNull();
+    expect(result!.confirmationToken).toHaveLength(64); // 32 bytes hex
   });
 
-  it('rejects a duplicate email with AuthError("email_in_use")', async () => {
+  it('returns null (not an error) for a duplicate email — enumeration-safe at the service layer', async () => {
     await service.signUp('dup@example.com', 'Str0ng!Pass', 'A', 'B');
-    await expect(service.signUp('dup@example.com', 'Str0ng!Pass', 'C', 'D')).rejects.toMatchObject({
-      code: 'email_in_use',
-    } satisfies Partial<AuthError>);
+    expect(await service.signUp('dup@example.com', 'Str0ng!Pass', 'C', 'D')).toBeNull();
   });
 
   it.each([
@@ -133,7 +161,9 @@ describe('signUp', () => {
     ['NoNumbers!', 'password_missing_number'],
     ['NoSymbols123', 'password_missing_symbol'],
   ])('rejects password %s with AuthError(%s)', async (password, code) => {
-    await expect(service.signUp('x@example.com', password, 'A', 'B')).rejects.toMatchObject({ code });
+    await expect(service.signUp('x@example.com', password, 'A', 'B')).rejects.toMatchObject({
+      code,
+    });
   });
 });
 
@@ -146,7 +176,12 @@ describe('signIn / email confirmation gate', () => {
   });
 
   it('allows sign-in after confirmEmail() and returns an opaque session token', async () => {
-    const { confirmationToken } = await service.signUp('confirmed@example.com', 'Str0ng!Pass', 'A', 'B');
+    const { confirmationToken } = (await service.signUp(
+      'confirmed@example.com',
+      'Str0ng!Pass',
+      'A',
+      'B',
+    ))!;
     expect(await service.confirmEmail(confirmationToken)).toBe(true);
 
     const result = await service.signIn('confirmed@example.com', 'Str0ng!Pass');
@@ -156,7 +191,7 @@ describe('signIn / email confirmation gate', () => {
   });
 
   it('returns null (not an error) for a wrong password against a real account', async () => {
-    const { confirmationToken } = await service.signUp('real@example.com', 'Str0ng!Pass', 'A', 'B');
+    const { confirmationToken } = (await service.signUp('real@example.com', 'Str0ng!Pass', 'A', 'B'))!;
     await service.confirmEmail(confirmationToken);
     const result = await service.signIn('real@example.com', 'WrongPass1!');
     expect(result).toBeNull();
@@ -170,7 +205,7 @@ describe('signIn / email confirmation gate', () => {
 
 describe('verifySession', () => {
   it('returns the user for a valid session and null after revokeSession', async () => {
-    const { confirmationToken } = await service.signUp('sess@example.com', 'Str0ng!Pass', 'A', 'B');
+    const { confirmationToken } = (await service.signUp('sess@example.com', 'Str0ng!Pass', 'A', 'B'))!;
     await service.confirmEmail(confirmationToken);
     const { token } = (await service.signIn('sess@example.com', 'Str0ng!Pass'))!;
 
@@ -204,8 +239,20 @@ describe('password reset — enumeration-safety and cooldown', () => {
     expect(await service.requestPasswordReset('reset@example.com')).toBeNull();
   });
 
+  it('requestPasswordReset keeps older unused links valid for their full lifetime after a newer link is sent', async () => {
+    await service.signUp('multilink@example.com', 'Str0ng!Pass', 'A', 'B');
+    const firstToken = (await service.requestPasswordReset('multilink@example.com'))!;
+    const firstRecord = db.resetTokens.get(firstToken)!;
+    firstRecord.createdAt = new Date(Date.now() - 61_000).toISOString();
+
+    const secondToken = await service.requestPasswordReset('multilink@example.com');
+    expect(secondToken).not.toBeNull();
+    expect(secondToken).not.toBe(firstToken);
+    expect(await service.confirmPasswordReset(firstToken, 'NewStr0ng!Pass')).toBe(true);
+  });
+
   it('confirmPasswordReset changes the password and invalidates the token for reuse', async () => {
-    const { user } = await service.signUp('resetflow@example.com', 'Str0ng!Pass', 'A', 'B');
+    const { user } = (await service.signUp('resetflow@example.com', 'Str0ng!Pass', 'A', 'B'))!;
     const token = (await service.requestPasswordReset('resetflow@example.com'))!;
 
     expect(await service.confirmPasswordReset(token, 'NewStr0ng!Pass')).toBe(true);
@@ -215,8 +262,18 @@ describe('password reset — enumeration-safety and cooldown', () => {
     expect(await service.confirmPasswordReset(token, 'AnotherStr0ng!1')).toBe(false);
   });
 
+  it('confirmPasswordReset invalidates other unused reset links for the same user', async () => {
+    await service.signUp('useonelink@example.com', 'Str0ng!Pass', 'A', 'B');
+    const firstToken = (await service.requestPasswordReset('useonelink@example.com'))!;
+    db.resetTokens.get(firstToken)!.createdAt = new Date(Date.now() - 61_000).toISOString();
+    const secondToken = (await service.requestPasswordReset('useonelink@example.com'))!;
+
+    expect(await service.confirmPasswordReset(secondToken, 'NewStr0ng!Pass')).toBe(true);
+    expect(await service.confirmPasswordReset(firstToken, 'AnotherStr0ng!1')).toBe(false);
+  });
+
   it('confirmPasswordReset revokes every existing session for the user (regression: was previously a silent no-op)', async () => {
-    const { user } = await service.signUp('revokeonreset@example.com', 'Str0ng!Pass', 'A', 'B');
+    const { user } = (await service.signUp('revokeonreset@example.com', 'Str0ng!Pass', 'A', 'B'))!;
     await service.confirmEmail((await db.findLatestEmailConfirmationTokenForUser(user.id))!.token);
 
     const { token: sessionA } = (await service.signIn('revokeonreset@example.com', 'Str0ng!Pass'))!;
@@ -236,9 +293,14 @@ describe('password reset — enumeration-safety and cooldown', () => {
   });
 
   it('confirmPasswordReset returns false for an expired token', async () => {
-    const { user } = await service.signUp('expiredreset@example.com', 'Str0ng!Pass', 'A', 'B');
+    const { user } = (await service.signUp('expiredreset@example.com', 'Str0ng!Pass', 'A', 'B'))!;
     const token = generateToken(32);
-    await db.createResetToken(generateId(), user.id, token, new Date(Date.now() - 1000).toISOString());
+    await db.createResetToken(
+      generateId(),
+      user.id,
+      token,
+      new Date(Date.now() - 1000).toISOString(),
+    );
     expect(await service.confirmPasswordReset(token, 'NewStr0ng!Pass')).toBe(false);
   });
 });
@@ -247,7 +309,12 @@ describe('email confirmation — enumeration-safety', () => {
   it('requestEmailConfirmation returns null for an unregistered email and for an already-confirmed one', async () => {
     expect(await service.requestEmailConfirmation('nobody@example.com')).toBeNull();
 
-    const { confirmationToken } = await service.signUp('already@example.com', 'Str0ng!Pass', 'A', 'B');
+    const { confirmationToken } = (await service.signUp(
+      'already@example.com',
+      'Str0ng!Pass',
+      'A',
+      'B',
+    ))!;
     await service.confirmEmail(confirmationToken);
     expect(await service.requestEmailConfirmation('already@example.com')).toBeNull();
   });
@@ -255,7 +322,12 @@ describe('email confirmation — enumeration-safety', () => {
   it('confirmEmail returns false for an unknown or already-used token', async () => {
     expect(await service.confirmEmail('unknown-token')).toBe(false);
 
-    const { confirmationToken } = await service.signUp('usedtoken@example.com', 'Str0ng!Pass', 'A', 'B');
+    const { confirmationToken } = (await service.signUp(
+      'usedtoken@example.com',
+      'Str0ng!Pass',
+      'A',
+      'B',
+    ))!;
     expect(await service.confirmEmail(confirmationToken)).toBe(true);
     expect(await service.confirmEmail(confirmationToken)).toBe(false);
   });
@@ -263,8 +335,10 @@ describe('email confirmation — enumeration-safety', () => {
 
 describe('updatePassword', () => {
   it('validates the new password and updates the stored hash', async () => {
-    const { user } = await service.signUp('update@example.com', 'Str0ng!Pass', 'A', 'B');
-    await expect(service.updatePassword(user.id, 'weak')).rejects.toMatchObject({ code: 'password_too_short' });
+    const { user } = (await service.signUp('update@example.com', 'Str0ng!Pass', 'A', 'B'))!;
+    await expect(service.updatePassword(user.id, 'weak')).rejects.toMatchObject({
+      code: 'password_too_short',
+    });
     await service.updatePassword(user.id, 'NewStr0ng!Pass');
     expect(db.users.get(user.id)?.passwordHash).toBeDefined();
   });
