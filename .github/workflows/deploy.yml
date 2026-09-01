@@ -35,14 +35,17 @@ jobs:
     runs-on: [self-hosted, windows, deploy]
 
     steps:
+      # actions/checkout authenticates with GitHub's own ephemeral
+      # GITHUB_TOKEN and checks out into $env:GITHUB_WORKSPACE, a path the
+      # runner's own service account already has full access to — unlike
+      # C:\Users\User\desk-api, which NT AUTHORITY\NetworkService (the
+      # identity this runner service runs as) cannot read at all.
+      - uses: actions/checkout@v4
+
       - name: Deploy to the live service
         shell: powershell
-        # The self-hosted runner service runs as NT AUTHORITY\NetworkService,
-        # not the interactive user — $env:USERPROFILE resolves to
-        # C:\Windows\ServiceProfiles\NetworkService there, not the real home
-        # directory, so these paths are hardcoded rather than derived.
         run: |
           & "C:\Users\User\.cloudflared\deploy-service.ps1" `
-            -RepoPath "C:\Users\User\desk-api" `
+            -RepoPath "$env:GITHUB_WORKSPACE" `
             -Port 3458 `
             -StartCommand "start"
