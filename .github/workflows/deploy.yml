@@ -42,6 +42,18 @@ jobs:
       # identity this runner service runs as) cannot read at all.
       - uses: actions/checkout@v4
 
+      # .env is gitignored, so it never comes down with checkout — without
+      # it the service starts with no DATABASE_URL/API keys/PORT and never
+      # binds, which is why the health check below was timing out with no
+      # other error. DOTENV_CONTENT holds the same file's full contents.
+      - name: Write environment file
+        shell: powershell
+        env:
+          DOTENV_CONTENT: ${{ secrets.DOTENV_CONTENT }}
+        run: |
+          if (-not $env:DOTENV_CONTENT) { throw "DOTENV_CONTENT secret is not set for this repo." }
+          Set-Content -Path "$env:GITHUB_WORKSPACE\.env" -Value $env:DOTENV_CONTENT
+
       - name: Deploy to the live service
         shell: powershell
         run: |
