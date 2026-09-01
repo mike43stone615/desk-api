@@ -37,8 +37,12 @@ jobs:
     steps:
       - name: Deploy to the live service
         shell: powershell
+        # The self-hosted runner service runs as NT AUTHORITY\NetworkService,
+        # not the interactive user — $env:USERPROFILE resolves to
+        # C:\Windows\ServiceProfiles\NetworkService there, not the real home
+        # directory, so these paths are hardcoded rather than derived.
         run: |
-          & "$env:USERPROFILE\.cloudflared\deploy-service.ps1" `
-            -RepoPath "$env:USERPROFILE\desk-api" `
+          & "C:\Users\User\.cloudflared\deploy-service.ps1" `
+            -RepoPath "C:\Users\User\desk-api" `
             -Port 3458 `
             -StartCommand "start"
