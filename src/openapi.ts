@@ -380,52 +380,5 @@ export const OPENAPI_SPEC = {
         responses: { '200': { description: 'Market-validation score' }, '503': { description: 'Market validation is temporarily unavailable.' } },
       },
     },
-    // ── api.deskbusiness.co gateway — transparent proxy to upstream services ─
-    // Registered as a Fastify wildcard route (`instance.all('/registry/*', ...)`),
-    // so every HTTP method and every sub-path is forwarded byte-for-byte (JSON
-    // bodies re-serialized, all other content passed through) to
-    // REGISTRY_API_URL with the /registry prefix stripped. {proxyPath}
-    // below stands in for the full wildcard remainder of the path, which
-    // OpenAPI 3.0 has no native catch-all syntax for. The equivalent
-    // compliance-os proxy (/compliance/*) was removed — see cross-20 in the
-    // audit — since it was unauthenticated, forwarded the caller's own API
-    // key verbatim, and nothing in the real product used it.
-    '/registry/{proxyPath}': {
-      get: {
-        tags: ['Integrations'],
-        summary: 'Transparent proxy to registry-api',
-        description: 'Forwards the request (any method) to REGISTRY_API_URL with the /registry prefix stripped. Returns 503 if REGISTRY_API_URL is not configured.',
-        parameters: [{ name: 'proxyPath', in: 'path', required: true, schema: { type: 'string' }, description: 'Full remaining path, forwarded as-is.' }],
-        responses: { '200': { description: 'Upstream response, forwarded as-is' }, '503': { description: 'Registry service is not configured.' } },
-      },
-      post: {
-        tags: ['Integrations'],
-        summary: 'Transparent proxy to registry-api',
-        description: 'Forwards the request (any method) to REGISTRY_API_URL with the /registry prefix stripped. Returns 503 if REGISTRY_API_URL is not configured.',
-        parameters: [{ name: 'proxyPath', in: 'path', required: true, schema: { type: 'string' }, description: 'Full remaining path, forwarded as-is.' }],
-        responses: { '200': { description: 'Upstream response, forwarded as-is' }, '503': { description: 'Registry service is not configured.' } },
-      },
-      put: {
-        tags: ['Integrations'],
-        summary: 'Transparent proxy to registry-api',
-        description: 'Forwards the request (any method) to REGISTRY_API_URL with the /registry prefix stripped. Returns 503 if REGISTRY_API_URL is not configured.',
-        parameters: [{ name: 'proxyPath', in: 'path', required: true, schema: { type: 'string' }, description: 'Full remaining path, forwarded as-is.' }],
-        responses: { '200': { description: 'Upstream response, forwarded as-is' }, '503': { description: 'Registry service is not configured.' } },
-      },
-      patch: {
-        tags: ['Integrations'],
-        summary: 'Transparent proxy to registry-api',
-        description: 'Forwards the request (any method) to REGISTRY_API_URL with the /registry prefix stripped. Returns 503 if REGISTRY_API_URL is not configured.',
-        parameters: [{ name: 'proxyPath', in: 'path', required: true, schema: { type: 'string' }, description: 'Full remaining path, forwarded as-is.' }],
-        responses: { '200': { description: 'Upstream response, forwarded as-is' }, '503': { description: 'Registry service is not configured.' } },
-      },
-      delete: {
-        tags: ['Integrations'],
-        summary: 'Transparent proxy to registry-api',
-        description: 'Forwards the request (any method) to REGISTRY_API_URL with the /registry prefix stripped. Returns 503 if REGISTRY_API_URL is not configured.',
-        parameters: [{ name: 'proxyPath', in: 'path', required: true, schema: { type: 'string' }, description: 'Full remaining path, forwarded as-is.' }],
-        responses: { '200': { description: 'Upstream response, forwarded as-is' }, '503': { description: 'Registry service is not configured.' } },
-      },
-    },
   },
 };

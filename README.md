@@ -79,7 +79,6 @@ client, `desk_business/lib/core/api_client.dart`) and under `/v1` — see
 | `POST`/`GET` | `/functions/v1/check-*`, `/business-structures...` | — | → registry-api (fallback catalog when unconfigured) |
 | `GET` | `/integrations/compliance/business-types` \| `/requirements/search` \| `/jurisdictions` | — | → compliance-os (fallback catalog when unconfigured) |
 | `POST` | `/integrations/market-research/analyze` | — | → market-validation-api (503 on failure, see above) |
-| `ANY` | `/registry/*` | — | Transparent proxy gateway |
 
 \* `/metrics` and `/docs` (+ `/docs/openapi.json`) are fully public by
 default, matching common practice for diagnostic/docs endpoints. Setting

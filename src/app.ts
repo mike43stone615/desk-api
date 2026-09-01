@@ -74,7 +74,6 @@ import {
   recommendBusinessStructuresHandler,
 } from './routes/integrations/registry';
 import { marketResearchAnalyzeHandler } from './routes/integrations/marketResearch';
-import { registryGatewayHandler } from './routes/apiGateway';
 
 export async function buildApp(): Promise<FastifyInstance> {
   const app = Fastify({
@@ -245,7 +244,4 @@ async function registerLegacyAndVersionedRoutes(instance: FastifyInstance) {
   instance.get('/integrations/compliance/requirements/search', requirementsSearchHandler);
   instance.get('/integrations/compliance/jurisdictions', jurisdictionsHandler);
   instance.post('/integrations/market-research/analyze', marketResearchAnalyzeHandler);
-
-  // ── api.deskbusiness.co gateway — transparent proxy to upstream services ─
-  instance.all('/registry/*', registryGatewayHandler);
 }
