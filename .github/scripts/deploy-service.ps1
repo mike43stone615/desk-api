@@ -36,11 +36,25 @@ if ($owner) {
   Start-Sleep -Seconds 2
 }
 
+# Start-Process's child is attached to the GitHub Actions runner's own
+# Windows Job Object (JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE) unless explicitly
+# detached -- confirmed live: the service reported healthy, then was killed
+# within 20 seconds by the runner's own "Cleaning up orphan processes" step
+# when THIS job finished. Every previous "successful" deploy was actually
+# dying moments after reporting success. Launching via WMI's
+# Win32_Process.Create instead routes creation through the WMI provider
+# host (a separate service), which does not inherit the caller's job
+# object, so the process survives the job's own completion.
 $temp = [System.IO.Path]::GetTempPath()
-Start-Process -FilePath 'npm.cmd' -ArgumentList @('run', $StartCommand) -WorkingDirectory $RepoPath `
-  -RedirectStandardOutput (Join-Path $temp "$(Split-Path $RepoPath -Leaf).out.log") `
-  -RedirectStandardError (Join-Path $temp "$(Split-Path $RepoPath -Leaf).err.log") `
-  -WindowStyle Hidden
+$outLog = Join-Path $temp "$(Split-Path $RepoPath -Leaf).out.log"
+$errLog = Join-Path $temp "$(Split-Path $RepoPath -Leaf).err.log"
+$cmdLine = "cmd.exe /c `"npm run $StartCommand > `"$outLog`" 2> `"$errLog`"`""
+$created = Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{
+  CommandLine      = $cmdLine
+  CurrentDirectory = $RepoPath
+}
+if ($created.ReturnValue -ne 0) { throw "Failed to launch service via WMI (Win32_Process.Create returned $($created.ReturnValue))" }
+Write-Output "Launched via WMI, new PID $($created.ProcessId)"
 
 # 30s, then 90s, both proved too tight: confirmed live multiple times that
 # a service started right after a fresh `npm ci` under this account can
