@@ -4,7 +4,7 @@
 // never on D1 or pg specifics. This is the same class that ships against
 // PgDatabaseAdapter in production; only the repository implementation differs.
 import { describe, it, expect, beforeEach } from 'vitest';
-import { DeskAuthService, AuthError } from './auth-service';
+import { DeskAuthService } from './auth-service';
 import type {
   DatabaseRepository,
   EmailConfirmationToken,

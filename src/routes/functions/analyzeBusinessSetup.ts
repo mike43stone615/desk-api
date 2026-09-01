@@ -3403,10 +3403,6 @@ function hasBusinessIdeaSignal(value: string, tokens: string[]): boolean {
   );
 }
 
-function assessIdeaHardStop(idea: string): IdeaPlausibility {
-  return assessIdeaPlausibilityHeuristic(idea);
-}
-
 function assessIdeaPlausibilityHeuristic(idea: string): IdeaPlausibility {
   const trimmed = idea.trim();
   if (trimmed.length === 0) {
@@ -3765,7 +3761,7 @@ function looksLikeUrlOrContactDump(value: string): boolean {
     /\b\d{2,6}\s+[a-z0-9 .'-]+\s+(street|st|avenue|ave|road|rd|drive|dr|lane|ln|boulevard|blvd|terrace|way|court|ct)\b/.test(
       lower,
     );
-  const looksLikeJson = /^\s*[\[{]/.test(value);
+  const looksLikeJson = /^\s*[[{]/.test(value);
   return (
     urlOnly ||
     hasUrl ||
@@ -3790,6 +3786,7 @@ function looksLikeRepeatedFiller(tokens: string[]): boolean {
 }
 
 function looksUnsupportedLanguage(value: string): boolean {
+  // eslint-disable-next-line no-control-regex -- \x00-\x7F is the ASCII range check, not a literal control character
   return /[^\x00-\x7F]/.test(value);
 }
 
