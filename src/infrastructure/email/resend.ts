@@ -138,6 +138,9 @@ async function sendEmail(config: AppConfig, request: EmailRequest): Promise<void
     return;
   }
 
+  // Audit-level success log, paired with the console.error failure path
+  // above -- genuinely informational, not a warning.
+  // eslint-disable-next-line no-console
   console.log(
     JSON.stringify({
       level: 'audit',
