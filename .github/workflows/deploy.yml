@@ -45,7 +45,7 @@ jobs:
       - name: Deploy to the live service
         shell: powershell
         run: |
-          & "C:\Users\User\.cloudflared\deploy-service.ps1" `
+          & "$env:GITHUB_WORKSPACE\.github\scripts\deploy-service.ps1" `
             -RepoPath "$env:GITHUB_WORKSPACE" `
             -Port 3458 `
             -StartCommand "start"
