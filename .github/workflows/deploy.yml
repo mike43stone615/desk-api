@@ -1,0 +1,44 @@
+name: Deploy
+
+on:
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Run tests with coverage gate
+        run: npm run test:coverage
+
+      - name: Type check
+        run: npm run build
+
+      - name: Security audit
+        run: npm audit --audit-level=high
+
+  deploy:
+    needs: test
+    runs-on: [self-hosted, windows, deploy]
+
+    steps:
+      - name: Deploy to the live service
+        shell: powershell
+        run: |
+          & "$env:USERPROFILE\.cloudflared\deploy-service.ps1" `
+            -RepoPath "$env:USERPROFILE\desk-api" `
+            -Port 3458 `
+            -StartCommand "start"
