@@ -5,22 +5,29 @@
 // script's only real job is running it on a schedule, compressing, and
 // keeping a bounded number of generations.
 //
+// Streams pg_dump's stdout straight through gzip into the output file
+// instead of buffering the whole dump in memory first — the original
+// buffered version of this script (readFileSync + gzipSync) worked fine
+// against this service's small database, but the identical approach hit
+// Node's ERR_FS_FILE_TOO_LARGE the moment it was copied to registry-api's
+// multi-GB database and left compliance-os's pg_dump running well past a
+// reasonable window. Rewritten here too so this doesn't quietly break the
+// same way once this database grows.
+//
 // Usage: tsx scripts/backup-database.ts [--out-dir <dir>] [--keep <n>]
 // Requires `pg_dump` on PATH (bundled with any local PostgreSQL install;
 // see docs/BACKUP-RESTORE.md's manual-procedure section for the Docker
 // Compose equivalent if pg_dump isn't installed on the host directly).
 //
-// Not wired into a scheduler here deliberately -- this repo has no
-// deployment yet (see README.md), so there's no production host to
-// schedule against. Once deployed, invoke this from cron/systemd-timer/the
-// hosting platform's scheduled-job feature; see docs/BACKUP-RESTORE.md for
-// the restore-side commands this pairs with.
+// Registered as the "Desk API Database Backup" scheduled task (daily) —
+// see scripts/run-backup-task.ps1 and docs/BACKUP-RESTORE.md for the
+// restore-side commands this pairs with.
 import "dotenv/config";
-import { spawnSync } from "child_process";
-import { existsSync, mkdirSync, readdirSync, statSync, unlinkSync } from "fs";
+import { spawn, spawnSync } from "child_process";
+import { existsSync, mkdirSync, readdirSync, statSync, unlinkSync, createWriteStream } from "fs";
 import { join } from "path";
-import { gzipSync } from "zlib";
-import { readFileSync, writeFileSync } from "fs";
+import { createGzip } from "zlib";
+import { pipeline } from "stream/promises";
 
 function parseArgs(argv: string[]): { outDir: string; keep: number } {
   let outDir = "backups";
@@ -46,7 +53,24 @@ function resolvePgDump(): string {
   );
 }
 
-function main(): void {
+async function dumpAndCompress(pgDump: string, databaseUrl: string, gzPath: string): Promise<void> {
+  const child = spawn(pgDump, [databaseUrl], { stdio: ["ignore", "pipe", "inherit"] });
+  const gzip = createGzip();
+  const out = createWriteStream(gzPath);
+
+  const pipelineDone = pipeline(child.stdout, gzip, out);
+  const exitCode = await new Promise<number>((resolve, reject) => {
+    child.on("error", reject);
+    child.on("exit", (code) => resolve(code ?? 1));
+  });
+
+  await pipelineDone;
+  if (exitCode !== 0) {
+    throw new Error(`pg_dump exited with status ${exitCode}.`);
+  }
+}
+
+async function main(): Promise<void> {
   const databaseUrl = process.env.DATABASE_URL;
   if (!databaseUrl) {
     console.error("DATABASE_URL is required.");
@@ -57,23 +81,20 @@ function main(): void {
   mkdirSync(outDir, { recursive: true });
 
   const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
-  const dumpPath = join(outDir, `backup-${timestamp}.sql`);
-  const gzPath = `${dumpPath}.gz`;
+  const gzPath = join(outDir, `backup-${timestamp}.sql.gz`);
 
   const pgDump = process.env.PGDUMP_PATH ?? resolvePgDump();
-  console.log(`Running pg_dump -> ${dumpPath} ...`);
-  const result = spawnSync(pgDump, [databaseUrl, "-f", dumpPath], {
-    stdio: "inherit",
-  });
-  if (result.status !== 0) {
-    console.error(`pg_dump exited with status ${result.status}.`);
-    process.exit(result.status ?? 1);
+  console.log(`Running pg_dump -> ${gzPath} (streamed + gzipped) ...`);
+
+  try {
+    await dumpAndCompress(pgDump, databaseUrl, gzPath);
+  } catch (err) {
+    if (existsSync(gzPath)) unlinkSync(gzPath);
+    console.error(String(err));
+    process.exit(1);
   }
 
-  const compressed = gzipSync(readFileSync(dumpPath));
-  writeFileSync(gzPath, compressed);
-  unlinkSync(dumpPath);
-  console.log(`Wrote ${gzPath} (${compressed.length} bytes).`);
+  console.log(`Wrote ${gzPath} (${statSync(gzPath).size} bytes).`);
 
   const dumps = readdirSync(outDir)
     .filter((f) => f.startsWith("backup-") && f.endsWith(".sql.gz"))
