@@ -7,7 +7,14 @@
 // http://localhost:3458, i.e. this process. Bind loopback-only — the
 // tunnel always connects via localhost on this same machine.
 
-// Sentry MUST be first — captures errors during the imports/setup below too.
+// dotenv MUST be first, before anything below reads process.env — Sentry and
+// tracing.ts both read their config (SENTRY_DSN, OTEL_EXPORTER_OTLP_ENDPOINT)
+// at import time, and both were silently no-ops in production because
+// './config' (which loads dotenv) was imported after them, not before. Live
+// confirmed: with the old order, both env vars read as undefined at the
+// exact moment Sentry.init()/tracing.ts evaluated them.
+import 'dotenv/config';
+// Sentry MUST be first after dotenv — captures errors during the imports/setup below too.
 import { Sentry } from './sentry';
 // tracing MUST come right after Sentry — patches modules before they are loaded
 import './tracing';
