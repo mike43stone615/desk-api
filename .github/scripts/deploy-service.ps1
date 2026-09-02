@@ -45,9 +45,15 @@ if ($owner) {
 # Win32_Process.Create instead routes creation through the WMI provider
 # host (a separate service), which does not inherit the caller's job
 # object, so the process survives the job's own completion.
-$temp = [System.IO.Path]::GetTempPath()
-$outLog = Join-Path $temp "$(Split-Path $RepoPath -Leaf).out.log"
-$errLog = Join-Path $temp "$(Split-Path $RepoPath -Leaf).err.log"
+# Logs go inside the checkout workspace, not $env:TEMP -- $env:TEMP for
+# this script's own NetworkService context is NetworkService's own
+# profile, which the interactive user has no read access to (same NTFS
+# restriction documented above), making every failure here undebuggable
+# after the fact without a manual reproduction. This location is readable
+# by the interactive account, and next run's `git clean -ffdx` (already
+# the first step of the next checkout) wipes it, so nothing accumulates.
+$outLog = Join-Path $RepoPath "deploy.out.log"
+$errLog = Join-Path $RepoPath "deploy.err.log"
 $cmdLine = "cmd.exe /c `"npm run $StartCommand > `"$outLog`" 2> `"$errLog`"`""
 $created = Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{
   CommandLine      = $cmdLine
