@@ -2,25 +2,27 @@
 
 Tracked as a gap in `docs/KNOWN-LIMITATIONS.md` #5: no runbook existed for
 rotating any of this service's secrets. This describes the procedure for
-each one, given the current deployment reality — this service isn't
-deployed anywhere yet (see `README.md`), so "rotation" today just means
-updating `.env` and restarting the process; there's no atomic,
-zero-downtime rotation because there's no multi-instance/load-balanced
-deployment to make that meaningful yet. Revisit this doc once a real
-deployment target (and its env-injection mechanism — Docker secrets, a
-platform's env-var UI, a secrets manager) is chosen.
+each one, given the current deployment reality: this service deploys via
+GitHub Actions (`.github/workflows/deploy.yml`), which writes `.env` from
+the `DOTENV_CONTENT` repository secret on every run. Rotating anything
+below means updating `DOTENV_CONTENT` (Settings → Secrets and variables →
+Actions) — not just a local `.env` — then triggering a deploy so the live
+service actually picks it up. There's no atomic, zero-downtime rotation
+yet — a brief drop in availability during restart is expected until this
+runs as multiple replicas behind a load balancer.
 
 ## General procedure (all secrets below)
 
 1. Generate the new secret value.
-2. Update `.env` (or the eventual deployment's env-injection mechanism).
-3. Restart the process (`npm run dev` locally; once deployed, whatever
-   restarts the service — a brief drop in availability during restart is
-   expected until this runs as multiple replicas behind a load balancer).
-4. Verify the specific behavior each secret gates (see below) still works.
-5. If the secret is also configured in a sibling service that authenticates
-   *to* this one (or that this one authenticates to), update both sides —
-   see each secret's "Shared with" note.
+2. Update the `DOTENV_CONTENT` GitHub secret for this repo (and local
+   `.env` too, if you also run this interactively).
+3. If the secret is also configured in a sibling service that authenticates
+   *to* this one (or that this one authenticates to), update that side
+   first — see each secret's "Shared with" note.
+4. Trigger `deploy.yml` (`workflow_dispatch`) to restart the live service
+   with the new value (`npm run dev` restart is enough for local-only
+   testing).
+5. Verify the specific behavior each secret gates (see below) still works.
 
 ## Secrets
 
@@ -75,10 +77,15 @@ too.
 
 ### `DATABASE_URL` (Postgres credentials)
 
-Not an application secret in the usual sense, but rotating the Postgres
-password follows the same shape: update the password on the Postgres side,
-update `DATABASE_URL` in `.env`, restart. No other service depends on
-this service's own database credentials.
+**Shared with registry-api, compliance-os, and market-validation-api** —
+all four backend services currently point at the same physical Postgres
+instance and the same login role (this is what the platform-wide
+"database password was the factory default" fix, elsewhere in this
+audit, actually rotated). Rotating this password is a whole-platform
+action, not a per-service one: change the Postgres password once, then
+update `DATABASE_URL` in all four services' `DOTENV_CONTENT` (or `.env`)
+at the same time and redeploy all four — updating only this one breaks
+the other three's every database call immediately.
 
 ## Not yet applicable
 
