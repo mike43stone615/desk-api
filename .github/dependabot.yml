@@ -11,3 +11,14 @@ updates:
         dependency-type: development
       dependencies:
         dependency-type: production
+    ignore:
+      # v4's type declarations break src/jobs/cron.ts's `cron.ScheduledTask`
+      # usage (TS2503: Cannot find namespace 'cron'). Re-enable once cron.ts
+      # is updated for v4's new type exports.
+      - dependency-name: "node-cron"
+        update-types: ["version-update:semver-major"]
+      # TS7 conflicts with openapi-typescript@7.13.0's peer dependency
+      # (requires typescript@^5.x), so `npm ci` fails ERESOLVE. Re-enable
+      # once openapi-typescript supports TS7.
+      - dependency-name: "typescript"
+        update-types: ["version-update:semver-major"]
