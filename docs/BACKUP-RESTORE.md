@@ -10,17 +10,26 @@ this service owns. Redis (`REDIS_URL`) holds only rate-limit counters —
 disposable, not something that needs backing up (see the table at the
 bottom of this doc).
 
-This service is **not currently deployed** anywhere (see `README.md`) —
-`docker-compose.yml` starts Postgres + Redis for local development only.
+This service is **live in production** at `api.deskbusiness.co`.
+`docker-compose.yml` starts Postgres + Redis for local development only —
+production runs against the real host's own Postgres instance directly.
 
-**Current gap:** no automated backup — scheduled `pg_dump` or WAL-based
-continuous backup — is wired up anywhere in this repo yet. There is no such
-script in `scripts/` (only `apply-migrations.ts` and `export-openapi.ts`
-exist there) and no backup service defined in `docker-compose.yml`. This is
-tracked in `docs/KNOWN-LIMITATIONS.md`. The manual procedure below is what
-to use in the meantime, and an automated version of it (cron + off-host
-storage, or a managed Postgres provider's built-in backups) should be set
-up before this service holds any real user data.
+**Automated backup is live:** `scripts/backup-database.ts` runs `pg_dump`,
+streams it straight through gzip (not buffered in memory — this matters
+once a database grows past a few hundred MB), and prunes to the 14 most
+recent generations. It's registered as the "Desk API Database Backup"
+Windows scheduled task, running daily at 3:30am (staggered against the
+other three services' identical setups so they don't all hit the shared
+Postgres instance at once). **A real restore rehearsal has been run and
+verified** — see the restore section below for exactly what that proved.
+
+**Known, deliberate gap:** every backup still lands on the same disk as the
+live database it's backing up. Off-host storage (cloud object storage, or
+the OneDrive already signed into this machine) was considered and
+intentionally deferred until a specific destination is chosen, rather than
+built toward an undecided one. A single disk failure would still take out
+the live data and every backup of it — this is a real, open risk, tracked
+in `docs/KNOWN-LIMITATIONS.md`, not an oversight.
 
 ---
 
@@ -64,40 +73,41 @@ npm run migrate
 
 ---
 
-## Production (once this service is actually deployed)
+## Production
 
-No production backup process exists yet, because there is no production
-database yet — this build has not been cut over from the live Cloudflare
-Worker (see `README.md`, `docs/KNOWN-LIMITATIONS.md`). Before cutover, set
-up one of:
-
-- **Scheduled `pg_dump`** — simplest. Run on a cron against `DATABASE_URL`,
-  compress, and ship the file off-host (e.g. `rclone`, an S3-compatible
-  bucket, or whatever the eventual hosting provider offers). Acceptable
-  data-loss window with this approach = time since the last dump.
-- **WAL-based continuous backup** (pgBackRest, Barman, or a managed
-  Postgres provider's built-in point-in-time recovery) — needed if the
-  acceptable data-loss window is smaller than "since last daily dump."
-  Recommended once this service holds real user data (accounts,
-  business-setup drafts, businesses, memberships) rather than only local
-  test data.
-
-Whichever is chosen, verify it with an actual restore rehearsal — not just
-confirming the dump file exists — before relying on it in an incident.
-
-### Example: scheduled `pg_dump` against a running instance
+The scheduled task described above runs, unmodified:
 
 ```bash
-pg_dump "$DATABASE_URL" | gzip > backup-$(date +%Y%m%d-%H%M).sql.gz
-# ship backup-*.sql.gz off-host on the same schedule
+tsx scripts/backup-database.ts
+# writes backups/backup-<timestamp>.sql.gz, streamed + gzipped, keeping the
+# 14 most recent generations
 ```
 
-### Example: restore from a `pg_dump`
+`DATABASE_URL` and `PGDUMP_PATH` (if `pg_dump` isn't on the scheduled
+task's PATH — see the script's `resolvePgDump()`) come from the service's
+own `.env`, the same one every other part of this service reads.
+
+**Acceptable data-loss window:** up to 24 hours (time since the last daily
+dump). If that's ever too wide, move to WAL-based continuous backup
+(pgBackRest, Barman, or a managed Postgres provider's point-in-time
+recovery) — not needed today, but worth revisiting if this service starts
+holding data where losing up to a day of it would be a real problem.
+
+### Restore from a production backup
 
 ```bash
 # Stop the app first — no writes during restore
-gunzip -c backup-20260101-0000.sql.gz | psql "$DATABASE_URL"
+gunzip -c backups/backup-2026-09-01T03-30-00-000Z.sql.gz | psql "$DATABASE_URL"
 ```
+
+**This exact procedure has been rehearsed for real**, against an isolated
+throwaway database (`desk_api_restore_test`, never the live `desk_api`
+database) rather than just assumed to work: the most recent real backup at
+the time decompressed and restored cleanly with `psql -f` — every table,
+index, and foreign-key constraint created without error — and the restored
+data was verified by direct row counts against what was actually in the
+live database at that time. The throwaway database and the decompressed
+temp file were both deleted immediately after.
 
 ---
 
@@ -116,8 +126,8 @@ gunzip -c backup-20260101-0000.sql.gz | psql "$DATABASE_URL"
 
 ## Related
 
-- `docs/KNOWN-LIMITATIONS.md` — tracks the "no automated backup configured
-  yet" gap, and the pending D1 → Postgres data migration needed before
-  cutover.
+- `docs/KNOWN-LIMITATIONS.md` #2 — the full history of this backup's
+  automation and both restore rehearsals, plus the still-open off-host
+  storage gap.
 - `migrations/*.sql` — schema, applied via `npm run migrate`
   (`scripts/apply-migrations.ts`), tracked in `schema_migrations`.

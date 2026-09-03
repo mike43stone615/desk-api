@@ -168,7 +168,7 @@ reachable from an untrusted network.
 | Rate limiting enforced at the application level | Yes — 4-tier (minute/hour/day/month) limiter in `src/middleware/api-protection.ts`, Redis-backed with in-memory fallback (see #3 above for its remaining edge cases) |
 | Machine-readable API spec | Yes — `src/openapi.ts`, served at `GET /docs` (Swagger UI) and `GET /docs/openapi.json`; covers this service's own routes and every proxy/integration route (see #5 above for its remaining gap) |
 | Secret rotation runbook | Yes — `docs/SECRET-ROTATION.md`, covers every secret including the two shared with sibling services |
-| Backup script | Yes — `npm run backup` (`scripts/backup-database.ts`); not yet wired into a scheduler or restore-rehearsed (see #2 above) |
+| Backup script | Yes — `npm run backup` (`scripts/backup-database.ts`), wired into a daily scheduled task and restore-rehearsed twice (see #2 above) |
 | Session/token cleanup | Yes — `node-cron` in-process job, daily at 02:00 UTC (`src/jobs/cron.ts`), replacing the earlier Cloudflare Cron Trigger |
 | CORS narrowed to configured origins | Yes — `CORS_ORIGINS` env var, defaults to `https://app.deskbusiness.co` |
 | Correlation IDs on all requests | Yes — `x-request-id` header, generated per-request in `src/app.ts` |

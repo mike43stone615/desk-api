@@ -1,6 +1,7 @@
 // Scheduled Postgres backup — see docs/BACKUP-RESTORE.md and
-// docs/KNOWN-LIMITATIONS.md #2 ("no automated database backup exists
-// yet"). Wraps pg_dump rather than reimplementing it: pg_dump already
+// docs/KNOWN-LIMITATIONS.md #2 (live, restore-rehearsed automation; the
+// off-host storage gap tracked there is still open). Wraps pg_dump rather
+// than reimplementing it: pg_dump already
 // handles schema + data + the full dump-format tooling correctly, and this
 // script's only real job is running it on a schedule, compressing, and
 // keeping a bounded number of generations.
