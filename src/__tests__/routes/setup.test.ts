@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeAll } from 'vitest';
+import { createHash } from 'crypto';
 import { createFakeDb } from '../helpers/fake-db';
 
 vi.mock('../../db', async () => {
@@ -451,6 +452,65 @@ describe('POST /setup/drafts', () => {
     expect(JSON.parse(first.body)).toEqual(JSON.parse(second.body));
     expect(fakeDb.drafts.size).toBe(1); // exactly one draft created, not two
     expect(second.headers['idempotency-replayed']).toBe('true');
+  });
+
+  it('a second request with the same key while the first is still in flight is rejected, not executed', async () => {
+    // Regression test for dsk-27: the key used to only get marked "seen"
+    // after the handler finished (an INSERT in onSend), so a second request
+    // starting before the first finished would pass the "have I seen this?"
+    // check and execute too — the exact double-submit this feature exists
+    // to prevent. The fix claims the key atomically at request start, so a
+    // row with response_status still null (an in-flight claim, simulated
+    // here directly rather than via timing-dependent real concurrency)
+    // must reject a same-key request rather than let it run.
+    fakeDb.drafts.clear();
+    fakeDb.idempotencyKeys.clear();
+    const key = 'draft-create-key-in-flight';
+    const requestHash = createHash('sha256').update(JSON.stringify(null)).digest('hex');
+    fakeDb.idempotencyKeys.set(key, {
+      key,
+      request_hash: requestHash,
+      response_status: null,
+      response_body: null,
+      expires_at: new Date(Date.now() + 3_600_000).toISOString(),
+      created_at: new Date().toISOString(),
+    });
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/setup/drafts',
+      headers: { ...authHeaders, 'idempotency-key': key },
+    });
+
+    expect(res.statusCode).toBe(409);
+    expect(fakeDb.drafts.size).toBe(0); // did not execute
+  });
+
+  it('an abandoned in-flight claim older than the staleness window can be reclaimed', async () => {
+    // Covers the crash-recovery half of the same fix: if a process died
+    // between claiming a key and recording its response, that key must not
+    // stay wedged in "in flight" for the full 24h TTL.
+    fakeDb.drafts.clear();
+    fakeDb.idempotencyKeys.clear();
+    const key = 'draft-create-key-abandoned';
+    const requestHash = createHash('sha256').update(JSON.stringify(null)).digest('hex');
+    fakeDb.idempotencyKeys.set(key, {
+      key,
+      request_hash: requestHash,
+      response_status: null,
+      response_body: null,
+      expires_at: new Date(Date.now() + 3_600_000).toISOString(),
+      created_at: new Date(Date.now() - 60_000).toISOString(), // 60s ago — past the 30s staleness window
+    });
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/setup/drafts',
+      headers: { ...authHeaders, 'idempotency-key': key },
+    });
+
+    expect(res.statusCode).toBe(201);
+    expect(fakeDb.drafts.size).toBe(1);
   });
 
   it('a different request body under the same Idempotency-Key returns 409', async () => {

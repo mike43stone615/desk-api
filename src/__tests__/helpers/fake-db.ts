@@ -447,9 +447,25 @@ export function createFakeDb() {
       const row = idempotencyKeys.get(p[0]);
       return { rows: row ? [row] : [], rowCount: row ? 1 : 0 };
     }
-    if (s.startsWith('INSERT INTO idempotency_keys')) {
+    if (s.startsWith('INSERT INTO idempotency_keys') && s.includes('ON CONFLICT (key) DO NOTHING')) {
       const [key, request_hash, response_status, response_body, expires_at] = p;
-      idempotencyKeys.set(key, { key, request_hash, response_status, response_body, expires_at });
+      if (idempotencyKeys.has(key)) return { rows: [], rowCount: 0 };
+      idempotencyKeys.set(key, {
+        key,
+        request_hash,
+        response_status,
+        response_body,
+        expires_at,
+        created_at: new Date().toISOString(),
+      });
+      return { rows: [], rowCount: 1 };
+    }
+    if (s.startsWith('UPDATE idempotency_keys SET response_status = $2, response_body = $3')) {
+      const [key, response_status, response_body] = p;
+      const row = idempotencyKeys.get(key);
+      if (!row) return { rows: [], rowCount: 0 };
+      row.response_status = response_status;
+      row.response_body = response_body;
       return { rows: [], rowCount: 1 };
     }
     if (s.startsWith('DELETE FROM idempotency_keys WHERE key = $1')) {
