@@ -4,10 +4,12 @@ The backend API for Desk Business — Fastify + TypeScript + PostgreSQL.
 
 Rewritten in place (same git history) from the original Cloudflare
 Workers/Hono/D1 implementation; see `git log` for the prior architecture.
-This build is **not currently deployed** — it runs standalone on port 3458
-for local development and review. The live, customer-facing service at
-`deskbusiness.co` is still the original Cloudflare Worker; cutover is a
-separate, later, deliberately-decoupled step.
+This build is **live in production**, serving all real traffic at
+`api.deskbusiness.co` (and `app.deskbusiness.co`'s API calls) since the
+real cutover from the old Cloudflare Worker completed. The old Worker was
+found still silently intercepting traffic well after this rewrite had
+first shipped — see `git log` around the Worker-Routes cleanup for the
+full story — and has since been fully retired.
 
 Replaces:
 - Supabase Auth (self-service email/password auth — opaque session tokens)
@@ -81,12 +83,11 @@ client, `desk_business/lib/core/api_client.dart`) and under `/v1` — see
 | `GET` | `/integrations/compliance/business-types` \| `/requirements/search` \| `/jurisdictions` | — | → compliance-os (fallback catalog when unconfigured) |
 | `POST` | `/integrations/market-research/analyze` | — | → market-validation-api (503 on failure, see above) |
 
-\* `/metrics` and `/docs` (+ `/docs/openapi.json`) are fully public by
-default, matching common practice for diagnostic/docs endpoints. Setting
-`METRICS_DOCS_API_KEY` requires a matching `x-api-key` header on all three;
-leaving it unset keeps today's behavior unchanged. Recommended for
-production — set this, or restrict network access to these paths at the
-firewall/reverse-proxy level, since neither is needed by the Flutter client.
+\* `/metrics` and `/docs` (+ `/docs/openapi.json`) are public by default
+when `METRICS_DOCS_API_KEY` is unset — matching common practice for
+diagnostic/docs endpoints, but not how this service actually runs.
+**`METRICS_DOCS_API_KEY` is set in production**, so all three require a
+matching `x-api-key` header there; neither is needed by the Flutter client.
 
 ---
 
