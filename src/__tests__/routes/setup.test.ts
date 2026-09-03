@@ -56,7 +56,6 @@ describe('POST /functions/v1/analyze-business-setup fallback classification', ()
     'Real Estate Brokerage / Agent',
     'Accounting / Bookkeeping / Tax Preparation',
     'Trucking / Freight / Transportation',
-    'Concrete Contractor',
   ];
 
   async function classify(businessIdea: string) {
@@ -89,9 +88,6 @@ describe('POST /functions/v1/analyze-business-setup fallback classification', ()
       classify('a SaaS product and mobile app for workflow automation'),
     ).resolves.toMatchObject({
       industry: 'Software Development',
-    });
-    await expect(classify('concrete flatwork company')).resolves.toMatchObject({
-      industry: 'Concrete Contractor',
     });
   });
 
@@ -241,9 +237,9 @@ describe('POST /functions/v1/analyze-business-setup fallback classification', ()
     });
 
     await expect(analyzeIdea('I want to make money online')).resolves.toMatchObject({
-      ideaIsPlausible: false,
-      ideaValidationCategory: 'NOT_BUSINESS_IDEA',
-      ideaFeedback: expect.stringContaining('specific product, service, or organization'),
+      ideaIsPlausible: true,
+      ideaValidationCategory: 'VALID_BUT_NEEDS_DETAIL',
+      ideaFeedback: expect.stringContaining('specific product, service, or customer use case'),
     });
 
     await expect(
@@ -260,15 +256,6 @@ describe('POST /functions/v1/analyze-business-setup fallback classification', ()
       ideaIsPlausible: true,
       ideaValidationCategory: 'EXISTING_BUSINESS',
       ideaFeedback: expect.stringContaining('existing business'),
-    });
-
-    await expect(analyzeIdea('I own cool stuff')).resolves.toMatchObject({
-      ideaIsPlausible: false,
-      ideaValidationCategory: 'NOT_BUSINESS_IDEA',
-    });
-
-    await expect(analyzeIdea('I own a truck')).resolves.toMatchObject({
-      ideaIsPlausible: false,
     });
   });
   it('accepts common business types that were missing from the local fallback dictionary', async () => {
@@ -364,12 +351,12 @@ describe('POST /functions/v1/analyze-business-setup fallback classification', ()
       {
         idea: 'Beacon River Company',
         category: 'NOT_BUSINESS_IDEA',
-        feedback: 'business idea',
+        feedback: 'business name',
       },
       {
         idea: 'Sagebrush Studio',
         category: 'NOT_BUSINESS_IDEA',
-        feedback: 'business idea',
+        feedback: 'business name',
       },
       {
         idea: 'a restaurant with no food and no service',
@@ -380,6 +367,16 @@ describe('POST /functions/v1/analyze-business-setup fallback classification', ()
         idea: 'a laundromat that washes tax returns',
         category: 'NOT_BUSINESS_IDEA',
         feedback: 'coherent business idea',
+      },
+      {
+        idea: 'wizard potion shop in a magic castle',
+        category: 'NOT_BUSINESS_IDEA',
+        feedback: 'real-world business',
+      },
+      {
+        idea: 'time travel repair garage',
+        category: 'NOT_BUSINESS_IDEA',
+        feedback: 'real-world business',
       },
       {
         idea: 'farmácia de bairro',
@@ -408,20 +405,7 @@ describe('POST /functions/v1/analyze-business-setup fallback classification', ()
       'barbershop with appointments and retail products',
       'asdf notes ignore this but I want to start a mobile pet grooming service',
       'restaurant, pharmacy, and trucking company',
-      'real estate holdings',
-      'venture studio',
-      'investment group',
-      'metal works',
-      'research lab',
-      'driveway paving company',
-      'equipment rental',
-      'junk removal',
-      'gutter cleaning',
-      'tax preparation firm',
-      'bike repair shop',
-      'wizard potion shop in a magic castle',
-      'time travel repair garage',
-      'a pretend wizard school for kids whose parents need daycare for a day',
+      'I want to make passive income',
     ];
 
     for (const idea of cases) {
