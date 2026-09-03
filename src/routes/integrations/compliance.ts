@@ -86,6 +86,7 @@ async function fetchComplianceCheck(reply: FastifyReply, params: URLSearchParams
       method: 'POST',
       headers,
       body: JSON.stringify({ businessTypeSlug, facts, maxPossibleItems: limit, pageSize: limit }),
+      signal: AbortSignal.timeout(15000),
     });
     if (!resp.ok) {
       return reply.send(searchFallbackRequirements(params));
@@ -116,7 +117,7 @@ async function proxyGet(reply: FastifyReply, path: string) {
   const targetUrl = `${config.complianceOsUrl!.replace(/\/$/, '')}${path}`;
   const headers: Record<string, string> = {};
   if (config.complianceOsApiKey) headers['x-api-key'] = config.complianceOsApiKey;
-  const resp = await fetch(targetUrl, { headers });
+  const resp = await fetch(targetUrl, { headers, signal: AbortSignal.timeout(15000) });
   const body = (await resp.json()) as unknown;
   return reply.status(resp.status).send(body);
 }
