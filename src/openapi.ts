@@ -227,7 +227,41 @@ export const OPENAPI_SPEC = {
     },
     '/setup/businesses/{id}/members': {
       get: { tags: ['Setup'], summary: 'List a business\'s members', security: [{ SessionToken: [] }], responses: { '200': { description: 'OK' } } },
-      post: { tags: ['Setup'], summary: 'Invite/update a member (owner/admin only)', security: [{ SessionToken: [] }], responses: { '200': { description: 'OK' }, '403': { description: 'Forbidden' } } },
+      post: {
+        tags: ['Setup'],
+        summary: 'Invite a member — pending until they accept (owner/admin only)',
+        security: [{ SessionToken: [] }],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                required: ['email'],
+                properties: {
+                  email: { type: 'string', format: 'email' },
+                  role: { type: 'string', enum: ['owner', 'admin', 'member', 'accountant'], description: 'Defaults to member if omitted.' },
+                },
+              },
+            },
+          },
+        },
+        responses: {
+          '200': { description: 'OK — invite created or updated, pending acceptance' },
+          '403': { description: 'Forbidden' },
+          '404': { description: 'No user exists with that email' },
+          '409': { description: 'That person is already a member of this business' },
+        },
+      },
+    },
+    '/setup/invites': {
+      get: { tags: ['Setup'], summary: 'List the caller\'s own pending invites', security: [{ SessionToken: [] }], responses: { '200': { description: 'OK' } } },
+    },
+    '/setup/invites/{membershipId}/accept': {
+      post: { tags: ['Setup'], summary: 'Accept a pending invite (must be the invited user)', security: [{ SessionToken: [] }], responses: { '200': { description: 'OK' }, '404': { description: 'Invite not found' } } },
+    },
+    '/setup/invites/{membershipId}': {
+      delete: { tags: ['Setup'], summary: 'Decline a pending invite (must be the invited user)', security: [{ SessionToken: [] }], responses: { '200': { description: 'OK' }, '404': { description: 'Invite not found' } } },
     },
     '/setup/businesses/{id}/members/{membershipId}': {
       delete: { tags: ['Setup'], summary: 'Remove a member (owner/admin only; cannot remove the last owner)', security: [{ SessionToken: [] }], responses: { '200': { description: 'OK' }, '409': { description: 'Business must keep at least one owner' } } },

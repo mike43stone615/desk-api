@@ -72,7 +72,8 @@ client, `desk_business/lib/core/api_client.dart`) and under `/v1` — see
 | `POST` | `/auth/password` | Bearer | Change password |
 | `GET/POST/PATCH/DELETE` | `/setup/drafts...` | Bearer | Business-setup drafts (idempotency-key aware on creation endpoints) |
 | `GET` | `/setup/businesses` | Bearer | Businesses the caller belongs to |
-| `GET/POST/DELETE` | `/setup/businesses/:id/members...` | Bearer | Membership management |
+| `GET/POST/DELETE` | `/setup/businesses/:id/members...` | Bearer | Membership management — invites are pending until accepted |
+| `GET/POST/DELETE` | `/setup/invites...` | Bearer | The caller's own pending invites — accept or decline |
 | `GET/PATCH/DELETE` | `/admin/tables...` | Bearer + admin allowlist | Table browser (this service + registry-api + compliance-os), audit-logged |
 | `POST` | `/functions/v1/analyze-business-setup` | — | AI business classification (heuristic fallback without an API key) |
 | `POST` | `/functions/v1/search-place-areas` | — | Google Places city search |
