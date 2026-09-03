@@ -15,6 +15,7 @@
 import Fastify from 'fastify';
 import type { FastifyInstance } from 'fastify';
 import cors from '@fastify/cors';
+import helmet from '@fastify/helmet';
 import { randomUUID } from 'crypto';
 import { pool } from './db';
 import { config } from './config';
@@ -104,6 +105,17 @@ export async function buildApp(): Promise<FastifyInstance> {
     allowedHeaders: ['Content-Type', 'Authorization', 'Idempotency-Key'],
     credentials: true,
   });
+
+  // Baseline HTTP security headers (X-Frame-Options, X-Content-Type-Options,
+  // Strict-Transport-Security, etc.) - previously set nowhere. Matters most
+  // for /docs below: it's real, publicly-reachable HTML (now key-gated per
+  // dsk-1, but defense in depth), and had no X-Frame-Options at all, meaning
+  // it could be embedded in an iframe on any external site. Content-Security-
+  // Policy is disabled: this API has exactly one HTML surface (/docs), and it
+  // loads the Swagger UI bundle from unpkg.com by design - a default CSP
+  // would block that. Every other route only ever returns JSON, where CSP
+  // provides no protection anyway.
+  await app.register(helmet, { contentSecurityPolicy: false });
 
   // OpenAPI spec + Swagger UI — publicly reachable by default, optionally
   // gated behind METRICS_DOCS_API_KEY (see middleware/auth.ts's

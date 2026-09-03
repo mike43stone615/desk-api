@@ -3,7 +3,7 @@
 # this replaced).
 
 # ── Build stage ───────────────────────────────────────────────────────────────
-FROM node:20-alpine AS build
+FROM node:24-alpine AS build
 
 WORKDIR /app
 
@@ -23,7 +23,7 @@ COPY migrations ./migrations
 RUN npm run build
 
 # ── Production stage ──────────────────────────────────────────────────────────
-FROM node:20-alpine AS production
+FROM node:24-alpine AS production
 
 WORKDIR /app
 
