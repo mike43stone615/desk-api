@@ -139,9 +139,27 @@ describe('/health and /metrics', () => {
     expect(res.statusCode).toBe(200);
   });
 
-  it('GET /metrics returns Prometheus text format', async () => {
-    const res = await app.inject({ method: 'GET', url: '/metrics' });
+  it('GET /metrics requires the configured x-api-key and returns Prometheus text format when given it', async () => {
+    const res = await app.inject({
+      method: 'GET',
+      url: '/metrics',
+      headers: { 'x-api-key': 'test-metrics-docs-key' },
+    });
     expect(res.statusCode).toBe(200);
     expect(res.headers['content-type']).toContain('text/plain');
+  });
+
+  it('GET /metrics rejects a missing or wrong x-api-key with 401', async () => {
+    const noKey = await app.inject({ method: 'GET', url: '/metrics' });
+    expect(noKey.statusCode).toBe(401);
+    const wrongKey = await app.inject({ method: 'GET', url: '/metrics', headers: { 'x-api-key': 'wrong' } });
+    expect(wrongKey.statusCode).toBe(401);
+  });
+
+  it('GET /docs rejects a missing x-api-key with 401 and allows the correct one', async () => {
+    const noKey = await app.inject({ method: 'GET', url: '/docs' });
+    expect(noKey.statusCode).toBe(401);
+    const withKey = await app.inject({ method: 'GET', url: '/docs', headers: { 'x-api-key': 'test-metrics-docs-key' } });
+    expect(withKey.statusCode).toBe(200);
   });
 });

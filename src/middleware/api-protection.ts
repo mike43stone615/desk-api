@@ -29,9 +29,26 @@ interface BucketState {
   lastHourReset: number;
   lastDayReset: number;
   lastMonthReset: number;
+  lastAccess: number;
 }
 
 const memBuckets = new Map<string, BucketState>();
+
+// Every unique caller (IP, since this service has no API-key bucketing) gets
+// a permanent entry with no eviction - a slow, guaranteed leak on any run
+// without Redis configured, worse under scanning/probing traffic (confirmed
+// live: no cap, no cleanup interval anywhere). A caller idle for a full day
+// has necessarily had every one of its windows (minute/hour/day) refill
+// already, so evicting it loses no real rate-limit state - the next request
+// just gets a fresh bucket, identical to a brand-new caller.
+const BUCKET_IDLE_EVICTION_MS = 24 * 60 * 60 * 1000;
+const sweepInterval = setInterval(() => {
+  const now = Date.now();
+  for (const [key, bucket] of memBuckets) {
+    if (now - bucket.lastAccess > BUCKET_IDLE_EVICTION_MS) memBuckets.delete(key);
+  }
+}, 15 * 60 * 1000);
+sweepInterval.unref();
 
 function memGetOrCreate(key: string): BucketState {
   let b = memBuckets.get(key);
@@ -46,8 +63,11 @@ function memGetOrCreate(key: string): BucketState {
       lastHourReset: now,
       lastDayReset: now,
       lastMonthReset: now,
+      lastAccess: now,
     };
     memBuckets.set(key, b);
+  } else {
+    b.lastAccess = Date.now();
   }
   return b;
 }

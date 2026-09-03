@@ -39,3 +39,9 @@ delete process.env.REDIS_URL;
 // `!config.complianceOsUrl` correctly evaluates true).
 process.env.COMPLIANCE_OS_URL = '';
 process.env.REGISTRY_API_URL = '';
+// Set to a known value, not deleted, for the same reason as COMPLIANCE_OS_URL
+// above (dotenv only skips keys already PRESENT) - without this, a real local
+// .env's now-set METRICS_DOCS_API_KEY (see dsk-1) silently leaks into the
+// test process and makes routes/auth.test.ts's public-/metrics assumption
+// developer-machine-dependent instead of deterministic.
+process.env.METRICS_DOCS_API_KEY = 'test-metrics-docs-key';
