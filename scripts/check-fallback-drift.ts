@@ -26,9 +26,28 @@ const REGISTRY_API_SECRET = process.env.REGISTRY_API_SECRET;
 // them). If those constants are ever exported, switch this to import
 // them directly instead of re-declaring.
 const FALLBACK_BUSINESS_TYPE_SLUGS = [
-  "professional-services", "retail", "food-service", "construction",
-  "health-wellness", "technology", "transportation", "real-estate",
-  "nonprofit", "general-business",
+  "accounting-firm", "auto-dealership", "auto-repair", "bakery", "bar-tavern",
+  "barbershop", "bed-and-breakfast", "body-shop", "brewery", "cannabis-dispensary",
+  "catering-service", "chemical-manufacturing", "childcare-center", "chiropractor",
+  "cleaning-service", "coffee-shop", "concrete-contractor", "consulting-firm",
+  "contractor", "convenience-store", "courier-service", "cpa-firm",
+  "dental-practice", "driving-school", "electrical-contractor", "engineering-firm",
+  "excavation-contractor", "farm", "financial-advisor", "firearms-dealer",
+  "food-manufacturing", "food-truck", "funeral-home", "general-contractor",
+  "grocery-store", "gym-fitness-center", "home-health-agency", "hospital",
+  "hotel-motel", "hvac-contractor", "insurance-agency", "it-services",
+  "landscaping-contractor", "law-firm", "light-manufacturing", "liquor-store",
+  "manufacturing", "medical-practice", "mental-health-practice", "mortgage-broker",
+  "moving-company", "nonprofit-organization", "nursery-greenhouse",
+  "optometry-practice", "painting-contractor", "pawn-shop", "pest-control",
+  "pharmacy", "physical-therapy", "plumbing-contractor", "private-school",
+  "professional-services", "property-management", "real-estate-agent",
+  "real-estate-brokerage", "real-estate-developer", "restaurant", "retail-store",
+  "roofing-contractor", "secondhand-dealer", "security-company",
+  "short-term-rental", "software-company", "solar-installer", "spa-salon",
+  "specialty-contractor", "staffing-agency", "tattoo-studio", "taxi-rideshare",
+  "transportation-carrier", "trucking-company", "tutoring-center",
+  "utility-contractor", "veterinary-practice", "waste-management", "winery",
 ];
 const FALLBACK_STATE_CODES = [
   "AL","AK","AZ","AR","CA","CO","CT","DE","DC","FL","GA","HI","ID","IL","IN","IA",
