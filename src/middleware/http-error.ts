@@ -56,6 +56,23 @@ function problem(request: FastifyRequest, status: number, detail: string, errors
   return body;
 }
 
+/**
+ * Sentry's default Fastify `shouldHandleError` checks `reply.statusCode` —
+ * but its `onError` hook runs before this service's own error handler above
+ * has set that status, so it's always still Fastify's default (200) at that
+ * point, and the default filter's `statusCode <= 299` branch always matches.
+ * Confirmed live: an ordinary 401 (no session) and a routine 400 (empty
+ * JSON body) both got captured as Sentry issues, indistinguishable from a
+ * real crash — exactly what trains people to ignore error alerts. This
+ * checks the error's own semantic status instead, which is known before any
+ * response has been sent.
+ */
+export function shouldCaptureError(error: Error): boolean {
+  if (error instanceof ZodError) return false; // validation errors are routine 400s, not incidents
+  const status = (error as { status?: unknown }).status ?? (error as { statusCode?: unknown }).statusCode;
+  return typeof status !== 'number' || status >= 500;
+}
+
 export function registerErrorHandler(app: FastifyInstance) {
   app.setErrorHandler((error, request, reply) => {
     reply.header('Content-Type', 'application/problem+json');

@@ -24,11 +24,12 @@ import { connectRedis } from './middleware/redis-client';
 import { pool } from './db';
 import { config } from './config';
 import { startCleanupCron, stopCleanupCron } from './jobs/cron';
+import { shouldCaptureError } from './middleware/http-error';
 
 async function main() {
   await connectRedis();
   const app = await buildApp();
-  Sentry.setupFastifyErrorHandler(app);
+  Sentry.setupFastifyErrorHandler(app, { shouldHandleError: shouldCaptureError });
 
   try {
     await app.listen({ port: config.port, host: '127.0.0.1' });
