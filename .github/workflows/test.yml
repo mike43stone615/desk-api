@@ -10,6 +10,26 @@ jobs:
   test:
     runs-on: ubuntu-latest
 
+    # A dedicated, throwaway Postgres for the E2E step only -- the regular
+    # unit suite above mocks the db pool entirely (see __tests__/setup.ts's
+    # placeholder DATABASE_URL) and never touches this. Only
+    # __tests__/e2e/*.e2e.test.ts, which self-skip without a real database,
+    # need it.
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: desk_api
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 5
+
     steps:
       - uses: actions/checkout@v7
 
@@ -29,6 +49,16 @@ jobs:
 
       - name: Type check
         run: npm run build
+
+      - name: Apply database migrations for E2E
+        run: npm run migrate
+        env:
+          DATABASE_URL: postgresql://postgres:postgres@localhost:5432/desk_api
+
+      - name: Run E2E tests
+        run: npm run test:e2e
+        env:
+          E2E_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/desk_api
 
       - name: Security audit
         run: npm audit --audit-level=high
