@@ -5,9 +5,11 @@ Fastify/TypeScript/PostgreSQL rewrite (see git history around commit
 `aceb5e8` for the earlier Cloudflare Workers/Hono/D1 build this replaced;
 that architecture's limitations no longer apply and are not repeated here).
 
-This build is **not currently deployed**. The live, customer-facing service
-at `deskbusiness.co` is still the original Cloudflare Worker; cutover is a
-separate, later, deliberately-decoupled step (see `README.md`).
+This build is **live in production**, serving all real traffic at
+`api.deskbusiness.co` (and `app.deskbusiness.co`'s API calls) since the
+real cutover from the old Cloudflare Worker completed — see `README.md`
+for the full cutover story. Item #1 below covers the data-migration side
+of that cutover in detail.
 
 ---
 
@@ -36,14 +38,14 @@ from earlier local testing) — cleared first (`--clear-first`) per an
 explicit decision to keep the real D1 data as source of truth rather than
 the local test signups.
 
-**Still not done: the actual cutover.** This service's Postgres now has
-real data, but `deskbusiness.co` still points at the Cloudflare Worker —
-switching the Tunnel/DNS/watchdog over to this service is a separate,
-deliberately-decoupled, later step (see `README.md`), not something this
-migration does on its own. Re-run `migrate-from-d1.ts` (without
+**Cutover: done.** The Tunnel/DNS switch to this service happened — see
+item #2 below and `README.md` for the full story, including the old
+Worker being found still silently intercepting traffic well after this
+migration first ran, and its later, full retirement. If D1 is ever
+consulted again for any reason, re-run `migrate-from-d1.ts` (without
 `--clear-first`, since `ON CONFLICT (id) DO NOTHING` makes re-running
-safe) right before actually cutting over, to catch anything written to D1
-between now and then.
+safe) to catch anything written there since this migration's original
+run.
 
 ### 2. ~~No automated database backup exists yet~~ — resolved 2026-08-26
 
@@ -155,6 +157,28 @@ rather than an accident. Left unset today (this repo's default).
 **Resolution:** set `METRICS_DOCS_API_KEY`, or restrict network access to
 these paths at the firewall/reverse-proxy level, before any deployment
 reachable from an untrusted network.
+
+### 7. ~~No documented latency baseline for the three proxied siblings~~ — resolved 2026-09-03
+
+The 15-second `AbortSignal.timeout()` on every proxy fetch (compliance-os,
+registry-api, market-validation-api — see `src/routes/integrations/`) was
+never checked against a real measured baseline; it was just a round
+number.
+
+**Measured directly** (5 requests each, this same machine — which is a
+real baseline, not an approximation, since all four services and Postgres
+already share one physical machine per the cross-service architecture
+documented elsewhere in this repo):
+- compliance-os `GET /business-types`: ~210-270ms
+- registry-api `GET /business-structures`: ~206-218ms
+- market-validation-api `POST /research/analyze` (the actual proxied
+  compute endpoint, not just a health check): ~211-218ms
+
+All three sit well under 300ms end-to-end on a healthy day, meaning the
+15s timeout carries roughly 50-70x headroom over normal operation — it
+exists purely to bound a genuinely hung sibling (cos-38's failure mode),
+not to trim normal-case latency. No change to the timeout value itself;
+this closes the documentation gap, not a code gap.
 
 ---
 
