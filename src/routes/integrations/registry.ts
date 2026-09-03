@@ -19,7 +19,13 @@ async function proxyGet(reply: FastifyReply, path: string) {
   if (!config.registryApiUrl) throw new HttpError(503, 'Registry service is not configured.');
   const headers: Record<string, string> = {};
   if (config.registryApiSecret) headers['x-api-key'] = config.registryApiSecret;
-  const resp = await fetch(`${config.registryApiUrl.replace(/\/$/, '')}${path}`, { headers });
+  // Matches marketResearch.ts's existing timeout - a hung registry-api instance
+  // must not hang this desk-api request indefinitely (confirmed live: with no
+  // timeout, this held open for as long as the sibling did, no bound at all).
+  const resp = await fetch(`${config.registryApiUrl.replace(/\/$/, '')}${path}`, {
+    headers,
+    signal: AbortSignal.timeout(15000),
+  });
   const data = (await resp.json()) as unknown;
   return reply.status(resp.status).send(data);
 }
@@ -32,6 +38,7 @@ async function proxyPostWithBody(reply: FastifyReply, path: string, body: unknow
     method: 'POST',
     headers,
     body: JSON.stringify(body),
+    signal: AbortSignal.timeout(15000),
   });
   const data = (await resp.json()) as unknown;
   return reply.status(resp.status).send(data);
