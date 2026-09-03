@@ -104,6 +104,7 @@ export async function analyzeBusinessSetupHandler(request: FastifyRequest, reply
           { role: 'user', content: JSON.stringify(prompt) },
         ],
       }),
+      signal: AbortSignal.timeout(15000),
     });
 
     if (!resp.ok) {
