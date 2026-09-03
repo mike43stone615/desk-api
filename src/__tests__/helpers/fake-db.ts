@@ -296,10 +296,14 @@ export function createFakeDb() {
           (m) => m.business_id === business_id && m.user_id === user_id,
         );
         if (existing) {
+          if (existing.accepted_at) {
+            // Mirrors the real WHERE guard: re-inviting an already-accepted
+            // member is a no-op, not a silent reset back to pending.
+            return { rows: [], rowCount: 0 };
+          }
           existing.role = role;
           existing.invited_by_user_id = invited_by_user_id;
           existing.invited_at = now;
-          existing.accepted_at = now;
           existing.updated_at = now;
         } else {
           memberships.set(id, {
@@ -309,7 +313,7 @@ export function createFakeDb() {
             role,
             invited_by_user_id,
             invited_at: now,
-            accepted_at: now,
+            accepted_at: null,
             created_at: now,
             updated_at: now,
           });
@@ -368,6 +372,44 @@ export function createFakeDb() {
     if (s.startsWith('DELETE FROM business_memberships WHERE id = $1 AND business_id = $2')) {
       const existed = memberships.delete(p[0]);
       return { rows: [], rowCount: existed ? 1 : 0 };
+    }
+    if (s.startsWith('SELECT name FROM businesses WHERE id = $1')) {
+      const b = businesses.get(p[0]);
+      return { rows: b ? [{ name: b.name }] : [], rowCount: b ? 1 : 0 };
+    }
+    if (s.includes('FROM business_memberships bm') && s.includes('INNER JOIN businesses b')) {
+      const rows = [...memberships.values()]
+        .filter((m) => m.user_id === p[0] && !m.accepted_at)
+        .map((m) => {
+          const b = businesses.get(m.business_id as string);
+          const inviter = m.invited_by_user_id ? users.get(m.invited_by_user_id as string) : undefined;
+          return {
+            id: m.id,
+            business_id: m.business_id,
+            business_name: b?.name ?? null,
+            role: m.role,
+            invited_at: m.invited_at,
+            invited_by_email: inviter?.email ?? null,
+            invited_by_first_name: inviter?.first_name ?? null,
+            invited_by_last_name: inviter?.last_name ?? null,
+          };
+        });
+      return { rows, rowCount: rows.length };
+    }
+    if (s.startsWith('UPDATE business_memberships SET accepted_at = $1, updated_at = $1')) {
+      const [now, membershipId, userId] = p;
+      const row = memberships.get(membershipId);
+      if (!row || row.user_id !== userId || row.accepted_at) return { rows: [], rowCount: 0 };
+      row.accepted_at = now;
+      row.updated_at = now;
+      return { rows: [], rowCount: 1 };
+    }
+    if (s.startsWith('DELETE FROM business_memberships WHERE id = $1 AND user_id = $2 AND accepted_at IS NULL')) {
+      const [membershipId, userId] = p;
+      const row = memberships.get(membershipId);
+      if (!row || row.user_id !== userId || row.accepted_at) return { rows: [], rowCount: 0 };
+      memberships.delete(membershipId);
+      return { rows: [], rowCount: 1 };
     }
 
     // ── mutation audit log ────────────────────────────────────────────────

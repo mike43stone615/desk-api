@@ -49,6 +49,9 @@ import {
   listBusinessMembersHandler,
   inviteBusinessMemberHandler,
   removeBusinessMemberHandler,
+  listPendingInvitesHandler,
+  acceptBusinessInviteHandler,
+  declineBusinessInviteHandler,
 } from './routes/setup';
 import {
   adminTablesHandler,
@@ -229,6 +232,9 @@ async function registerLegacyAndVersionedRoutes(instance: FastifyInstance) {
   instance.get('/setup/businesses/:id/members', listBusinessMembersHandler);
   instance.post('/setup/businesses/:id/members', inviteBusinessMemberHandler);
   instance.delete('/setup/businesses/:id/members/:membershipId', removeBusinessMemberHandler);
+  instance.get('/setup/invites', listPendingInvitesHandler);
+  instance.post('/setup/invites/:membershipId/accept', acceptBusinessInviteHandler);
+  instance.delete('/setup/invites/:membershipId', declineBusinessInviteHandler);
 
   // ── Admin table browser (+ upstream aggregation) ────────────────────────
   instance.get('/admin/tables', adminTablesHandler);

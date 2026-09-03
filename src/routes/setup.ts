@@ -16,6 +16,8 @@ import { requireAuth, requireConfirmedEmail } from '../middleware/auth';
 import { generateId, nowUtc } from '../domain/auth/tokens';
 import { pool } from '../db';
 import { DraftPatchSchema, MemberInviteSchema } from '../validators/setup';
+import { config } from '../config';
+import { sendBusinessInviteEmail } from '../infrastructure/email/resend';
 
 const MAX_INCOMPLETE_DRAFTS = 5;
 const MAX_DRAFT_BYTES = 262_144;
@@ -298,20 +300,99 @@ export async function inviteBusinessMemberHandler(request: FastifyRequest, reply
   const invitedUser = invitedRows[0];
   if (!invitedUser) throw new HttpError(404, 'User not found.');
 
+  const { rows: businessRows } = await pool.query<{ name: string }>(`SELECT name FROM businesses WHERE id = $1`, [
+    businessId,
+  ]);
+  const businessName = businessRows[0]?.name ?? 'a business';
+
   const now = nowUtc();
-  await pool.query(
+  // Pending until the invited user accepts — see acceptBusinessInviteHandler.
+  // The WHERE guard on the update means a currently-accepted member can't be
+  // silently reset to pending by a re-invite; rowCount 0 signals that case.
+  const result = await pool.query(
     `INSERT INTO business_memberships (
        id, business_id, user_id, role, invited_by_user_id, invited_at, accepted_at, created_at, updated_at
      )
-     VALUES ($1, $2, $3, $4, $5, $6, $6, $6, $6)
+     VALUES ($1, $2, $3, $4, $5, $6, NULL, $6, $6)
      ON CONFLICT (business_id, user_id) DO UPDATE SET
        role = excluded.role,
        invited_by_user_id = excluded.invited_by_user_id,
        invited_at = excluded.invited_at,
-       accepted_at = excluded.accepted_at,
-       updated_at = excluded.updated_at`,
+       updated_at = excluded.updated_at
+     WHERE business_memberships.accepted_at IS NULL`,
     [generateId(), businessId, invitedUser.id, role, user.id, now],
   );
+  if (result.rowCount === 0) {
+    throw new HttpError(409, 'That person is already a member of this business.');
+  }
+
+  // Best-effort: sendEmail already swallows its own failures (logged, not
+  // thrown) so a Resend outage can't block the invite itself.
+  await sendBusinessInviteEmail(config, email, businessName, user.email, request.id);
+
+  return reply.send({ ok: true });
+}
+
+export async function listPendingInvitesHandler(request: FastifyRequest, reply: FastifyReply) {
+  await requireAuth(request, reply);
+  await requireConfirmedEmail(request, reply);
+  const user = request.currentUser!;
+
+  const { rows } = await pool.query<Record<string, unknown>>(
+    `SELECT bm.id, bm.business_id, b.name AS business_name, bm.role, bm.invited_at,
+            u.email AS invited_by_email, u.first_name AS invited_by_first_name, u.last_name AS invited_by_last_name
+     FROM business_memberships bm
+     INNER JOIN businesses b ON b.id = bm.business_id
+     LEFT JOIN users u ON u.id = bm.invited_by_user_id
+     WHERE bm.user_id = $1 AND bm.accepted_at IS NULL
+     ORDER BY bm.invited_at DESC`,
+    [user.id],
+  );
+
+  return reply.send({
+    invites: rows.map((row) => ({
+      id: row.id,
+      businessId: row.business_id,
+      businessName: row.business_name,
+      role: formatRole(parseMemberRole(String(row.role ?? ''))),
+      invitedAt: row.invited_at,
+      invitedBy: {
+        email: row.invited_by_email,
+        firstName: row.invited_by_first_name,
+        lastName: row.invited_by_last_name,
+      },
+    })),
+  });
+}
+
+export async function acceptBusinessInviteHandler(request: FastifyRequest, reply: FastifyReply) {
+  await requireAuth(request, reply);
+  await requireConfirmedEmail(request, reply);
+  const user = request.currentUser!;
+  const { membershipId } = request.params as { membershipId: string };
+
+  const now = nowUtc();
+  const result = await pool.query(
+    `UPDATE business_memberships SET accepted_at = $1, updated_at = $1
+     WHERE id = $2 AND user_id = $3 AND accepted_at IS NULL`,
+    [now, membershipId, user.id],
+  );
+  if (result.rowCount === 0) throw new HttpError(404, 'Invite not found.');
+
+  return reply.send({ ok: true });
+}
+
+export async function declineBusinessInviteHandler(request: FastifyRequest, reply: FastifyReply) {
+  await requireAuth(request, reply);
+  await requireConfirmedEmail(request, reply);
+  const user = request.currentUser!;
+  const { membershipId } = request.params as { membershipId: string };
+
+  const result = await pool.query(
+    `DELETE FROM business_memberships WHERE id = $1 AND user_id = $2 AND accepted_at IS NULL`,
+    [membershipId, user.id],
+  );
+  if (result.rowCount === 0) throw new HttpError(404, 'Invite not found.');
 
   return reply.send({ ok: true });
 }

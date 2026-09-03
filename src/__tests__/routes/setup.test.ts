@@ -9,6 +9,7 @@ vi.mock('../../middleware/redis-client', () => ({ getRedis: () => null, connectR
 
 import { pool } from '../../db';
 import { buildApp } from '../../app';
+import { config } from '../../config';
 import type { FastifyInstance } from 'fastify';
 
 const fakeDb = pool as unknown as ReturnType<typeof createFakeDb>;
@@ -55,6 +56,7 @@ describe('POST /functions/v1/analyze-business-setup fallback classification', ()
     'Real Estate Brokerage / Agent',
     'Accounting / Bookkeeping / Tax Preparation',
     'Trucking / Freight / Transportation',
+    'Concrete Contractor',
   ];
 
   async function classify(businessIdea: string) {
@@ -87,6 +89,9 @@ describe('POST /functions/v1/analyze-business-setup fallback classification', ()
       classify('a SaaS product and mobile app for workflow automation'),
     ).resolves.toMatchObject({
       industry: 'Software Development',
+    });
+    await expect(classify('concrete flatwork company')).resolves.toMatchObject({
+      industry: 'Concrete Contractor',
     });
   });
 
@@ -236,9 +241,9 @@ describe('POST /functions/v1/analyze-business-setup fallback classification', ()
     });
 
     await expect(analyzeIdea('I want to make money online')).resolves.toMatchObject({
-      ideaIsPlausible: true,
-      ideaValidationCategory: 'VALID_BUT_NEEDS_DETAIL',
-      ideaFeedback: expect.stringContaining('specific product, service, or customer use case'),
+      ideaIsPlausible: false,
+      ideaValidationCategory: 'NOT_BUSINESS_IDEA',
+      ideaFeedback: expect.stringContaining('specific product, service, or organization'),
     });
 
     await expect(
@@ -255,6 +260,15 @@ describe('POST /functions/v1/analyze-business-setup fallback classification', ()
       ideaIsPlausible: true,
       ideaValidationCategory: 'EXISTING_BUSINESS',
       ideaFeedback: expect.stringContaining('existing business'),
+    });
+
+    await expect(analyzeIdea('I own cool stuff')).resolves.toMatchObject({
+      ideaIsPlausible: false,
+      ideaValidationCategory: 'NOT_BUSINESS_IDEA',
+    });
+
+    await expect(analyzeIdea('I own a truck')).resolves.toMatchObject({
+      ideaIsPlausible: false,
     });
   });
   it('accepts common business types that were missing from the local fallback dictionary', async () => {
@@ -350,12 +364,12 @@ describe('POST /functions/v1/analyze-business-setup fallback classification', ()
       {
         idea: 'Beacon River Company',
         category: 'NOT_BUSINESS_IDEA',
-        feedback: 'business name',
+        feedback: 'business idea',
       },
       {
         idea: 'Sagebrush Studio',
         category: 'NOT_BUSINESS_IDEA',
-        feedback: 'business name',
+        feedback: 'business idea',
       },
       {
         idea: 'a restaurant with no food and no service',
@@ -366,16 +380,6 @@ describe('POST /functions/v1/analyze-business-setup fallback classification', ()
         idea: 'a laundromat that washes tax returns',
         category: 'NOT_BUSINESS_IDEA',
         feedback: 'coherent business idea',
-      },
-      {
-        idea: 'wizard potion shop in a magic castle',
-        category: 'NOT_BUSINESS_IDEA',
-        feedback: 'real-world business',
-      },
-      {
-        idea: 'time travel repair garage',
-        category: 'NOT_BUSINESS_IDEA',
-        feedback: 'real-world business',
       },
       {
         idea: 'farmácia de bairro',
@@ -404,7 +408,20 @@ describe('POST /functions/v1/analyze-business-setup fallback classification', ()
       'barbershop with appointments and retail products',
       'asdf notes ignore this but I want to start a mobile pet grooming service',
       'restaurant, pharmacy, and trucking company',
-      'I want to make passive income',
+      'real estate holdings',
+      'venture studio',
+      'investment group',
+      'metal works',
+      'research lab',
+      'driveway paving company',
+      'equipment rental',
+      'junk removal',
+      'gutter cleaning',
+      'tax preparation firm',
+      'bike repair shop',
+      'wizard potion shop in a magic castle',
+      'time travel repair garage',
+      'a pretend wizard school for kids whose parents need daycare for a day',
     ];
 
     for (const idea of cases) {
@@ -564,6 +581,244 @@ describe('PATCH /setup/drafts/:id and POST /setup/drafts/:id/complete', () => {
       headers: authHeaders,
     });
     expect(complete.statusCode).toBe(400);
+  });
+});
+
+describe('business membership invites', () => {
+  const invitedUserId = 'user-invited';
+  const invitedEmail = 'invited@example.com';
+  let invitedHeaders: Record<string, string>;
+
+  beforeAll(() => {
+    fakeDb.users.set(invitedUserId, {
+      id: invitedUserId,
+      email: invitedEmail,
+      password_hash: 'irrelevant',
+      first_name: 'Invited',
+      last_name: 'Person',
+      email_confirmed_at: new Date().toISOString(),
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    });
+    const token = 'invited-session-token';
+    fakeDb.sessions.set(token, {
+      id: 'session-invited',
+      user_id: invitedUserId,
+      token,
+      expires_at: new Date(Date.now() + 3_600_000).toISOString(),
+      created_at: new Date().toISOString(),
+    });
+    invitedHeaders = { authorization: `Bearer ${token}` };
+  });
+
+  async function createOwnedBusiness(): Promise<string> {
+    const created = await app.inject({ method: 'POST', url: '/setup/drafts', headers: authHeaders });
+    const draftId = JSON.parse(created.body).id as string;
+    await app.inject({
+      method: 'PATCH',
+      url: `/setup/drafts/${draftId}`,
+      headers: authHeaders,
+      payload: { draft: { businessName: 'Acme Invites Co' } },
+    });
+    const complete = await app.inject({
+      method: 'POST',
+      url: `/setup/drafts/${draftId}/complete`,
+      headers: authHeaders,
+    });
+    return JSON.parse(complete.body).business.id as string;
+  }
+
+  it('invites a member as pending, not immediately accepted — invited user has no access until they accept', async () => {
+    fakeDb.businesses.clear();
+    fakeDb.memberships.clear();
+    const businessId = await createOwnedBusiness();
+
+    const invite = await app.inject({
+      method: 'POST',
+      url: `/setup/businesses/${businessId}/members`,
+      headers: authHeaders,
+      payload: { email: invitedEmail, role: 'member' },
+    });
+    expect(invite.statusCode).toBe(200);
+
+    const membersList = await app.inject({
+      method: 'GET',
+      url: `/setup/businesses/${businessId}/members`,
+      headers: authHeaders,
+    });
+    const invitedMember = JSON.parse(membersList.body).members.find((m: { userId: string }) => m.userId === invitedUserId);
+    expect(invitedMember.acceptedAt).toBeNull();
+
+    // The invited user has no access yet — the business doesn't show up for them.
+    const invitedBusinesses = await app.inject({ method: 'GET', url: '/setup/businesses', headers: invitedHeaders });
+    expect(JSON.parse(invitedBusinesses.body).businesses).toHaveLength(0);
+  });
+
+  it('sends a notification email to the invited user, with the inviter and business name in the body', async () => {
+    fakeDb.businesses.clear();
+    fakeDb.memberships.clear();
+    const businessId = await createOwnedBusiness();
+
+    const originalKey = config.resendApiKey;
+    config.resendApiKey = 'test-resend-key';
+    const fetchSpy = vi.spyOn(global, 'fetch').mockResolvedValue(new Response(null, { status: 200 }));
+    try {
+      await app.inject({
+        method: 'POST',
+        url: `/setup/businesses/${businessId}/members`,
+        headers: authHeaders,
+        payload: { email: invitedEmail, role: 'member' },
+      });
+    } finally {
+      config.resendApiKey = originalKey;
+    }
+
+    expect(fetchSpy).toHaveBeenCalledWith(
+      'https://api.resend.com/emails',
+      expect.objectContaining({ method: 'POST' }),
+    );
+    const sentBody = JSON.parse(fetchSpy.mock.calls[0][1]!.body as string);
+    expect(sentBody.to).toEqual([invitedEmail]);
+    expect(sentBody.html).toContain('Acme Invites Co');
+    expect(sentBody.html).toContain('owner@example.com');
+    fetchSpy.mockRestore();
+  });
+
+  it("a pending invite shows up in the invited user's own pending-invites list", async () => {
+    fakeDb.businesses.clear();
+    fakeDb.memberships.clear();
+    const businessId = await createOwnedBusiness();
+    await app.inject({
+      method: 'POST',
+      url: `/setup/businesses/${businessId}/members`,
+      headers: authHeaders,
+      payload: { email: invitedEmail, role: 'admin' },
+    });
+
+    const invites = await app.inject({ method: 'GET', url: '/setup/invites', headers: invitedHeaders });
+    expect(invites.statusCode).toBe(200);
+    const list = JSON.parse(invites.body).invites;
+    expect(list).toHaveLength(1);
+    expect(list[0].businessName).toBe('Acme Invites Co');
+    expect(list[0].role).toBe('Admin');
+    expect(list[0].invitedBy.email).toBe('owner@example.com');
+
+    // The inviting owner shouldn't see it in their own pending-invites list.
+    const ownerInvites = await app.inject({ method: 'GET', url: '/setup/invites', headers: authHeaders });
+    expect(JSON.parse(ownerInvites.body).invites).toHaveLength(0);
+  });
+
+  it("accepting an invite grants access; the business now appears in the invited user's list", async () => {
+    fakeDb.businesses.clear();
+    fakeDb.memberships.clear();
+    const businessId = await createOwnedBusiness();
+    await app.inject({
+      method: 'POST',
+      url: `/setup/businesses/${businessId}/members`,
+      headers: authHeaders,
+      payload: { email: invitedEmail, role: 'member' },
+    });
+    const invites = await app.inject({ method: 'GET', url: '/setup/invites', headers: invitedHeaders });
+    const inviteId = JSON.parse(invites.body).invites[0].id as string;
+
+    const accept = await app.inject({
+      method: 'POST',
+      url: `/setup/invites/${inviteId}/accept`,
+      headers: invitedHeaders,
+    });
+    expect(accept.statusCode).toBe(200);
+
+    const invitedBusinesses = await app.inject({ method: 'GET', url: '/setup/businesses', headers: invitedHeaders });
+    expect(JSON.parse(invitedBusinesses.body).businesses).toHaveLength(1);
+
+    const invitesAfter = await app.inject({ method: 'GET', url: '/setup/invites', headers: invitedHeaders });
+    expect(JSON.parse(invitesAfter.body).invites).toHaveLength(0);
+  });
+
+  it('declining an invite removes it — no access is granted', async () => {
+    fakeDb.businesses.clear();
+    fakeDb.memberships.clear();
+    const businessId = await createOwnedBusiness();
+    await app.inject({
+      method: 'POST',
+      url: `/setup/businesses/${businessId}/members`,
+      headers: authHeaders,
+      payload: { email: invitedEmail, role: 'member' },
+    });
+    const invites = await app.inject({ method: 'GET', url: '/setup/invites', headers: invitedHeaders });
+    const inviteId = JSON.parse(invites.body).invites[0].id as string;
+
+    const decline = await app.inject({
+      method: 'DELETE',
+      url: `/setup/invites/${inviteId}`,
+      headers: invitedHeaders,
+    });
+    expect(decline.statusCode).toBe(200);
+
+    const invitedBusinesses = await app.inject({ method: 'GET', url: '/setup/businesses', headers: invitedHeaders });
+    expect(JSON.parse(invitedBusinesses.body).businesses).toHaveLength(0);
+    const membersList = await app.inject({
+      method: 'GET',
+      url: `/setup/businesses/${businessId}/members`,
+      headers: authHeaders,
+    });
+    expect(JSON.parse(membersList.body).members).toHaveLength(1); // just the owner
+  });
+
+  it("one user can't accept or decline another user's invite", async () => {
+    fakeDb.businesses.clear();
+    fakeDb.memberships.clear();
+    const businessId = await createOwnedBusiness();
+    await app.inject({
+      method: 'POST',
+      url: `/setup/businesses/${businessId}/members`,
+      headers: authHeaders,
+      payload: { email: invitedEmail, role: 'member' },
+    });
+    const invites = await app.inject({ method: 'GET', url: '/setup/invites', headers: invitedHeaders });
+    const inviteId = JSON.parse(invites.body).invites[0].id as string;
+
+    // The inviting owner (not the invited user) tries to accept/decline it.
+    const acceptAsOwner = await app.inject({
+      method: 'POST',
+      url: `/setup/invites/${inviteId}/accept`,
+      headers: authHeaders,
+    });
+    expect(acceptAsOwner.statusCode).toBe(404);
+
+    const declineAsOwner = await app.inject({
+      method: 'DELETE',
+      url: `/setup/invites/${inviteId}`,
+      headers: authHeaders,
+    });
+    expect(declineAsOwner.statusCode).toBe(404);
+  });
+
+  it('re-inviting someone who is already an accepted member is rejected, not silently reset to pending', async () => {
+    fakeDb.businesses.clear();
+    fakeDb.memberships.clear();
+    const businessId = await createOwnedBusiness();
+    await app.inject({
+      method: 'POST',
+      url: `/setup/businesses/${businessId}/members`,
+      headers: authHeaders,
+      payload: { email: invitedEmail, role: 'member' },
+    });
+    const invites = await app.inject({ method: 'GET', url: '/setup/invites', headers: invitedHeaders });
+    const inviteId = JSON.parse(invites.body).invites[0].id as string;
+    await app.inject({ method: 'POST', url: `/setup/invites/${inviteId}/accept`, headers: invitedHeaders });
+
+    const reinvite = await app.inject({
+      method: 'POST',
+      url: `/setup/businesses/${businessId}/members`,
+      headers: authHeaders,
+      payload: { email: invitedEmail, role: 'admin' },
+    });
+    expect(reinvite.statusCode).toBe(409);
+
+    // Still has access, unaffected by the rejected re-invite.
+    const invitedBusinesses = await app.inject({ method: 'GET', url: '/setup/businesses', headers: invitedHeaders });
+    expect(JSON.parse(invitedBusinesses.body).businesses).toHaveLength(1);
   });
 });
 

@@ -56,6 +56,31 @@ export async function sendEmailConfirmationEmail(
   });
 }
 
+export async function sendBusinessInviteEmail(
+  config: AppConfig,
+  to: string,
+  businessName: string,
+  inviterEmail: string,
+  requestId: string,
+): Promise<void> {
+  const signInUrl = `${config.appBaseUrl}/login`;
+  await sendEmail(config, {
+    to,
+    subject: `You've been added to ${businessName} on Desk`,
+    html: themedEmailHtml({
+      title: `You've been added to ${businessName}`,
+      body: `${inviterEmail} added you to ${businessName} on Desk. Sign in and open your pending invites to accept or decline.`,
+      actionLabel: 'Sign in',
+      actionUrl: signInUrl,
+      note: 'If you were not expecting this, you can decline the invite once signed in, or ignore this email — declining removes your access.',
+    }),
+    requestId,
+    skippedEvent: 'business_invite_email_skipped',
+    failedEvent: 'business_invite_email_failed',
+    sentEvent: 'business_invite_email_sent',
+  });
+}
+
 export async function sendAccountAlreadyExistsEmail(
   config: AppConfig,
   to: string,
