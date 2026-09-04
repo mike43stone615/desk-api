@@ -63,6 +63,20 @@ describe('POST /auth/signup', () => {
     expect(body.status).toBe(400);
     expect(body.error).toBeDefined(); // Flutter-compat extension field
   });
+
+  it('rejects an oversized password with a 400 instead of hashing it', async () => {
+    const res = await app.inject({
+      method: 'POST',
+      url: '/auth/signup',
+      payload: {
+        email: 'huge-pw@example.com',
+        password: 'A1!' + 'a'.repeat(1_000_000),
+        firstName: 'H',
+        lastName: 'P',
+      },
+    });
+    expect(res.statusCode).toBe(400);
+  });
 });
 
 describe('email confirmation -> signin -> session -> signout', () => {

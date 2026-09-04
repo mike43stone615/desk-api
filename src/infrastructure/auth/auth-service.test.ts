@@ -156,6 +156,7 @@ describe('signUp', () => {
 
   it.each([
     ['short', 'password_too_short'],
+    ['a'.repeat(129), 'password_too_long'],
     ['nouppercase1!', 'password_missing_uppercase'],
     ['NOLOWERCASE1!', 'password_missing_lowercase'],
     ['NoNumbers!', 'password_missing_number'],

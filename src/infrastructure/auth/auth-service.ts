@@ -222,6 +222,7 @@ function validateName(value: string, code: string): void {
 
 function validatePassword(password: string): void {
   if (!password || password.length < 8) throw new AuthError('password_too_short');
+  if (password.length > 128) throw new AuthError('password_too_long');
   if (!/[A-Z]/.test(password)) throw new AuthError('password_missing_uppercase');
   if (!/[a-z]/.test(password)) throw new AuthError('password_missing_lowercase');
   if (!/[0-9]/.test(password)) throw new AuthError('password_missing_number');

@@ -48,6 +48,8 @@ function safeMessage(code: string): string {
       return 'An account with that email already exists.';
     case 'password_too_short':
       return 'Password must be at least 8 characters.';
+    case 'password_too_long':
+      return 'Password must be at most 128 characters.';
     case 'password_missing_uppercase':
       return 'Password must include at least one uppercase letter.';
     case 'password_missing_lowercase':
