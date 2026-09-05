@@ -79,6 +79,19 @@ import {
 } from './routes/integrations/registry';
 import { marketResearchAnalyzeHandler } from './routes/integrations/marketResearch';
 
+// Captured once at module load (= process start for all practical purposes)
+// specifically so /health can answer "is this actually the process I think
+// it is" without needing OS-level PID/creation-time forensics. Found the
+// hard way during a platform audit: a `tsx watch` dev server (on a sibling
+// service) had silently stopped picking up file-change reloads at some
+// point during a multi-day uptime, serving stale code for hours with no
+// visible symptom -- every request still succeeded normally, just against
+// the wrong build. The existing /health `ts` field doesn't help here -- it's
+// evaluated fresh on every request, so a stale process reports it looking
+// perfectly current regardless. A quick curl comparing this against "when
+// did I last edit this service" would catch that immediately.
+const PROCESS_STARTED_AT = new Date().toISOString();
+
 export async function buildApp(): Promise<FastifyInstance> {
   const app = Fastify({
     logger: { level: config.logLevel },
@@ -170,15 +183,15 @@ export async function buildApp(): Promise<FastifyInstance> {
     return { ok, checks };
   }
 
-  app.get('/health/live', async (_req, reply) => reply.status(200).send({ ok: true, service: 'desk-api' }));
+  app.get('/health/live', async (_req, reply) => reply.status(200).send({ ok: true, service: 'desk-api', processStartedAt: PROCESS_STARTED_AT }));
   app.get('/health/ready', async (_req, reply) => {
     const { ok, checks } = await getReadiness();
-    return reply.status(ok ? 200 : 503).send({ ok, checks });
+    return reply.status(ok ? 200 : 503).send({ ok, checks, processStartedAt: PROCESS_STARTED_AT });
   });
   // Back-compat alias for the original Hono version's GET /health (basic liveness,
   // no dependency checks) — kept cheap/dependency-free since nothing in the Flutter
   // client depends on it reflecting DB health specifically.
-  app.get('/health', async (_req, reply) => reply.send({ ok: true, service: 'desk-api', ts: new Date().toISOString() }));
+  app.get('/health', async (_req, reply) => reply.send({ ok: true, service: 'desk-api', ts: new Date().toISOString(), processStartedAt: PROCESS_STARTED_AT }));
 
   app.get('/metrics', { preHandler: requireMetricsDocsKey }, async (_req, reply) => {
     reply.header('Content-Type', metricsRegistry.contentType);
