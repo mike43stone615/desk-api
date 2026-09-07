@@ -64,6 +64,7 @@ describe('POST /functions/v1/analyze-business-setup fallback classification', ()
     const res = await app.inject({
       method: 'POST',
       url: '/functions/v1/analyze-business-setup',
+      headers: authHeaders,
       payload: {
         action: 'classify_unregistered_business',
         businessIdea,
@@ -100,6 +101,7 @@ describe('POST /functions/v1/analyze-business-setup fallback classification', ()
     const res = await app.inject({
       method: 'POST',
       url: '/functions/v1/analyze-business-setup',
+      headers: authHeaders,
       payload: {
         action: 'classify_unregistered_business',
         businessIdea:
@@ -138,6 +140,7 @@ describe('POST /functions/v1/analyze-business-setup fallback classification', ()
     const res = await app.inject({
       method: 'POST',
       url: '/functions/v1/analyze-business-setup',
+      headers: authHeaders,
       payload: {
         action: 'classify_unregistered_business',
         businessIdea: 'auto repair shop for local drivers',
@@ -156,6 +159,7 @@ describe('POST /functions/v1/analyze-business-setup fallback classification', ()
     const weak = await app.inject({
       method: 'POST',
       url: '/functions/v1/analyze-business-setup',
+      headers: authHeaders,
       payload: {
         action: 'classify_unregistered_business',
         businessIdea: 'yellow teeth',
@@ -174,6 +178,7 @@ describe('POST /functions/v1/analyze-business-setup fallback classification', ()
     const specific = await app.inject({
       method: 'POST',
       url: '/functions/v1/analyze-business-setup',
+      headers: authHeaders,
       payload: {
         action: 'classify_unregistered_business',
         businessIdea: 'teeth whitening service',
@@ -189,10 +194,33 @@ describe('POST /functions/v1/analyze-business-setup fallback classification', ()
     expect(specificBody.ideaIsPlausible).toBe(true);
     expect(specificBody.ideaFeedback).toBeNull();
   });
+  it('dsk-33: rejects an unauthenticated request instead of running a billed OpenAI-backed classification for free', async () => {
+    const res = await app.inject({
+      method: 'POST',
+      url: '/functions/v1/analyze-business-setup',
+      payload: {
+        action: 'classify_unregistered_business',
+        businessIdea: 'a coffee shop',
+        industries,
+      },
+    });
+    expect(res.statusCode).toBe(401);
+  });
+
+  it('dsk-33: rejects an unauthenticated request to the paired place-search endpoint too', async () => {
+    const res = await app.inject({
+      method: 'POST',
+      url: '/functions/v1/search-place-areas',
+      payload: { query: 'Bos' },
+    });
+    expect(res.statusCode).toBe(401);
+  });
+
   async function analyzeIdea(businessIdea: string, overrideIndustries = industries) {
     const res = await app.inject({
       method: 'POST',
       url: '/functions/v1/analyze-business-setup',
+      headers: authHeaders,
       payload: {
         action: 'classify_unregistered_business',
         businessIdea,
@@ -892,6 +920,7 @@ describe('auth is required', () => {
     const res = await app.inject({
       method: 'POST',
       url: '/functions/v1/analyze-business-setup',
+      headers: authHeaders,
       payload: {
         action: 'classify_unregistered_business',
         businessIdea: 'a vehicle wash business that manufactures vehicle cleaning chemicals',

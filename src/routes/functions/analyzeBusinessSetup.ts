@@ -5,6 +5,7 @@
 // OpenAI call shape, same fallback-without-API-key behavior.
 import type { FastifyReply, FastifyRequest } from 'fastify';
 import { HttpError } from '../../middleware/http-error';
+import { requireAuth } from '../../middleware/auth';
 import { config } from '../../config';
 
 interface Classification {
@@ -56,6 +57,14 @@ type IdeaValidationCategory =
   | 'TOO_LONG';
 
 export async function analyzeBusinessSetupHandler(request: FastifyRequest, reply: FastifyReply) {
+  // dsk-33: this fires a real, billed OpenAI call per request with no
+  // account required — a pay-per-call financial-abuse surface bounded only
+  // by the general per-IP rate limiter. The Flutter client's setup wizard is
+  // itself gated behind sign-in before a user ever reaches this step (see
+  // app_router.dart's global redirect), so requiring a real session here
+  // costs the legitimate path nothing.
+  await requireAuth(request, reply);
+
   const body = (request.body ?? {}) as Record<string, unknown>;
 
   if (body?.action !== 'classify_unregistered_business') {

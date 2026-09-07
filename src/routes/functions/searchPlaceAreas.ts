@@ -3,6 +3,7 @@
 // (mounted at /functions/v1/search-place-areas in app.ts).
 import type { FastifyReply, FastifyRequest } from 'fastify';
 import { HttpError } from '../../middleware/http-error';
+import { requireAuth } from '../../middleware/auth';
 import { config } from '../../config';
 
 interface PlacePrediction {
@@ -12,6 +13,12 @@ interface PlacePrediction {
 }
 
 export async function searchPlaceAreasHandler(request: FastifyRequest, reply: FastifyReply) {
+  // dsk-33: paired with analyze-business-setup's fix -- same unauthenticated
+  // gap, lower-stakes (Google's free tier is generous) but no reason to be
+  // reachable pre-auth either, since the setup wizard that calls this is
+  // itself gated behind sign-in.
+  await requireAuth(request, reply);
+
   const body = (request.body ?? {}) as { query?: string };
   const query = String(body?.query ?? '').trim();
 
