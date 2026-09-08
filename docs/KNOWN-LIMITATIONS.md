@@ -66,11 +66,16 @@ database dropped after verification; this isn't a standing fixture, just
 a one-time proof the mechanism works end-to-end, not just that a dump
 file gets written.
 
-**Still open:** off-host storage of the dump files — they currently only
-live in `backups/` on the same machine as the database itself, so a disk
-failure takes out both the live data and every backup simultaneously.
-Needs `rclone`/an S3-compatible bucket/etc. once a hosting decision is
-made; no credentials for any such target exist in this environment yet.
+**Fixed 2026-09-07:** off-host storage of the dump files. Every backup is
+now also copied into the OneDrive already signed into this machine
+(`C:\Users\User\OneDrive\DeskPlatformBackups\desk-api\`), pruned to the
+same 14 generations, confirmed live to land in the real, actively-syncing
+folder. A disk failure on this host now takes out the live data and the
+local backup copy, but not the off-host one. Still open: this host itself
+remains a single point of failure for everything else running on it (see
+the platform-wide single-machine risk elsewhere in this doc) — the backup
+story specifically is no longer single-disk, but the service as a whole
+still is.
 
 ---
 

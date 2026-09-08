@@ -23,13 +23,21 @@ other three services' identical setups so they don't all hit the shared
 Postgres instance at once). **A real restore rehearsal has been run and
 verified** — see the restore section below for exactly what that proved.
 
-**Known, deliberate gap:** every backup still lands on the same disk as the
-live database it's backing up. Off-host storage (cloud object storage, or
-the OneDrive already signed into this machine) was considered and
-intentionally deferred until a specific destination is chosen, rather than
-built toward an undecided one. A single disk failure would still take out
-the live data and every backup of it — this is a real, open risk, tracked
-in `docs/KNOWN-LIMITATIONS.md`, not an oversight.
+**Off-host copy is also live:** every backup is additionally copied into
+`C:\Users\User\OneDrive\DeskPlatformBackups\desk-api\` (the OneDrive
+already signed into this machine — the destination this doc's earlier
+"known, deliberate gap" note had been waiting on), pruned to the same 14
+generations. Confirmed live: the copy genuinely lands in the real,
+actively-syncing OneDrive folder, not just a local path with that name.
+This is additive — the local copy and its retention are unchanged, so a
+missing or unsynced OneDrive folder degrades to the original single-disk
+behavior rather than failing the scheduled backup outright. Override with
+`OFFHOST_BACKUP_DIR` (or `--offhost-dir`); set it to an empty string to
+disable the off-host copy entirely. A single disk failure now takes out
+the live data and the local backup copy, but not the off-host one — the
+platform-wide "everything lives on one machine" risk (this host itself
+still being a single point of failure) is separate and remains open,
+tracked in `docs/KNOWN-LIMITATIONS.md`.
 
 ---
 
