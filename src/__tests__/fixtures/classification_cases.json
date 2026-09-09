@@ -1,0 +1,264 @@
+[
+  {
+    "name": "moving and temporary staffing",
+    "idea": "a moving company that also supplies staff for companies that require additional staff for a project/requirement",
+    "includes": [
+      "Moving Company",
+      "Staffing Agency"
+    ],
+    "excludes": [
+      "Consulting / Professional Services"
+    ],
+    "customerType": "Both"
+  },
+  {
+    "name": "moving only",
+    "idea": "a residential moving company",
+    "includes": [
+      "Moving Company"
+    ],
+    "excludes": [
+      "Staffing Agency"
+    ],
+    "customerType": null
+  },
+  {
+    "name": "staff augmentation",
+    "idea": "a staff augmentation and project staffing agency",
+    "includes": [
+      "Staffing Agency"
+    ],
+    "excludes": [
+      "Consulting / Professional Services"
+    ],
+    "customerType": "B2B"
+  },
+  {
+    "name": "explicit separate activities",
+    "idea": "a bakery and a coffee shop",
+    "includes": [
+      "Bakery",
+      "Coffee Shop / Cafe"
+    ],
+    "excludes": [],
+    "customerType": null
+  },
+  {
+    "name": "customer industry software",
+    "idea": "SaaS software for restaurants",
+    "includes": [
+      "Software Development"
+    ],
+    "excludes": [
+      "Restaurant"
+    ],
+    "customerType": "B2B"
+  },
+  {
+    "name": "customer industry marketing",
+    "idea": "a marketing agency for law firms",
+    "includes": [
+      "Marketing Agency"
+    ],
+    "excludes": [
+      "Law Firm"
+    ],
+    "customerType": "B2B"
+  },
+  {
+    "name": "negated activity",
+    "idea": "a bakery, not a coffee shop",
+    "includes": [
+      "Bakery"
+    ],
+    "excludes": [
+      "Coffee Shop / Cafe"
+    ],
+    "customerType": "B2C"
+  },
+  {
+    "name": "negated contrast",
+    "idea": "not a bakery but a coffee shop",
+    "includes": [
+      "Coffee Shop / Cafe"
+    ],
+    "excludes": [
+      "Bakery"
+    ],
+    "customerType": "B2C"
+  },
+  {
+    "name": "negative prefix word",
+    "idea": "a nonprofit organization",
+    "includes": [
+      "Nonprofit Organization"
+    ],
+    "excludes": [],
+    "customerType": null
+  },
+  {
+    "name": "not for profit phrase",
+    "idea": "a not-for-profit charity",
+    "includes": [
+      "Nonprofit Organization"
+    ],
+    "excludes": [],
+    "customerType": null
+  },
+  {
+    "name": "carwash manufacturer",
+    "idea": "a vehicle wash business that manufactures vehicle cleaning chemicals",
+    "includes": [
+      "Chemical Manufacturing"
+    ],
+    "excludes": [
+      "Car Wash"
+    ],
+    "customerType": "B2B"
+  },
+  {
+    "name": "nested product",
+    "idea": "manufacturing car wash chemicals",
+    "includes": [
+      "Chemical Manufacturing"
+    ],
+    "excludes": [
+      "Car Wash"
+    ],
+    "customerType": "B2B"
+  },
+  {
+    "name": "carwash operation",
+    "idea": "a car wash service",
+    "includes": [
+      "Car Wash"
+    ],
+    "excludes": [
+      "Chemical Manufacturing"
+    ],
+    "customerType": null
+  },
+  {
+    "name": "incidental ai",
+    "idea": "a bakery using machine learning",
+    "includes": [
+      "Bakery"
+    ],
+    "excludes": [
+      "AI Services"
+    ],
+    "customerType": "B2C"
+  },
+  {
+    "name": "ai provider",
+    "idea": "artificial intelligence consulting and machine learning services",
+    "includes": [
+      "AI Services"
+    ],
+    "excludes": [],
+    "customerType": null
+  },
+  {
+    "name": "lawn not law",
+    "idea": "a landscaping company",
+    "includes": [
+      "Landscaping"
+    ],
+    "excludes": [
+      "Law Firm"
+    ],
+    "customerType": null
+  },
+  {
+    "name": "accountancy",
+    "idea": "a CPA accounting practice",
+    "includes": [
+      "Accounting / Bookkeeping / Tax Preparation"
+    ],
+    "excludes": [],
+    "customerType": null
+  },
+  {
+    "name": "electrical",
+    "idea": "an electrical contractor",
+    "includes": [
+      "Electrical Contractor"
+    ],
+    "excludes": [],
+    "customerType": null
+  },
+  {
+    "name": "medical",
+    "idea": "a family medical practice",
+    "includes": [
+      "Medical Practice"
+    ],
+    "excludes": [],
+    "customerType": null
+  },
+  {
+    "name": "coffee cart",
+    "idea": "a mobile coffee cart",
+    "includes": [
+      "Coffee Shop / Cafe"
+    ],
+    "excludes": [],
+    "customerType": null
+  },
+  {
+    "name": "grooming",
+    "idea": "a dog grooming service",
+    "includes": [
+      "Pet Services"
+    ],
+    "excludes": [],
+    "customerType": null
+  },
+  {
+    "name": "unknown",
+    "idea": "a company with a novel business concept",
+    "includes": [],
+    "excludes": [
+      "Consulting / Professional Services"
+    ],
+    "customerType": null
+  },
+  {
+    "name": "nonsense",
+    "idea": "purple cloud moon ideas",
+    "includes": [],
+    "excludes": [
+      "Consulting / Professional Services"
+    ],
+    "customerType": null
+  },
+  {
+    "name": "explicit b2b",
+    "idea": "a moving company exclusively serving businesses",
+    "includes": [
+      "Moving Company"
+    ],
+    "excludes": [],
+    "customerType": "B2B"
+  },
+  {
+    "name": "explicit b2c",
+    "idea": "a moving company exclusively serving households",
+    "includes": [
+      "Moving Company"
+    ],
+    "excludes": [],
+    "customerType": "B2C"
+  },
+  {
+    "name": "staff not internal",
+    "idea": "a bakery hiring additional staff",
+    "includes": [
+      "Bakery"
+    ],
+    "excludes": [
+      "Staffing Agency"
+    ],
+    "customerType": "B2C"
+  }
+]

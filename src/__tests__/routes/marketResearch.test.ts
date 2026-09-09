@@ -28,12 +28,39 @@ afterEach(() => {
 const BODY = { businessIdea: 'A mobile dog grooming service', formationState: 'CO' };
 
 describe('POST /integrations/market-research/analyze', () => {
-  it('passes through a successful upstream response', async () => {
-    global.fetch = vi.fn().mockResolvedValue(
-      new Response(JSON.stringify({ overallScore: 70 }), { status: 200, headers: { 'content-type': 'application/json' } }),
-    ) as unknown as typeof fetch;
+  it('allows the upstream request 75 seconds', async () => {
+    const timeoutSpy = vi
+      .spyOn(AbortSignal, 'timeout')
+      .mockReturnValue(new AbortController().signal);
+    global.fetch = vi.fn().mockResolvedValue(new Response('{}', { status: 200 })) as typeof fetch;
+    try {
+      const response = await app.inject({
+        method: 'POST',
+        url: '/integrations/market-research/analyze',
+        payload: BODY,
+      });
+      expect(response.statusCode).toBe(200);
+      expect(timeoutSpy).toHaveBeenCalledWith(75000);
+    } finally {
+      timeoutSpy.mockRestore();
+    }
+  });
 
-    const res = await app.inject({ method: 'POST', url: '/integrations/market-research/analyze', payload: BODY });
+  it('passes through a successful upstream response', async () => {
+    global.fetch = vi
+      .fn()
+      .mockResolvedValue(
+        new Response(JSON.stringify({ overallScore: 70 }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        }),
+      ) as unknown as typeof fetch;
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/integrations/market-research/analyze',
+      payload: BODY,
+    });
     expect(res.statusCode).toBe(200);
     expect(JSON.parse(res.body)).toEqual({ overallScore: 70 });
   });
@@ -41,16 +68,26 @@ describe('POST /integrations/market-research/analyze', () => {
   it('returns 503 (not a crash, not a computed fallback) when the upstream call throws', async () => {
     global.fetch = vi.fn().mockRejectedValue(new Error('ECONNREFUSED')) as unknown as typeof fetch;
 
-    const res = await app.inject({ method: 'POST', url: '/integrations/market-research/analyze', payload: BODY });
+    const res = await app.inject({
+      method: 'POST',
+      url: '/integrations/market-research/analyze',
+      payload: BODY,
+    });
     expect(res.statusCode).toBe(503);
     const body = JSON.parse(res.body);
     expect(body.detail).toMatch(/temporarily unavailable/i);
   });
 
   it('returns 503 when the upstream responds with a non-OK status', async () => {
-    global.fetch = vi.fn().mockResolvedValue(new Response('error', { status: 500 })) as unknown as typeof fetch;
+    global.fetch = vi
+      .fn()
+      .mockResolvedValue(new Response('error', { status: 500 })) as unknown as typeof fetch;
 
-    const res = await app.inject({ method: 'POST', url: '/integrations/market-research/analyze', payload: BODY });
+    const res = await app.inject({
+      method: 'POST',
+      url: '/integrations/market-research/analyze',
+      payload: BODY,
+    });
     expect(res.statusCode).toBe(503);
   });
 });
@@ -63,7 +100,11 @@ describe('MARKET_API_URL unset', () => {
     try {
       const { buildApp: buildFreshApp } = await import('../../app');
       const freshApp = await buildFreshApp();
-      const res = await freshApp.inject({ method: 'POST', url: '/integrations/market-research/analyze', payload: BODY });
+      const res = await freshApp.inject({
+        method: 'POST',
+        url: '/integrations/market-research/analyze',
+        payload: BODY,
+      });
       expect(res.statusCode).toBe(503);
       await freshApp.close();
     } finally {

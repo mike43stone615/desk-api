@@ -17,7 +17,8 @@ import type { FastifyReply, FastifyRequest } from 'fastify';
 import { HttpError } from '../../middleware/http-error';
 import { config } from '../../config';
 
-const UNAVAILABLE_MESSAGE = 'Market validation is temporarily unavailable. Please try again shortly.';
+const UNAVAILABLE_MESSAGE =
+  'Market validation is temporarily unavailable. Please try again shortly.';
 
 export async function marketResearchAnalyzeHandler(request: FastifyRequest, reply: FastifyReply) {
   if (!config.marketApiUrl) {
@@ -34,7 +35,7 @@ export async function marketResearchAnalyzeHandler(request: FastifyRequest, repl
       method: 'POST',
       headers,
       body: JSON.stringify(request.body ?? {}),
-      signal: AbortSignal.timeout(15000),
+      signal: AbortSignal.timeout(75000),
     });
   } catch (err) {
     request.log.error({ err }, 'market-validation-api proxy failed');
@@ -42,7 +43,10 @@ export async function marketResearchAnalyzeHandler(request: FastifyRequest, repl
   }
 
   if (!resp.ok) {
-    request.log.error({ status: resp.status }, 'market-validation-api proxy returned a non-OK status');
+    request.log.error(
+      { status: resp.status },
+      'market-validation-api proxy returned a non-OK status',
+    );
     throw new HttpError(503, UNAVAILABLE_MESSAGE);
   }
 

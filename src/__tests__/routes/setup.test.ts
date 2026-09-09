@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs';
+import { classificationRules } from '../../domain/setup/classification-rules';
 import { describe, it, expect, vi, beforeAll } from 'vitest';
 import { createHash } from 'crypto';
 import { createFakeDb } from '../helpers/fake-db';
@@ -700,7 +702,11 @@ describe('business membership invites', () => {
   });
 
   async function createOwnedBusiness(): Promise<string> {
-    const created = await app.inject({ method: 'POST', url: '/setup/drafts', headers: authHeaders });
+    const created = await app.inject({
+      method: 'POST',
+      url: '/setup/drafts',
+      headers: authHeaders,
+    });
     const draftId = JSON.parse(created.body).id as string;
     await app.inject({
       method: 'PATCH',
@@ -734,11 +740,17 @@ describe('business membership invites', () => {
       url: `/setup/businesses/${businessId}/members`,
       headers: authHeaders,
     });
-    const invitedMember = JSON.parse(membersList.body).members.find((m: { userId: string }) => m.userId === invitedUserId);
+    const invitedMember = JSON.parse(membersList.body).members.find(
+      (m: { userId: string }) => m.userId === invitedUserId,
+    );
     expect(invitedMember.acceptedAt).toBeNull();
 
     // The invited user has no access yet — the business doesn't show up for them.
-    const invitedBusinesses = await app.inject({ method: 'GET', url: '/setup/businesses', headers: invitedHeaders });
+    const invitedBusinesses = await app.inject({
+      method: 'GET',
+      url: '/setup/businesses',
+      headers: invitedHeaders,
+    });
     expect(JSON.parse(invitedBusinesses.body).businesses).toHaveLength(0);
   });
 
@@ -749,7 +761,9 @@ describe('business membership invites', () => {
 
     const originalKey = config.resendApiKey;
     config.resendApiKey = 'test-resend-key';
-    const fetchSpy = vi.spyOn(global, 'fetch').mockResolvedValue(new Response(null, { status: 200 }));
+    const fetchSpy = vi
+      .spyOn(global, 'fetch')
+      .mockResolvedValue(new Response(null, { status: 200 }));
     try {
       await app.inject({
         method: 'POST',
@@ -783,7 +797,11 @@ describe('business membership invites', () => {
       payload: { email: invitedEmail, role: 'admin' },
     });
 
-    const invites = await app.inject({ method: 'GET', url: '/setup/invites', headers: invitedHeaders });
+    const invites = await app.inject({
+      method: 'GET',
+      url: '/setup/invites',
+      headers: invitedHeaders,
+    });
     expect(invites.statusCode).toBe(200);
     const list = JSON.parse(invites.body).invites;
     expect(list).toHaveLength(1);
@@ -792,7 +810,11 @@ describe('business membership invites', () => {
     expect(list[0].invitedBy.email).toBe('owner@example.com');
 
     // The inviting owner shouldn't see it in their own pending-invites list.
-    const ownerInvites = await app.inject({ method: 'GET', url: '/setup/invites', headers: authHeaders });
+    const ownerInvites = await app.inject({
+      method: 'GET',
+      url: '/setup/invites',
+      headers: authHeaders,
+    });
     expect(JSON.parse(ownerInvites.body).invites).toHaveLength(0);
   });
 
@@ -806,7 +828,11 @@ describe('business membership invites', () => {
       headers: authHeaders,
       payload: { email: invitedEmail, role: 'member' },
     });
-    const invites = await app.inject({ method: 'GET', url: '/setup/invites', headers: invitedHeaders });
+    const invites = await app.inject({
+      method: 'GET',
+      url: '/setup/invites',
+      headers: invitedHeaders,
+    });
     const inviteId = JSON.parse(invites.body).invites[0].id as string;
 
     const accept = await app.inject({
@@ -816,10 +842,18 @@ describe('business membership invites', () => {
     });
     expect(accept.statusCode).toBe(200);
 
-    const invitedBusinesses = await app.inject({ method: 'GET', url: '/setup/businesses', headers: invitedHeaders });
+    const invitedBusinesses = await app.inject({
+      method: 'GET',
+      url: '/setup/businesses',
+      headers: invitedHeaders,
+    });
     expect(JSON.parse(invitedBusinesses.body).businesses).toHaveLength(1);
 
-    const invitesAfter = await app.inject({ method: 'GET', url: '/setup/invites', headers: invitedHeaders });
+    const invitesAfter = await app.inject({
+      method: 'GET',
+      url: '/setup/invites',
+      headers: invitedHeaders,
+    });
     expect(JSON.parse(invitesAfter.body).invites).toHaveLength(0);
   });
 
@@ -833,7 +867,11 @@ describe('business membership invites', () => {
       headers: authHeaders,
       payload: { email: invitedEmail, role: 'member' },
     });
-    const invites = await app.inject({ method: 'GET', url: '/setup/invites', headers: invitedHeaders });
+    const invites = await app.inject({
+      method: 'GET',
+      url: '/setup/invites',
+      headers: invitedHeaders,
+    });
     const inviteId = JSON.parse(invites.body).invites[0].id as string;
 
     const decline = await app.inject({
@@ -843,7 +881,11 @@ describe('business membership invites', () => {
     });
     expect(decline.statusCode).toBe(200);
 
-    const invitedBusinesses = await app.inject({ method: 'GET', url: '/setup/businesses', headers: invitedHeaders });
+    const invitedBusinesses = await app.inject({
+      method: 'GET',
+      url: '/setup/businesses',
+      headers: invitedHeaders,
+    });
     expect(JSON.parse(invitedBusinesses.body).businesses).toHaveLength(0);
     const membersList = await app.inject({
       method: 'GET',
@@ -863,7 +905,11 @@ describe('business membership invites', () => {
       headers: authHeaders,
       payload: { email: invitedEmail, role: 'member' },
     });
-    const invites = await app.inject({ method: 'GET', url: '/setup/invites', headers: invitedHeaders });
+    const invites = await app.inject({
+      method: 'GET',
+      url: '/setup/invites',
+      headers: invitedHeaders,
+    });
     const inviteId = JSON.parse(invites.body).invites[0].id as string;
 
     // The inviting owner (not the invited user) tries to accept/decline it.
@@ -892,9 +938,17 @@ describe('business membership invites', () => {
       headers: authHeaders,
       payload: { email: invitedEmail, role: 'member' },
     });
-    const invites = await app.inject({ method: 'GET', url: '/setup/invites', headers: invitedHeaders });
+    const invites = await app.inject({
+      method: 'GET',
+      url: '/setup/invites',
+      headers: invitedHeaders,
+    });
     const inviteId = JSON.parse(invites.body).invites[0].id as string;
-    await app.inject({ method: 'POST', url: `/setup/invites/${inviteId}/accept`, headers: invitedHeaders });
+    await app.inject({
+      method: 'POST',
+      url: `/setup/invites/${inviteId}/accept`,
+      headers: invitedHeaders,
+    });
 
     const reinvite = await app.inject({
       method: 'POST',
@@ -905,7 +959,11 @@ describe('business membership invites', () => {
     expect(reinvite.statusCode).toBe(409);
 
     // Still has access, unaffected by the rejected re-invite.
-    const invitedBusinesses = await app.inject({ method: 'GET', url: '/setup/businesses', headers: invitedHeaders });
+    const invitedBusinesses = await app.inject({
+      method: 'GET',
+      url: '/setup/businesses',
+      headers: invitedHeaders,
+    });
     expect(JSON.parse(invitedBusinesses.body).businesses).toHaveLength(1);
   });
 });
@@ -939,5 +997,124 @@ describe('auth is required', () => {
     expect(body.classification.geographicScope).toBe('National');
     expect(body.classification.customerType).toBe('B2B');
     expect(body.classification).not.toHaveProperty('targetMarket');
+  });
+});
+
+describe('classification reliability', () => {
+  const allowed = [...new Set(classificationRules.map((rule) => rule.industry))];
+  const cases = JSON.parse(
+    readFileSync('src/__tests__/fixtures/classification_cases.json', 'utf8'),
+  ) as Array<{
+    name: string;
+    idea: string;
+    includes: string[];
+    excludes: string[];
+    customerType: string | null;
+  }>;
+  for (const sample of cases) {
+    it(`matching corpus: ${sample.name}`, async () => {
+      const oldKey = config.openaiApiKey;
+      config.openaiApiKey = '';
+      try {
+        const res = await app.inject({
+          method: 'POST',
+          url: '/functions/v1/analyze-business-setup',
+          headers: authHeaders,
+          payload: {
+            action: 'classify_unregistered_business',
+            businessIdea: sample.idea,
+            industries: allowed,
+          },
+        });
+        expect(res.statusCode).toBe(200);
+        const classification = JSON.parse(res.body).classification;
+        const selected = [classification.industry, ...classification.additionalIndustries].filter(
+          Boolean,
+        );
+        expect(selected).toEqual(expect.arrayContaining(sample.includes));
+        for (const excluded of sample.excludes) expect(selected).not.toContain(excluded);
+        if (sample.includes.length === 0) expect(selected).toEqual([]);
+        if (sample.customerType) expect(classification.customerType).toBe(sample.customerType);
+      } finally {
+        config.openaiApiKey = oldKey;
+      }
+    });
+  }
+
+  it('uses strict catalog JSON and verifies AI evidence before accepting multiple industries', async () => {
+    const oldKey = config.openaiApiKey;
+    config.openaiApiKey = 'test-only-placeholder';
+    const fetchSpy = vi.spyOn(global, 'fetch').mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          choices: [
+            {
+              message: {
+                content: JSON.stringify({
+                  classification: {
+                    industry: 'Moving Company',
+                    additionalIndustries: ['Staffing Agency', 'Law Firm', 'Bakery'],
+                    industryEvidence: [
+                      { industry: 'Moving Company', quote: 'moving company', confidence: 'high' },
+                      { industry: 'Staffing Agency', quote: 'supplies staff', confidence: 'high' },
+                      { industry: 'Law Firm', quote: 'legal advice', confidence: 'high' },
+                      { industry: 'Bakery', quote: 'moving company', confidence: 'low' },
+                    ],
+                    customerType: 'Both',
+                    geographicScope: 'Local',
+                  },
+                  ideaIsPlausible: true,
+                  ideaValidationCategory: 'VALID',
+                  ideaFeedback: null,
+                }),
+              },
+            },
+          ],
+        }),
+        { status: 200 },
+      ),
+    );
+    try {
+      const res = await app.inject({
+        method: 'POST',
+        url: '/functions/v1/analyze-business-setup',
+        headers: authHeaders,
+        payload: {
+          action: 'classify_unregistered_business',
+          businessIdea: 'a moving company that supplies staff',
+          industries: allowed,
+          classificationOnly: true,
+        },
+      });
+      expect(res.statusCode).toBe(200);
+      expect(JSON.parse(res.body).classification.additionalIndustries).toEqual(['Staffing Agency']);
+      const sent = JSON.parse(fetchSpy.mock.calls[0][1]!.body as string);
+      expect(sent.response_format.type).toBe('json_schema');
+      expect(sent.response_format.json_schema.strict).toBe(true);
+      expect(sent.response_format.json_schema.schema.properties).not.toHaveProperty(
+        'businessPlanSections',
+      );
+      expect(
+        sent.response_format.json_schema.schema.properties.classification.properties.industry.enum,
+      ).toContain('Moving Company');
+    } finally {
+      fetchSpy.mockRestore();
+      config.openaiApiKey = oldKey;
+    }
+  });
+
+  it('infers customer mix from manually selected activities during fallback', async () => {
+    const res = await app.inject({
+      method: 'POST',
+      url: '/functions/v1/analyze-business-setup',
+      headers: authHeaders,
+      payload: {
+        action: 'classify_unregistered_business',
+        businessIdea: 'moving services',
+        industries: allowed,
+        selectedIndustries: ['Moving Company', 'Staffing Agency'],
+      },
+    });
+    expect(JSON.parse(res.body).classification.customerType).toBe('Both');
   });
 });
