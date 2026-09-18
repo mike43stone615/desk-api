@@ -176,7 +176,11 @@ async function sendEmail(config: AppConfig, request: EmailRequest): Promise<void
 }
 
 function themedEmailHtml(content: ThemedEmailContent): string {
-  const logoUrl = `${content.actionUrl.startsWith('http') ? new URL(content.actionUrl).origin : ''}/assets/assets/desk_logo.png`;
+  // The live frontend at appBaseUrl is the web_app static site (web_app/public),
+  // not the Flutter web build, so the logo lives at the site root -- not under
+  // Flutter's /assets/assets/ web-build convention (which 404s here, silently
+  // falling back to the SPA's index.html shell instead of an image).
+  const logoUrl = `${content.actionUrl.startsWith('http') ? new URL(content.actionUrl).origin : ''}/desk_logo.png`;
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
