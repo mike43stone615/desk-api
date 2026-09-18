@@ -110,6 +110,90 @@ describe('email confirmation -> signin -> session -> signout', () => {
   });
 });
 
+describe('httpOnly session cookie (what web_app relies on instead of storing the token itself)', () => {
+  async function signUpConfirmAndSignIn(email: string) {
+    await app.inject({
+      method: 'POST',
+      url: '/auth/signup',
+      payload: { email, password: 'Str0ng!Pass', firstName: 'Cookie', lastName: 'Tester' },
+    });
+    const token = [...fakeDb.emailConfirmationTokens.values()].find(
+      (t) => t.user_id === [...fakeDb.users.values()].find((u) => u.email === email)?.id,
+    )?.token as string;
+    await app.inject({ method: 'POST', url: '/auth/email-confirmation/confirm', payload: { token } });
+    return app.inject({ method: 'POST', url: '/auth/signin', payload: { email, password: 'Str0ng!Pass' } });
+  }
+
+  it('a successful sign-in sets an httpOnly, Secure, SameSite=Lax cookie carrying the same token as the response body', async () => {
+    const signin = await signUpConfirmAndSignIn('cookie-set@example.com');
+    expect(signin.statusCode).toBe(200);
+
+    const setCookie = signin.cookies.find((c) => c.name === 'desk_session');
+    expect(setCookie).toBeTruthy();
+    expect(setCookie!.httpOnly).toBe(true);
+    expect(setCookie!.secure).toBe(true);
+    expect(setCookie!.sameSite).toBe('Lax');
+    expect(setCookie!.path).toBe('/');
+    expect(setCookie!.value).toBe(JSON.parse(signin.body).token);
+  });
+
+  it('/auth/session authenticates from the cookie alone, with no Authorization header at all', async () => {
+    const signin = await signUpConfirmAndSignIn('cookie-only@example.com');
+    const sessionToken = JSON.parse(signin.body).token as string;
+
+    const session = await app.inject({
+      method: 'GET',
+      url: '/auth/session',
+      cookies: { desk_session: sessionToken },
+    });
+    expect(session.statusCode).toBe(200);
+    expect(JSON.parse(session.body).user.email).toBe('cookie-only@example.com');
+  });
+
+  it('the Authorization header wins over a stale/mismatched cookie when both are present', async () => {
+    const signinA = await signUpConfirmAndSignIn('header-priority-a@example.com');
+    const tokenA = JSON.parse(signinA.body).token as string;
+    const signinB = await signUpConfirmAndSignIn('header-priority-b@example.com');
+    const tokenB = JSON.parse(signinB.body).token as string;
+
+    const session = await app.inject({
+      method: 'GET',
+      url: '/auth/session',
+      headers: { authorization: `Bearer ${tokenA}` },
+      cookies: { desk_session: tokenB },
+    });
+    expect(session.statusCode).toBe(200);
+    expect(JSON.parse(session.body).user.email).toBe('header-priority-a@example.com');
+  });
+
+  it('/auth/signout clears the cookie and revokes the session it names, even when called with no Authorization header', async () => {
+    const signin = await signUpConfirmAndSignIn('cookie-signout@example.com');
+    const sessionToken = JSON.parse(signin.body).token as string;
+
+    const signout = await app.inject({
+      method: 'POST',
+      url: '/auth/signout',
+      cookies: { desk_session: sessionToken },
+    });
+    expect(signout.statusCode).toBe(200);
+    const clearedCookie = signout.cookies.find((c) => c.name === 'desk_session');
+    expect(clearedCookie).toBeTruthy();
+    expect(Number(clearedCookie!.maxAge)).toBeLessThanOrEqual(0);
+
+    const sessionAfter = await app.inject({
+      method: 'GET',
+      url: '/auth/session',
+      cookies: { desk_session: sessionToken },
+    });
+    expect(sessionAfter.statusCode).toBe(401);
+  });
+
+  it('a request with neither a header nor a cookie is unauthenticated', async () => {
+    const session = await app.inject({ method: 'GET', url: '/auth/session' });
+    expect(session.statusCode).toBe(401);
+  });
+});
+
 describe('enumeration-safety', () => {
   it('POST /auth/password-reset/request returns identical 200 {ok:true} for a registered and an unregistered email', async () => {
     const registered = await app.inject({ method: 'POST', url: '/auth/password-reset/request', payload: { email: SIGNUP_BODY.email } });

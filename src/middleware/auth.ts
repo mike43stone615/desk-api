@@ -6,6 +6,7 @@ import { timingSafeEqual } from 'crypto';
 import type { FastifyReply, FastifyRequest } from 'fastify';
 import { HttpError } from './http-error';
 import { authService } from '../infrastructure/auth';
+import { SESSION_COOKIE_NAME } from '../infrastructure/auth/session-cookie';
 import { config } from '../config';
 import type { User } from '../interfaces/database';
 
@@ -22,9 +23,16 @@ export function extractBearerToken(request: FastifyRequest): string | null {
   return match ? match[1].trim() : null;
 }
 
+/** Bearer header first (native clients always send one; also lets a header
+ * override a stale cookie in the same request), falling back to the
+ * httpOnly session cookie web_app relies on when there's no header. */
+export function extractSessionToken(request: FastifyRequest): string | null {
+  return extractBearerToken(request) ?? request.cookies[SESSION_COOKIE_NAME] ?? null;
+}
+
 /** Fastify preHandler — resolves the calling user onto request.currentUser, or throws 401. */
 export async function requireAuth(request: FastifyRequest, _reply: FastifyReply): Promise<void> {
-  const token = extractBearerToken(request);
+  const token = extractSessionToken(request);
   if (!token) throw new HttpError(401, 'Authentication required.');
   const user = await authService.verifySession(token);
   if (!user) throw new HttpError(401, 'Session expired or invalid.');

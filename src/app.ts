@@ -14,6 +14,7 @@
 //     scaffold requirements.
 import Fastify from 'fastify';
 import type { FastifyInstance } from 'fastify';
+import cookie from '@fastify/cookie';
 import cors from '@fastify/cors';
 import helmet from '@fastify/helmet';
 import { randomUUID } from 'crypto';
@@ -121,6 +122,13 @@ export async function buildApp(): Promise<FastifyInstance> {
     allowedHeaders: ['Content-Type', 'Authorization', 'Idempotency-Key'],
     credentials: true,
   });
+
+  // Backs the httpOnly session cookie (see routes/auth.ts) that web_app uses
+  // instead of storing the bearer token in localStorage, where any script
+  // on the page could read it. No secret/signing needed here -- the cookie
+  // holds the same opaque, server-verified session token the Authorization
+  // header always has, not something forgeable client-side.
+  await app.register(cookie);
 
   // Baseline HTTP security headers (X-Frame-Options, X-Content-Type-Options,
   // Strict-Transport-Security, etc.) - previously set nowhere. Matters most

@@ -10,7 +10,8 @@ import type { FastifyReply, FastifyRequest } from 'fastify';
 import { HttpError } from '../middleware/http-error';
 import { authService } from '../infrastructure/auth';
 import { AuthError } from '../infrastructure/auth/auth-service';
-import { requireAuth, extractBearerToken } from '../middleware/auth';
+import { requireAuth, extractSessionToken } from '../middleware/auth';
+import { setSessionCookie, clearSessionCookie } from '../infrastructure/auth/session-cookie';
 import { getClientIp } from '../middleware/api-protection';
 import { checkSignupRateLimit } from '../middleware/signup-limiter';
 import {
@@ -99,6 +100,7 @@ export async function signInHandler(request: FastifyRequest, reply: FastifyReply
   }
 
   audit(request, 'signin_success', 'ok', { userId: result.user.id });
+  setSessionCookie(reply, result.token);
   return reply.send({ token: result.token, user: result.user });
 }
 
@@ -167,11 +169,12 @@ export async function confirmEmailHandler(request: FastifyRequest, reply: Fastif
 }
 
 export async function signOutHandler(request: FastifyRequest, reply: FastifyReply) {
-  const token = extractBearerToken(request);
+  const token = extractSessionToken(request);
   if (token) {
     await authService.revokeSession(token);
     audit(request, 'signout', 'ok');
   }
+  clearSessionCookie(reply);
   return reply.send({ ok: true });
 }
 
