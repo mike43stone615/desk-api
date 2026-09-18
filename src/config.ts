@@ -69,7 +69,9 @@ const schema = z.object({
 
   RESEND_API_KEY: z.string().optional(),
   EMAIL_FROM: z.string().default('noreply@deskbusiness.co'),
-  APP_BASE_URL: z.string().default('https://deskbusiness.co'),
+  // The web app (web_app/public) is what actually serves /login,
+  // /reset-password, /confirm-email etc. — the bare domain doesn't.
+  APP_BASE_URL: z.string().default('https://app.deskbusiness.co'),
 
   // Optional — when set, requires a matching `x-api-key` header to reach
   // GET /metrics and GET /docs (+ /docs/openapi.json). Both stay exactly as

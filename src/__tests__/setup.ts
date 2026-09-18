@@ -3,7 +3,7 @@ process.env.DATABASE_URL = 'postgresql://test:test@localhost:5432/test';
 process.env.PORT = '3458';
 process.env.LOG_LEVEL = 'error';
 process.env.ADMIN_EMAILS = 'admin@example.com';
-process.env.APP_BASE_URL = 'https://deskbusiness.co';
+process.env.APP_BASE_URL = 'https://app.deskbusiness.co';
 // Set so routes/integrations/marketResearch.test.ts's "happy path" tests
 // don't fail closed with 503 before they even get to mock fetch() — its
 // "MARKET_API_URL unset" describe block deletes+re-imports with

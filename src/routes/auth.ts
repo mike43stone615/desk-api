@@ -126,11 +126,13 @@ export async function signUpHandler(request: FastifyRequest, reply: FastifyReply
       audit(request, 'signup_already_exists', 'ok');
     }
     // Response is identical either way, including status code and body
-    // shape — see the comment above.
+    // shape — see the comment above. The wording is honestly non-committal
+    // (matches requestEmailConfirmationHandler/requestPasswordResetHandler
+    // below) rather than flatly claiming an account was created.
     return reply.status(201).send({
       ok: true,
       emailConfirmationRequired: true,
-      message: 'Check your email to confirm your account before signing in.',
+      message: 'If that email is not already registered, a confirmation link has been sent. Check your inbox before signing in.',
     });
   } catch (err) {
     if (err instanceof AuthError) {

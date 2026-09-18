@@ -45,7 +45,7 @@ describe('POST /auth/signup', () => {
     expect(body).toEqual({
       ok: true,
       emailConfirmationRequired: true,
-      message: 'Check your email to confirm your account before signing in.',
+      message: 'If that email is not already registered, a confirmation link has been sent. Check your inbox before signing in.',
     });
     // No second account was actually created — still exactly the one user.
     expect(fakeDb.users.size).toBe(1);
