@@ -377,7 +377,12 @@ input[type="password"]::-ms-reveal { display: none; }
 .biz-icon.neutral { background: var(--input-bg); }
 .biz-body { flex: 1; min-width: 0; }
 .biz-title { font-size: 1.25rem; font-weight: 700; margin: 0 0 var(--sp-xs); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.biz-card .biz-sub { color: var(--ink-faint); font-size: .85rem; font-weight: 500; margin: 0; }
+/* The one card-subtitle style, shared by every card (.biz-card, .state-card,
+   .create-biz-card, library rows, card section notes). Do not use .hint for a
+   card's subtitle: it is smaller and lighter. */
+.biz-sub { color: var(--ink-faint); font-size: .85rem; font-weight: 500; margin: 0; }
+/* A card heading followed by its subtitle sits as tightly as a card title does. */
+.biz-section-title:has(+ .biz-sub) { margin-bottom: var(--sp-xs); }
 .biz-card .biz-chips { display: flex; gap: var(--sp-sm); flex-wrap: wrap; margin-top: var(--sp-xs); }
 .meta-chip {
   display: inline-flex; align-items: center; gap: var(--sp-2xs); padding: var(--sp-2xs) var(--sp-sm);
@@ -403,7 +408,6 @@ input[type="password"]::-ms-reveal { display: none; }
    width:100%) — this one isn't clickable. Matches DeskStatePanel(horizontal:
    true) in the Flutter app, used for the exact same "no businesses yet" panel. */
 .state-card { display: flex; align-items: flex-start; gap: var(--sp-lg); background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-xl); padding: var(--sp-lg) var(--sp-xl); }
-.state-card .biz-sub { color: var(--ink-faint); font-size: .85rem; font-weight: 500; margin: 0; }
 
 /* API Library (pages/developer.js). Key rows reuse .state-card; these add the
    actions slot, the chip row (.biz-chips is otherwise scoped to .biz-card),
@@ -423,10 +427,8 @@ input[type="password"]::-ms-reveal { display: none; }
 /* The global input rule (full width, padded, bordered) would blow a checkbox up. */
 .library-row input[type="checkbox"] { width: 18px; height: 18px; padding: 0; margin-top: 2px; flex-shrink: 0; accent-color: var(--accent); cursor: inherit; }
 .library-icon { display: flex; margin-top: 2px; color: var(--ink-soft); flex-shrink: 0; }
-.library-body { display: flex; flex-direction: column; gap: var(--sp-2xs); flex: 1; }
+.library-body { display: flex; flex-direction: column; gap: var(--sp-xs); flex: 1; }
 .library-body .name { font-weight: 700; }
-.library-body .desc { color: var(--ink-soft); font-size: .85rem; font-weight: 500; }
-.library-body .hint { margin-top: var(--sp-2xs); }
 .reveal-key { display: flex; gap: var(--sp-sm); align-items: stretch; }
 .reveal-key input { flex: 1; }
 

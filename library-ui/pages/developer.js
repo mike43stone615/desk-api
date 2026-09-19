@@ -145,8 +145,8 @@ registerRoute('/developer', async (app) => {
         <span class="library-icon">${icon(SERVICE_ICONS[svc.service] || 'category_outlined')}</span>
         <span class="library-body">
           <span class="name" id="svc-name-${esc(svc.service)}">${esc(svc.name)}</span>
-          <span class="desc" id="svc-desc-${esc(svc.service)}">${esc(svc.description)}</span>
-          <span class="hint">${disabled ? esc(svc.unavailableReason || 'Not available right now.') : `Endpoints under <b>${esc(svc.basePath)}</b>`}</span>
+          <span class="biz-sub" id="svc-desc-${esc(svc.service)}">${esc(svc.description)}</span>
+          <span class="biz-sub">${disabled ? esc(svc.unavailableReason || 'Not available right now.') : `Endpoints under <b>${esc(svc.basePath)}</b>`}</span>
         </span>
       </label>
     `;
@@ -157,7 +157,7 @@ registerRoute('/developer', async (app) => {
     return `
       <div class="card fold-in${s.animateReveal ? ' fold-in-animate' : ''}" id="reveal-card" style="max-height:1600px;margin-bottom:var(--sp-lg);">
         <h2 class="biz-section-title">Copy your new key</h2>
-        <p class="hint" style="margin-bottom:var(--sp-md);">This is the only time the full key is shown. Store it somewhere safe — if you lose it, revoke it and create a new one.</p>
+        <p class="biz-sub" style="margin-bottom:var(--sp-md);">This is the only time the full key is shown. Store it somewhere safe — if you lose it, revoke it and create a new one.</p>
         <div class="reveal-key">
           <input id="reveal-input" readonly value="${esc(r.key)}" aria-label="Your new API key" />
           <button type="button" class="btn btn-primary" id="copy-key-btn">${icon('content_copy')} Copy</button>
@@ -196,7 +196,7 @@ registerRoute('/developer', async (app) => {
         ${s.revealed ? revealHtml() : ''}
         <div class="card" style="margin-bottom:var(--sp-lg);">
           <h2 class="biz-section-title">Create a key</h2>
-          <p class="hint" style="margin-bottom:var(--sp-lg);">Choose which APIs the key can call. A key's APIs are fixed once it's created — to change them, create a new key.</p>
+          <p class="biz-sub" style="margin-bottom:var(--sp-lg);">Choose which APIs the key can call. A key's APIs are fixed once it's created — to change them, create a new key.</p>
           <form id="create-form" novalidate>
             <div class="field-float has-icon">
               <span class="field-icon">${icon('key')}</span>
