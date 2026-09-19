@@ -86,6 +86,7 @@ import {
   revokeGatewayKeyHandler,
 } from './routes/gateway';
 import { gatewayMarketProxyHandler, gatewayRegistryProxyHandler } from './routes/gatewayProxy';
+import { landingPageHandler } from './routes/landing';
 
 // Captured once at module load (= process start for all practical purposes)
 // specifically so /health can answer "is this actually the process I think
@@ -142,11 +143,14 @@ export async function buildApp(): Promise<FastifyInstance> {
   // for /docs below: it's real, publicly-reachable HTML (now key-gated per
   // dsk-1, but defense in depth), and had no X-Frame-Options at all, meaning
   // it could be embedded in an iframe on any external site. Content-Security-
-  // Policy is disabled: this API has exactly one HTML surface (/docs), and it
-  // loads the Swagger UI bundle from unpkg.com by design - a default CSP
+  // Policy is disabled: this API has two HTML surfaces (/docs and the static
+  // landing page at /), and /docs loads the Swagger UI bundle from unpkg.com by design - a default CSP
   // would block that. Every other route only ever returns JSON, where CSP
   // provides no protection anyway.
   await app.register(helmet, { contentSecurityPolicy: false });
+
+  // Public front door: what the API Library is and where to sign in. Static.
+  app.get('/', landingPageHandler);
 
   // OpenAPI spec + Swagger UI — publicly reachable by default, optionally
   // gated behind METRICS_DOCS_API_KEY (see middleware/auth.ts's
