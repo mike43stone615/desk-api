@@ -451,6 +451,19 @@ describe('proxying to registry-api and market-validation-api', () => {
     }
   });
 
+  it('documents every proxied endpoint in the OpenAPI spec', async () => {
+    const { OPENAPI_SPEC } = await import('../../openapi');
+    const docs = JSON.stringify((OPENAPI_SPEC as { paths: Record<string, unknown> }).paths['/gateway/registry/{path}']);
+    for (const name of [
+      'check-business-name-availability', 'check-dba-name-availability', 'check-trademark-availability',
+      'check-name-multi-state', 'check-names-batch', 'check-name-trend', 'registry-sync-status',
+      'business-structures', 'business-structures/recommend',
+    ]) expect(docs, name).toContain(name);
+    const market = (OPENAPI_SPEC as { paths: Record<string, Record<string, unknown>> }).paths['/gateway/market/{path}'];
+    expect(JSON.stringify(market.post)).toContain('research/analyze');
+    expect(JSON.stringify(market.get)).toContain('scoring-methodology');
+  });
+
   it('only reaches allowlisted upstream endpoints — no admin, no traversal', async () => {
     const user = seedUser('escape@example.com');
     const key = JSON.parse((await createKey(user, ['registry_api', 'market_validation_api'])).body).apiKey.key;

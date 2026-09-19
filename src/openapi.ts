@@ -473,7 +473,7 @@ export const OPENAPI_SPEC = {
         tags: ['API Library'],
         summary: 'Registry API (requires a key with the Registry API enabled)',
         description:
-          'Forwards to registry-api. Allowed: POST functions/v1/check-business-name-availability, check-dba-name-availability, check-trademark-availability, check-name-multi-state, check-names-batch; POST business-structures/recommend. Anything else is 404.',
+          'Forwards to registry-api. Allowed: POST functions/v1/check-business-name-availability, check-dba-name-availability, check-trademark-availability, check-name-multi-state, check-names-batch, check-name-trend; POST business-structures/recommend. Anything else is 404.',
         security: [{ ApiLibraryKey: [] }],
         parameters: [{ name: 'path', in: 'path', required: true, schema: { type: 'string' } }],
         responses: { '200': { description: 'Upstream response, passed through' }, '401': { description: 'Missing or invalid key' }, '403': { description: 'Key not enabled for this API' }, '404': { description: 'Unknown endpoint' } },
@@ -488,6 +488,14 @@ export const OPENAPI_SPEC = {
       },
     },
     '/gateway/market/{path}': {
+      get: {
+        tags: ['API Library'],
+        summary: 'Market Validation API reference (requires a key with it enabled)',
+        description: 'Allowed: GET scoring-methodology (how each score is calculated). Anything else is 404.',
+        security: [{ ApiLibraryKey: [] }],
+        parameters: [{ name: 'path', in: 'path', required: true, schema: { type: 'string' } }],
+        responses: { '200': { description: 'Upstream response, passed through' }, '401': { description: 'Missing or invalid key' }, '403': { description: 'Key not enabled for this API' }, '404': { description: 'Unknown endpoint' } },
+      },
       post: {
         tags: ['API Library'],
         summary: 'Market Validation API (requires a key with it enabled)',
