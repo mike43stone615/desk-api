@@ -11,7 +11,7 @@ import {
 } from '../app.js';
 
 const subtitles = {
-  signIn: 'Start and run your business in minutes.',
+  signIn: 'Build on business data with your own API keys.',
   signUp: 'Create your account and confirm your email before opening your workspace.',
   resetPassword: 'Enter your account email and we will send a secure password reset link.',
 };

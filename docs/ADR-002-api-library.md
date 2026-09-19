@@ -55,7 +55,8 @@ each key may call.
    desk_business web app (`web_app/public`): the sign-in page, the shared shell,
    the stylesheet, the logo and the API Library page. The **only** differences:
    the brand text reads "Desk API Library" instead of "Desk Business" (page title
-   and sign-in heading), and sign-in leads to the API Library page (`/developer`)
+   and sign-in heading), the sign-in subtitle reads "Build on business data with
+   your own API keys." instead of the business app's tagline, and sign-in leads to the API Library page (`/developer`)
    instead of the business list. Because the shell here has no business pages,
    it also points its default route at `/developer`, uses same-origin API URLs,
    hides the back arrow, drops the menu entries for business pages, and loads

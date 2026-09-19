@@ -50,6 +50,8 @@ describe('API Library web pages (served from api.deskbusiness.co)', () => {
     expect(auth).not.toContain('>Business</span>');
     expect(auth).toContain("takeReturnPath() || '/developer'");
     expect(auth).not.toContain("'/businesses'");
+    expect(auth).toContain("signIn: 'Build on business data with your own API keys.'");
+    expect(auth).not.toContain('Start and run your business');
   });
 
   it('the app shell calls this same origin, and defaults to the API Library page', async () => {
