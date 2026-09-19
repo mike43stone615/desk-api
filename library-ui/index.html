@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Desk API Library</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/style.css" />
+</head>
+<body>
+  <div class="topbar" id="topbar" hidden>
+    <button type="button" class="back-btn" id="back-btn" hidden aria-label="Back" title="Back">&larr;</button>
+    <a class="brand" id="brand-link" href="https://www.deskbusiness.co" target="_blank" rel="noopener" aria-label="Open Desk website">
+      <img src="/desk_logo.png" alt="" width="32" height="32" />
+      <span>Desk</span>
+    </a>
+    <nav id="nav"></nav>
+    <div class="authbox" id="authbox"></div>
+  </div>
+  <div id="app"></div>
+  <!-- Plain (non-module) script so it runs and sets up window.Sentry before
+       the deferred module script below executes -- app.js calls Sentry.init
+       at its own top level. Error-capture only, no tracing/replay bundle
+       (this app doesn't need those, and the plain bundle is far smaller).
+       Matches the Flutter app's own Sentry setup (see lib/main.dart) with
+       its own separate project, so a browser error doesn't get miscounted
+       against the phone/desktop app's error rate. -->
+  <script src="https://browser.sentry-cdn.com/10.15.0/bundle.min.js" crossorigin="anonymous"></script>
+  <script type="module" src="/app.js"></script>
+</body>
+</html>

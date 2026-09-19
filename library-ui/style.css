@@ -1,0 +1,583 @@
+/* Desk web dashboard — hand-written HTML/CSS/JS replacing the Flutter web
+   build (mobile/desktop apps stay on Flutter, untouched). Deliberately kept
+   in sync with lib/theme/app_colors.dart + lib/theme/app_theme.dart (the
+   Flutter app's own theme) and with desk-oracle's public/style.css, which
+   uses the same token set. If any of the three change, update the others. */
+:root {
+  /* Backgrounds (DeskColors) */
+  --bg: #070d1a;
+  --bg-deep: #0a1120;
+  --surface: #0e1626;      /* DeskColors.card / surface */
+  --surface-2: #162033;    /* DeskColors.cardElevated / surfaceElevated */
+  --input-bg: #111b2d;
+  --overlay: rgba(7, 13, 26, .7);
+  --line: #22304a;         /* DeskColors.border */
+  --line-strong: #2c3d5e;
+  --line-subtle: rgba(34, 48, 74, .4);
+  --divider: rgba(34, 48, 74, .5);
+
+  /* Brand (DeskColors) */
+  --accent: #3b82f6;          /* primaryBlue */
+  --accent-hover: #60a5fa;
+  --accent-pressed: #2563eb;
+  --accent-soft: rgba(59, 130, 246, .15);
+
+  /* Semantic (DeskColors) */
+  --success: #22c55e;
+  --success-soft: rgba(34, 197, 94, .15);
+  --warning: #f59e0b;
+  --warning-soft: rgba(245, 158, 11, .15);
+  --error: #ef4444;
+  --error-soft: rgba(239, 68, 68, .15);
+
+  /* Text (DeskColors) */
+  --ink: #ffffff;              /* textPrimary */
+  --ink-soft: #cbd5e1;         /* textSecondary */
+  --ink-faint: #94a3b8;        /* textMuted */
+  --ink-disabled: #64748b;     /* textDisabled */
+
+  /* Radius scale (DeskTheme radius atoms) */
+  --r-xs: 6px; --r-sm: 8px; --r-md: 12px; --r-lg: 16px; --r-xl: 18px; --r-2xl: 24px; --r-pill: 999px;
+
+  /* Spacing scale (DeskTheme spacing atoms) */
+  --sp-2xs: 2px; --sp-xs: 4px; --sp-sm: 8px; --sp-md: 12px; --sp-lg: 16px;
+  --sp-xl: 20px; --sp-2xl: 24px; --sp-3xl: 32px; --sp-4xl: 40px; --sp-5xl: 48px;
+
+  --shadow: 0 1px 2px rgba(0,0,0,.35), 0 10px 28px -14px rgba(0,0,0,.55);
+}
+* { box-sizing: border-box; min-width: 0; }
+html, body { height: auto; overflow-x: hidden; }
+body {
+  margin: 0; background: var(--bg); color: var(--ink);
+  font-family: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-size: 15px; line-height: 1.5; overflow-wrap: break-word;
+}
+a { color: var(--accent-hover); text-decoration: none; }
+a:hover { text-decoration: underline; }
+
+.topbar[hidden] { display: none; }
+.topbar {
+  position: sticky; top: 0; z-index: 10;
+  background: var(--surface); border-bottom: 1px solid var(--line);
+  display: flex; align-items: center; gap: var(--sp-lg); padding: var(--sp-md) var(--sp-2xl);
+}
+.topbar .back-btn {
+  display: flex; align-items: center; justify-content: center;
+  width: 32px; height: 32px; flex-shrink: 0;
+  border: none; border-radius: var(--r-pill); background: none; color: var(--ink-soft);
+  font-size: 1.1rem; line-height: 1; cursor: pointer; font-family: inherit;
+}
+.topbar .back-btn[hidden] { display: none; }
+.topbar .back-btn:hover { background: var(--surface-2); color: var(--ink); }
+.topbar .back-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+/* Matches DeskTheme.titleStyle (20/700) — the exact style DeskBrandMark uses
+   for the "Desk" wordmark next to the logo. */
+.topbar .brand {
+  display: flex; align-items: center; gap: var(--sp-md); flex-shrink: 0;
+  padding: var(--sp-sm) var(--sp-md); margin: calc(var(--sp-sm) * -1) calc(var(--sp-md) * -1);
+  border-radius: var(--r-pill);
+  font-weight: 700; font-size: 1.25rem; color: var(--ink); text-decoration: none;
+}
+.topbar .brand:hover { background: var(--surface-2); text-decoration: none; }
+.topbar .brand img { display: block; width: 32px; height: 32px; }
+.topbar nav { display: flex; gap: var(--sp-2xs); flex: 1; min-width: 0; }
+.topbar nav a, .topbar nav button.linklike {
+  padding: var(--sp-sm) var(--sp-md); border-radius: var(--r-sm); color: var(--ink-soft);
+  font-weight: 500; font-size: .92rem; background: none; border: none; cursor: pointer; font-family: inherit;
+  white-space: nowrap; flex-shrink: 0;
+}
+.topbar nav a.active, .topbar nav a:hover, .topbar nav button.linklike:hover { background: var(--surface-2); color: var(--ink); text-decoration: none; }
+.topbar .authbox { display: flex; align-items: center; flex-shrink: 0; min-width: 0; }
+@media (max-width: 520px) {
+  .topbar { gap: var(--sp-sm); padding: var(--sp-sm) var(--sp-md); }
+}
+
+/* Matches ProfileRibbon's _ProfileMenu exactly: a pill trigger (avatar +
+   chevron) that opens a dropdown — not an always-visible "Sign out" button. */
+.profile-menu { position: relative; }
+.profile-trigger {
+  display: flex; align-items: center; gap: var(--sp-xs); cursor: pointer;
+  background: var(--input-bg); border: 1px solid var(--line); border-radius: var(--r-pill);
+  padding: var(--sp-xs) var(--sp-sm); color: var(--ink-soft); font-family: inherit;
+}
+.profile-trigger:hover { border-color: var(--line-strong); }
+.profile-avatar {
+  display: flex; align-items: center; justify-content: center;
+  width: 32px; height: 32px; border-radius: 50%;
+  background: var(--accent-soft); color: var(--accent-hover);
+  font-size: .75rem; font-weight: 700;
+}
+.profile-dropdown {
+  position: absolute; top: calc(100% + var(--sp-xs)); right: 0; z-index: 30;
+  background: var(--input-bg); border: 1px solid var(--line); border-radius: var(--r-lg);
+  box-shadow: var(--shadow); min-width: 240px; max-width: 280px; padding: var(--sp-xs) 0;
+}
+.profile-dropdown[hidden] { display: none; }
+.profile-header { padding: var(--sp-sm) var(--sp-md); }
+.profile-label { font-size: .75rem; font-weight: 700; color: var(--ink-soft); }
+.profile-name { font-size: .875rem; font-weight: 500; color: var(--ink); margin-top: var(--sp-xs); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.profile-email { font-size: .875rem; font-weight: 500; color: var(--ink-faint); margin-top: var(--sp-2xs); overflow-wrap: break-word; }
+.profile-divider { height: 1px; background: var(--divider); margin: var(--sp-xs) 0; }
+.profile-item {
+  display: flex; align-items: center; gap: var(--sp-md); width: 100%; text-align: left;
+  padding: var(--sp-sm) var(--sp-md); background: none; border: none; color: var(--ink);
+  font-family: inherit; font-size: .875rem; font-weight: 500; cursor: pointer;
+}
+.profile-item:hover { background: var(--surface-2); }
+
+.page { max-width: 1180px; margin: 0 auto; padding: var(--sp-3xl) var(--sp-2xl) 80px; }
+.page-head { margin-bottom: var(--sp-xl); }
+/* h1/p here match DeskTheme.headlineStyle (28/700) + subtitleStyle (16/500) exactly — these are the literal styles Flutter uses for page titles/subtitles (e.g. "Choose a Business" in business_selection_page.dart). */
+.page-head h1 { font-size: 1.75rem; font-weight: 700; margin: 0 0 var(--sp-xs); }
+.page-head p { color: var(--ink-soft); margin: 0; font-size: 1rem; font-weight: 500; }
+
+/* Auth shell: full-viewport-minus-topbar centered card, natural document flow. */
+.auth-shell { display: flex; justify-content: center; padding: var(--sp-4xl) var(--sp-lg) 80px; }
+.auth-card {
+  width: 100%; max-width: 440px; background: var(--surface); border: 1px solid var(--line);
+  border-radius: var(--r-xl); padding: var(--sp-2xl);
+}
+.auth-card-logo { display: block; height: 44px; }
+/* Matches Theme.textTheme.headlineMedium (24/700) — the exact style _LoginHeader
+   uses for the "Desk" heading inside the card (distinct from DeskTheme.headlineStyle,
+   used for page titles elsewhere at 28/700). */
+.auth-card h1 { font-size: 1.5rem; font-weight: 700; margin: var(--sp-lg) 0 var(--sp-xs); }
+/* "Business" in the product name is always this accent color wherever the
+   full "Desk Business" brand appears — the bare topbar wordmark is the one
+   deliberate exception (DeskBrandMark shows just "Desk"). */
+.brand-business { color: var(--accent); }
+.auth-card .subtitle { color: var(--ink-soft); margin: 0 0 var(--sp-2xl); font-size: 1rem; font-weight: 500; }
+.auth-card .row-2 { display: flex; gap: var(--sp-md); }
+.auth-card .row-2 > div { flex: 1; }
+
+.btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: var(--sp-xs); cursor: pointer;
+  border: 1px solid var(--line); background: var(--surface); color: var(--ink);
+  padding: var(--sp-sm) var(--sp-lg); border-radius: var(--r-md); font-size: .88rem; font-weight: 700;
+  transition: background .12s ease, border-color .12s ease, opacity .12s ease; font-family: inherit;
+}
+.btn:hover { background: var(--surface-2); }
+.btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.btn:disabled { opacity: .5; cursor: not-allowed; }
+.btn-primary { background: var(--accent); border-color: var(--accent); color: #ffffff; }
+.btn-primary:hover:not(:disabled) { background: var(--accent-hover); }
+.btn-primary:active:not(:disabled) { background: var(--accent-pressed); }
+/* Matches Flutter exactly: there's no dedicated danger/error FilledButton
+   style anywhere in app_theme.dart, so "Delete" buttons use the same plain
+   FilledButton look as every other primary action (colorScheme.primary). */
+.btn-danger { background: var(--accent); border-color: var(--accent); color: #ffffff; }
+.btn-danger:hover:not(:disabled) { background: var(--accent-hover); }
+.btn-danger:active:not(:disabled) { background: var(--accent-pressed); }
+.btn-block { width: 100%; }
+.btn-sm { padding: var(--sp-xs) var(--sp-md); font-size: .78rem; }
+.btn-link {
+  display: inline-flex; align-items: center; justify-content: center; gap: var(--sp-xs);
+  background: none; border: none; color: var(--ink-soft); padding: var(--sp-xs) var(--sp-sm); font-weight: 600;
+  font-family: inherit;
+}
+.btn-link:hover:not(:disabled) { color: var(--ink); background: none; text-decoration: underline; }
+.btn-link:disabled { opacity: .5; cursor: not-allowed; }
+
+.spinner {
+  width: 15px; height: 15px; border-radius: 50%; border: 2px solid rgba(255,255,255,.4);
+  border-top-color: #fff; animation: spin .7s linear infinite; flex-shrink: 0;
+}
+.spinner-dark { border-color: var(--line-strong); border-top-color: var(--ink-soft); }
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* Clamp every animation/transition to effectively instant for anyone with
+   the OS-level "reduce motion" setting on -- covers the spinner's spin, the
+   status-message fold, and the floating-label move together instead of
+   annotating each one. `input:-webkit-autofill`'s own transition is the one
+   deliberate exception: that's not decorative motion, it's a 9999s delay
+   trick to keep the browser's native yellow autofill background from ever
+   visually applying (see its own comment above) -- clamping its duration
+   would defeat the trick and let the yellow flash through. */
+@media (prefers-reduced-motion: reduce) {
+  *:not(input:-webkit-autofill),
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+.field { margin-bottom: var(--sp-lg); }
+.field label { display: block; font-size: .8rem; font-weight: 700; color: var(--ink-soft); margin-bottom: var(--sp-xs); }
+.error-text { color: var(--error); font-size: .78rem; }
+.field .error-text { margin-top: var(--sp-2xs); }
+/* Same per-field error text, paired with a floating-label field instead of
+   a plain .field: the field's own bottom margin collapses to a tight gap
+   so the error sits right under it, and the error text itself carries the
+   margin down to whatever comes next. */
+.field-float:has(+ .error-text) { margin-bottom: var(--sp-2xs); }
+.field-float + .error-text { margin: 0 0 var(--sp-lg); }
+
+/* Floating label: Flutter's TextFormField (filled, InputDecorationTheme)
+   shows the label sitting inside the field like a hint, then floats up and
+   shrinks once focused or filled — Material's default behavior for
+   labelText-only fields. Requires a `placeholder` attribute (even just a
+   space) on the input so :placeholder-shown tracks "empty" correctly. Used
+   on the auth pages for now; .field's static above-field label is left
+   alone elsewhere since not every field type (selects, custom widgets)
+   fits this exact pattern safely. */
+.field-float { position: relative; margin-bottom: var(--sp-lg); }
+.field-float input { padding: 22px var(--sp-md) 8px; }
+.field-float label {
+  position: absolute; z-index: 1; left: var(--sp-md); top: 50%; transform: translateY(-50%);
+  font-size: .9rem; font-weight: 500; color: var(--ink-faint); pointer-events: none; margin: 0;
+  max-width: calc(100% - var(--sp-lg)); overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  transition: top 220ms ease-in-out, transform 220ms ease-in-out, font-size 220ms ease-in-out, font-weight 220ms ease-in-out, color 220ms ease-in-out;
+}
+.field-float:has(input:focus) label,
+.field-float:has(input:not(:placeholder-shown)) label {
+  top: 8px; transform: translateY(0); font-size: .68rem; font-weight: 700; color: var(--ink-soft);
+}
+/* Prefix icon (Flutter's InputDecoration.prefixIcon, e.g. Icons.mail_outline
+   on the email field) — shifts the input's own text and the label right to
+   make room, matching Material's fixed icon-adjacent label position (stays
+   in that same spot floated or not, doesn't slide back to the field edge). */
+.field-float.has-icon input { padding-left: 42px; }
+.field-float.has-icon label { left: 42px; }
+.field-float .field-icon {
+  position: absolute; left: var(--sp-md); top: 50%; transform: translateY(-50%);
+  color: var(--ink-faint); pointer-events: none; display: flex; z-index: 1;
+}
+/* Matches DeskTheme.fieldValueStyle (16/500) — the exact style Flutter uses
+   for whatever a user types or selects into a field (explicitly defined
+   there because TextField/DropdownButtonFormField otherwise fall back to
+   mismatched Material defaults). Density-specific overrides (admin grid
+   cells/filters) set their own smaller font-size and win via specificity. */
+input, select, textarea {
+  width: 100%; padding: var(--sp-sm) var(--sp-md); border: 1px solid var(--line); border-radius: var(--r-md);
+  font-size: 1rem; font-weight: 500; font-family: inherit; background: var(--input-bg); color: var(--ink);
+}
+/* The rule above makes every input full-width and padded, which stretches a
+   checkbox/radio into an 80px-wide box. These stay small and square. */
+input[type="checkbox"], input[type="radio"] { width: 18px; height: 18px; padding: 0; flex-shrink: 0; accent-color: var(--accent); cursor: pointer; }
+input::placeholder, textarea::placeholder { color: var(--ink-faint); }
+input:focus, select:focus, textarea:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+input.invalid { border-color: var(--error); }
+input.invalid:focus { box-shadow: 0 0 0 3px var(--error-soft); }
+/* Browser autofill (Chrome/Edge) paints its own opaque background — a
+   near-white yellow by default — that a plain `background` rule can't
+   override; the standard fix is forcing it via an absurdly large inset
+   shadow the same color as the field, plus fixing the text color it also
+   overrides. transition-delay is a second common trick to fight browsers
+   that re-apply the yellow after a delay/on blur. */
+input:-webkit-autofill,
+input:-webkit-autofill:hover,
+input:-webkit-autofill:focus {
+  -webkit-box-shadow: 0 0 0 1000px var(--input-bg) inset;
+  -webkit-text-fill-color: var(--ink);
+  caret-color: var(--ink);
+  transition: background-color 9999s ease-in-out 0s;
+}
+/* Edge's built-in password-reveal eye icon would otherwise sit directly on
+   top of our own eye-icon toggle button. */
+input[type="password"]::-ms-reveal { display: none; }
+.password-field { position: relative; }
+.password-field input { padding-right: 40px; }
+.password-toggle {
+  position: absolute; right: var(--sp-xs); top: 50%; transform: translateY(-50%);
+  background: none; border: none; color: var(--ink-faint); cursor: pointer; padding: var(--sp-xs);
+  display: flex; align-items: center; justify-content: center; border-radius: 50%; font-family: inherit;
+}
+.password-toggle:hover { color: var(--ink); }
+
+/* Base look — no transition here. A re-render that shows the exact same
+   message as last time (e.g. a cooldown timer ticking once a second, or
+   resubmitting with the same invalid input) uses this class alone and
+   appears instantly in its final position: no re-fold, matching direct
+   feedback that repeat renders of unchanged content shouldn't re-animate. */
+.status-msg {
+  border-radius: var(--r-sm); border: 1px solid; padding: var(--sp-md); font-size: .85rem;
+  margin-bottom: var(--sp-lg); display: flex; gap: var(--sp-sm); align-items: flex-start;
+  overflow: hidden; max-height: 400px; opacity: 1;
+}
+/* Only a genuinely NEW or CHANGED message gets this modifier (see the
+   `animate` argument on statusMsg() in app.js) — folds open over
+   DeskTheme.foldDuration/foldCurve (220ms ease-in-out), the same timing
+   Flutter's AnimatedSize uses. @starting-style defines the state a
+   freshly-inserted element transitions FROM, so a plain innerHTML swap
+   still animates in. */
+.status-msg.status-msg-animate {
+  transition: max-height 220ms ease-in-out, opacity 220ms ease-in-out, margin-bottom 220ms ease-in-out, padding-block 220ms ease-in-out;
+}
+@starting-style {
+  .status-msg.status-msg-animate { max-height: 0; opacity: 0; margin-bottom: 0; padding-block: 0; }
+}
+.status-msg.success { background: var(--success-soft); border-color: var(--success); color: var(--success); }
+.status-msg.error { background: var(--error-soft); border-color: var(--error); color: var(--error); }
+/* Matches _ConfirmationStatusMessage's isPending branch exactly (input bg,
+   textSecondary border/color) — the confirm-email page's only real use of
+   a neutral third state. */
+.status-msg.info { background: var(--input-bg); border-color: var(--ink-soft); color: var(--ink-soft); }
+.status-msg .title { font-weight: 700; display: block; }
+
+/* Same fold-in mechanism as .status-msg above, generalized for any block of
+   content that conditionally appears (e.g. the partner-count field once
+   "more than one owner" is set to Yes) — same DeskTheme.foldDuration/
+   foldCurve timing. Only a genuinely newly-shown block gets -animate (see
+   callers), so a re-render where it was already visible doesn't replay it. */
+.fold-in { overflow: hidden; max-height: 400px; opacity: 1; }
+.fold-in.fold-in-animate { transition: max-height 220ms ease-in-out, opacity 220ms ease-in-out, margin-top 220ms ease-in-out; }
+@starting-style {
+  .fold-in.fold-in-animate { max-height: 0; opacity: 0; margin-top: 0; }
+}
+
+/* No shadow: Flutter's DeskTheme.cardDecoration/cardDecorationMd — used for
+   nearly every card in the app — is border+color only, no boxShadow. Only
+   the one card styled with elevatedCardDecoration (the "Set up a new
+   business" card, .create-biz-card below) gets a shadow. */
+.card {
+  background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-xl);
+  padding: var(--sp-xl); margin-bottom: var(--sp-lg);
+}
+.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px,1fr)); gap: var(--sp-md); }
+.badge {
+  font-size: .68rem; font-weight: 700; letter-spacing: .03em; text-transform: uppercase;
+  padding: 3px var(--sp-sm); border-radius: var(--r-pill); border: 1px solid;
+}
+.badge-neutral { color: var(--ink-faint); background: var(--surface-2); border-color: var(--line); }
+.badge-accent { color: var(--accent); background: var(--accent-soft); border-color: var(--accent); }
+.badge-success { color: var(--success); background: var(--success-soft); border-color: var(--success); }
+.badge-warning { color: var(--warning); background: var(--warning-soft); border-color: var(--warning); }
+
+.page-head-row { display: flex; align-items: flex-start; gap: var(--sp-md); margin-bottom: var(--sp-2xl); }
+.page-head-row .head-text { flex: 1; }
+.page-head-row h1 { font-size: 1.75rem; font-weight: 700; margin: 0 0 var(--sp-sm); }
+.page-head-row p { color: var(--ink-soft); margin: 0; font-size: 1rem; font-weight: 500; }
+.icon-btn {
+  width: 40px; height: 40px; border-radius: var(--r-md); background: var(--surface-2);
+  border: 1px solid var(--line); color: var(--ink-soft); cursor: pointer; font-size: 1.1rem;
+  display: flex; align-items: center; justify-content: center; flex-shrink: 0; font-family: inherit;
+}
+.icon-btn:hover { background: var(--line); color: var(--ink); }
+
+.biz-list { display: flex; flex-direction: column; gap: var(--sp-lg); }
+.biz-section-title { font-size: 1.25rem; font-weight: 700; margin: 0 0 var(--sp-md); }
+.biz-card {
+  display: flex; align-items: center; gap: var(--sp-lg); background: var(--surface); border: 1px solid var(--line);
+  border-radius: var(--r-xl); padding: var(--sp-lg) var(--sp-xl); margin-bottom: var(--sp-md);
+  cursor: pointer; text-align: left; width: 100%; font-family: inherit; color: inherit;
+}
+.biz-card:hover { border-color: var(--line-strong); }
+/* Unscoped (not ".biz-card .biz-icon" etc.): .create-biz-card ("Set up a new
+   business") reuses these same classes but isn't a .biz-card itself — it
+   used to render completely unstyled there. */
+.biz-icon {
+  width: 44px; height: 44px; border-radius: var(--r-md); border: 1px solid var(--line);
+  display: flex; align-items: center; justify-content: center; font-size: 1.3rem; flex-shrink: 0;
+}
+.biz-icon.warn { background: var(--warning-soft); }
+.biz-icon.accent { background: var(--accent-soft); }
+.biz-icon.neutral { background: var(--input-bg); }
+.biz-body { flex: 1; min-width: 0; }
+.biz-title { font-size: 1.25rem; font-weight: 700; margin: 0 0 var(--sp-xs); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.biz-card .biz-sub { color: var(--ink-faint); font-size: .85rem; font-weight: 500; margin: 0; }
+.biz-card .biz-chips { display: flex; gap: var(--sp-sm); flex-wrap: wrap; margin-top: var(--sp-xs); }
+.meta-chip {
+  display: inline-flex; align-items: center; gap: var(--sp-2xs); padding: var(--sp-2xs) var(--sp-sm);
+  background: var(--input-bg); border: 1px solid var(--line-subtle); border-radius: var(--r-pill);
+  font-size: .72rem; font-weight: 700; color: var(--ink-faint);
+}
+.biz-card .chevron { display: flex; align-items: center; color: var(--ink-faint); flex-shrink: 0; }
+.biz-card .biz-delete {
+  display: flex; align-items: center; justify-content: center;
+  background: none; border: none; color: var(--ink-faint); cursor: pointer; padding: var(--sp-sm);
+  border-radius: var(--r-sm); flex-shrink: 0; font-family: inherit;
+}
+.biz-card .biz-delete:hover { color: var(--error); background: var(--error-soft); }
+
+.create-biz-card {
+  background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-xl);
+  padding: var(--sp-xl); box-shadow: var(--shadow);
+}
+.create-biz-card .row { display: flex; gap: var(--sp-lg); align-items: flex-start; }
+
+/* Same card treatment as .biz-card (background/border/radius/padding, icon
+   left + title/message right), minus the button-only bits (cursor, hover,
+   width:100%) — this one isn't clickable. Matches DeskStatePanel(horizontal:
+   true) in the Flutter app, used for the exact same "no businesses yet" panel. */
+.state-card { display: flex; align-items: flex-start; gap: var(--sp-lg); background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-xl); padding: var(--sp-lg) var(--sp-xl); }
+.state-card .biz-sub { color: var(--ink-faint); font-size: .85rem; font-weight: 500; margin: 0; }
+
+/* API Library (pages/developer.js). Key rows reuse .state-card; these add the
+   actions slot, the chip row (.biz-chips is otherwise scoped to .biz-card),
+   the per-API checkbox rows, and the one-time key reveal. */
+.state-card .biz-chips { display: flex; gap: var(--sp-sm); flex-wrap: wrap; margin-top: var(--sp-xs); }
+.key-card { margin-bottom: var(--sp-md); align-items: center; }
+.key-card > .btn { margin-left: auto; flex-shrink: 0; }
+.library-list { display: flex; flex-direction: column; gap: var(--sp-sm); margin-bottom: var(--sp-sm); }
+.library-row {
+  display: flex; align-items: flex-start; gap: var(--sp-md); padding: var(--sp-md) var(--sp-lg);
+  background: var(--input-bg); border: 1px solid var(--line); border-radius: var(--r-md); cursor: pointer;
+}
+.library-row:hover { border-color: var(--line-strong); }
+.library-row:has(input:checked) { border-color: var(--accent); background: var(--accent-soft); }
+.library-row:has(input:focus-visible) { outline: 2px solid var(--accent); outline-offset: 1px; }
+.library-row:has(input:disabled) { opacity: .5; cursor: not-allowed; }
+/* The global input rule (full width, padded, bordered) would blow a checkbox up. */
+.library-row input[type="checkbox"] { width: 18px; height: 18px; padding: 0; margin-top: 2px; flex-shrink: 0; accent-color: var(--accent); cursor: inherit; }
+.library-icon { display: flex; margin-top: 2px; color: var(--ink-soft); flex-shrink: 0; }
+.library-body { display: flex; flex-direction: column; gap: var(--sp-2xs); flex: 1; }
+.library-body .name { font-weight: 700; }
+.library-body .desc { color: var(--ink-soft); font-size: .85rem; font-weight: 500; }
+.library-body .hint { margin-top: var(--sp-2xs); }
+.reveal-key { display: flex; gap: var(--sp-sm); align-items: stretch; }
+.reveal-key input { flex: 1; }
+/* Monospace is deliberate and limited to copy-paste code samples; every other
+   piece of text stays on the theme's Inter stack. */
+.code-block {
+  margin: 0 0 var(--sp-md); padding: var(--sp-md); overflow-x: auto; white-space: pre;
+  background: var(--input-bg); border: 1px solid var(--line); border-radius: var(--r-md);
+  color: var(--ink-soft); font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: .8rem; line-height: 1.5;
+}
+
+.empty-state { text-align: center; color: var(--ink-faint); padding: var(--sp-4xl) 0; }
+.toast { position: fixed; bottom: var(--sp-xl); right: var(--sp-xl); background: var(--surface-2); border: 1px solid var(--line); color: var(--ink); padding: var(--sp-md) var(--sp-lg); border-radius: var(--r-md); font-size: .85rem; box-shadow: var(--shadow); z-index: 100; }
+.toast.error { background: var(--error); border-color: var(--error); color: #ffffff; }
+.hint { font-size: .78rem; color: var(--ink-faint); margin-top: var(--sp-xs); }
+
+.modal-backdrop { position: fixed; inset: 0; background: var(--overlay); display: flex; align-items: center; justify-content: center; z-index: 50; }
+.modal { background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-xl); padding: var(--sp-2xl); width: 480px; max-width: 92vw; max-height: 86vh; overflow-y: auto; box-shadow: var(--shadow); }
+.modal h2 { margin-top: 0; font-size: 1.25rem; font-weight: 700; }
+
+/* ---- Setup wizard ---- */
+.wizard-shell { display: grid; grid-template-columns: 260px 1fr; gap: var(--sp-2xl); align-items: start; }
+@media (max-width: 860px) { .wizard-shell { grid-template-columns: 1fr; } }
+.wizard-rail { background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-lg); padding: var(--sp-lg); }
+.wizard-rail .rail-title { font-weight: 700; font-size: 1.25rem; margin-bottom: var(--sp-md); }
+.wizard-rail .rail-item { display: flex; align-items: center; gap: var(--sp-md); padding: var(--sp-xs) 0; color: var(--ink-faint); font-size: .88rem; }
+.wizard-rail .rail-item .dot { width: 18px; height: 18px; border-radius: 50%; border: 2px solid currentColor; flex-shrink: 0; display: flex; align-items: center; justify-content: center; font-size: .7rem; }
+.wizard-rail .rail-item.current, .wizard-rail .rail-item.done { color: var(--accent); }
+.wizard-rail .rail-item.current .dot { background: var(--accent); border-color: var(--accent); }
+.wizard-rail .rail-item.done .dot { background: var(--accent); border-color: var(--accent); }
+
+.wizard-card { background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-xl); padding: var(--sp-2xl); }
+.wizard-step-title { font-size: 1.75rem; font-weight: 700; margin: 0 0 var(--sp-lg); }
+/* Matches DeskFieldHeader exactly (app_theme.dart): titleStyle (20/700) for
+   the label, bodyMutedStyle (14/500, muted) for the subtext, spaceSm (8px)
+   trailing gap before the field. This is a deliberately STATIC label —
+   DeskFieldHeader's own doc comment explains it exists specifically so the
+   label looks the same above every field type (text input, dropdown, custom
+   widget), unlike the floating TextFormField labelText used on the auth
+   pages. Don't convert this to a floating label. */
+.field-header { margin: var(--sp-lg) 0 var(--sp-sm); }
+.field-header label { display: block; font-weight: 700; font-size: 1.25rem; line-height: 1.25; }
+.field-header .subtext { color: var(--ink-faint); font-size: .875rem; font-weight: 500; margin-top: var(--sp-xs); }
+.wizard-actions { display: flex; justify-content: space-between; margin-top: var(--sp-2xl); padding-top: var(--sp-lg); border-top: 1px solid var(--line); }
+
+.segmented { display: inline-flex; border: 1px solid var(--line); border-radius: var(--r-pill); overflow: hidden; }
+.segmented button { background: var(--surface); border: none; color: var(--ink-soft); padding: var(--sp-xs) var(--sp-lg); font-weight: 700; font-size: .85rem; cursor: pointer; font-family: inherit; }
+.segmented button.active { background: var(--accent); color: #fff; }
+
+.chip-row { display: flex; gap: var(--sp-sm); flex-wrap: wrap; margin: var(--sp-sm) 0; }
+.chip {
+  display: inline-flex; align-items: center; gap: var(--sp-xs); padding: var(--sp-2xs) var(--sp-md); border-radius: var(--r-pill);
+  border: 1px solid var(--line); background: var(--input-bg); color: var(--ink-soft); font-size: .82rem; cursor: pointer; font-family: inherit;
+}
+.chip.selected { background: var(--accent-soft); border-color: var(--accent); color: var(--ink); }
+.chip .x { opacity: .7; }
+.chip:hover { border-color: var(--line-strong); }
+.chip:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.autocomplete-wrap { position: relative; }
+.autocomplete-list {
+  position: absolute; z-index: 20; top: calc(100% + 4px); left: 0; right: 0; background: var(--surface-2);
+  border: 1px solid var(--line); border-radius: var(--r-md); max-height: 240px; overflow-y: auto;
+}
+.autocomplete-list button {
+  display: block; width: 100%; text-align: left; background: none; border: none; color: var(--ink); padding: var(--sp-sm) var(--sp-md);
+  cursor: pointer; font-size: .88rem; font-family: inherit;
+}
+.autocomplete-list button:hover { background: var(--surface); }
+
+.option-list { display: flex; flex-direction: column; gap: var(--sp-sm); max-height: 480px; overflow-y: auto; padding-right: var(--sp-xs); }
+.option-row {
+  display: flex; align-items: flex-start; gap: var(--sp-sm); padding: var(--sp-md); border-radius: var(--r-md); border: 1px solid var(--line);
+  background: var(--input-bg); cursor: pointer; text-align: left; width: 100%; font-family: inherit; color: inherit;
+}
+.option-row.selected { border-color: var(--accent); background: var(--accent-soft); }
+.option-row.unavailable { opacity: .5; cursor: not-allowed; }
+.option-row .radio { width: 16px; height: 16px; border-radius: 50%; border: 2px solid var(--ink-faint); flex-shrink: 0; margin-top: 2px; }
+.option-row.selected .radio { border-color: var(--accent); background: var(--accent); }
+.option-row .name { font-weight: 600; font-size: .9375rem; }
+.option-row .category { color: var(--ink-faint); font-size: .74rem; }
+.guidance-panel { background: var(--input-bg); border: 1px solid var(--line); border-radius: var(--r-lg); padding: var(--sp-lg); }
+.guidance-panel h3 { margin: 0 0 var(--sp-sm); font-size: 1.05rem; font-weight: 700; }
+.guidance-panel .pros-cons { display: grid; grid-template-columns: 1fr 1fr; gap: var(--sp-md); margin-top: var(--sp-md); }
+@media (max-width: 640px) { .guidance-panel .pros-cons { grid-template-columns: 1fr; } }
+.guidance-panel .pros-cons .col-title { font-weight: 700; font-size: .78rem; text-transform: uppercase; letter-spacing: .03em; margin-bottom: var(--sp-xs); }
+.guidance-panel .sources { margin-top: var(--sp-md); font-size: .8rem; }
+.guidance-panel .sources a { display: block; margin-top: 2px; }
+.structure-grid { display: grid; grid-template-columns: minmax(220px, 320px) 1fr; gap: var(--sp-lg); align-items: start; }
+@media (max-width: 760px) { .structure-grid { grid-template-columns: 1fr; } }
+.entry-choice-grid { display: grid; grid-template-columns: 1fr 1fr; gap: var(--sp-lg); }
+@media (max-width: 640px) { .entry-choice-grid { grid-template-columns: 1fr; } }
+
+.upload-dropzone {
+  border: 2px dashed var(--line); border-radius: var(--r-lg); padding: var(--sp-2xl); text-align: center; color: var(--ink-faint);
+  cursor: pointer;
+}
+.upload-dropzone:hover { border-color: var(--accent); color: var(--ink-soft); }
+
+.req-item { display: flex; align-items: flex-start; gap: var(--sp-md); padding: var(--sp-md); border: 1px solid var(--line); border-radius: var(--r-md); margin-bottom: var(--sp-sm); background: var(--input-bg); flex-wrap: wrap; }
+.req-item .req-body { flex: 1; min-width: 160px; }
+.req-item .req-title { font-weight: 700; font-size: .9rem; overflow-wrap: normal; }
+.req-item .req-desc { color: var(--ink-faint); font-size: .82rem; margin-top: 2px; }
+.req-item .req-actions { display: flex; gap: var(--sp-xs); flex-shrink: 0; }
+
+.score-card { background: var(--input-bg); border: 1px solid var(--line); border-radius: var(--r-lg); padding: var(--sp-lg); }
+.score-card .score-num { font-size: 2rem; font-weight: 800; flex-shrink: 0; }
+.score-ring { display: flex; align-items: center; gap: var(--sp-lg); flex-wrap: wrap; }
+.score-ring > div:last-child { flex: 1; min-width: 200px; }
+
+/* ---- Admin tables ---- */
+.admin-toolbar { display: flex; align-items: center; gap: var(--sp-md); flex-wrap: wrap; margin-bottom: var(--sp-lg); }
+.admin-toolbar .spacer { flex: 1; }
+.source-tabs, .table-tabs { display: flex; gap: var(--sp-2xs); flex-wrap: wrap; margin-bottom: var(--sp-md); }
+.source-tabs button, .table-tabs button {
+  padding: var(--sp-xs) var(--sp-md); border-radius: var(--r-pill); border: 1px solid var(--line);
+  background: var(--surface); color: var(--ink-soft); font-size: .82rem; font-weight: 700; cursor: pointer; font-family: inherit;
+}
+.source-tabs button.active, .table-tabs button.active { background: var(--accent); border-color: var(--accent); color: #fff; }
+.admin-grid-wrap { background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-xl); overflow: hidden; position: relative; }
+.admin-grid-toolbar { display: flex; align-items: center; gap: var(--sp-md); padding: var(--sp-sm) var(--sp-lg); background: var(--input-bg); border-bottom: 1px solid var(--line); flex-wrap: wrap; }
+.admin-grid-scroll { overflow-x: auto; max-height: 65vh; overflow-y: auto; }
+table.admin-table { border-collapse: collapse; font-size: .82rem; width: max-content; min-width: 100%; }
+table.admin-table th { position: sticky; top: 0; background: var(--input-bg); text-align: left; padding: var(--sp-sm); border-bottom: 1px solid var(--line); vertical-align: top; z-index: 1; cursor: pointer; }
+table.admin-table th .col-name { font-size: .7rem; text-transform: uppercase; letter-spacing: .03em; color: var(--ink-faint); font-weight: 700; display: block; margin-bottom: var(--sp-2xs); white-space: nowrap; }
+table.admin-table th .col-filter { width: 130px; padding: 4px 6px; font-size: .76rem; }
+table.admin-table td { padding: var(--sp-sm); border-bottom: 1px solid var(--line-subtle); vertical-align: top; max-width: 260px; }
+table.admin-table td.admin-actions-cell { white-space: nowrap; }
+.admin-cell-value { display: block; max-height: 3.2em; overflow: hidden; text-overflow: ellipsis; white-space: pre-wrap; cursor: pointer; padding: 4px 6px; border-radius: var(--r-sm); }
+.admin-cell-value.editable:hover { background: var(--input-bg); outline: 1px solid var(--line); }
+.admin-cell-value.null-value { font-style: italic; color: var(--ink-faint); }
+.admin-cell-value.secret { color: var(--ink-faint); font-style: italic; }
+.admin-cell-input { width: 100%; min-width: 140px; font-size: .82rem; padding: 4px 6px; }
+.bool-pill { display: inline-block; padding: 2px 8px; border-radius: var(--r-pill); font-size: .74rem; font-weight: 700; border: 1px solid; }
+.bool-pill.t { background: var(--success-soft); color: var(--success); border-color: var(--success); }
+.bool-pill.f { background: var(--warning-soft); color: var(--warning); border-color: var(--warning); }
+.admin-icon-btn { display: inline-flex; align-items: center; gap: var(--sp-xs); background: none; border: none; color: var(--ink-faint); cursor: pointer; padding: 4px; font-size: 1rem; font-family: inherit; }
+.admin-icon-btn:hover:not(:disabled) { color: var(--ink); }
+.admin-icon-btn:disabled { opacity: .35; cursor: not-allowed; }
+.admin-footer { display: flex; align-items: center; gap: var(--sp-md); padding: var(--sp-sm) var(--sp-lg); background: var(--input-bg); border-top: 1px solid var(--line); font-size: .8rem; color: var(--ink-faint); }
+.row-detail-panel {
+  position: absolute; top: 0; right: 0; bottom: 0; width: min(420px, 100%); background: var(--surface-2);
+  border-left: 1px solid var(--line); box-shadow: var(--shadow); display: flex; flex-direction: column; z-index: 5;
+}
+.row-detail-panel .rd-head { display: flex; align-items: center; gap: var(--sp-sm); padding: var(--sp-lg); border-bottom: 1px solid var(--line); }
+.row-detail-panel .rd-body { flex: 1; overflow-y: auto; padding: var(--sp-lg); }
+.row-detail-panel .rd-field { margin-bottom: var(--sp-lg); }
+.row-detail-panel .rd-field label { display: block; font-size: .72rem; text-transform: uppercase; color: var(--ink-faint); font-weight: 700; margin-bottom: 4px; }
+.column-menu { position: relative; }
+.column-menu-list {
+  position: absolute; top: calc(100% + 4px); right: 0; z-index: 20; background: var(--surface-2); border: 1px solid var(--line);
+  border-radius: var(--r-md); max-height: 320px; overflow-y: auto; min-width: 220px; padding: var(--sp-xs);
+}
+.column-menu-list label { display: flex; align-items: center; gap: var(--sp-sm); padding: var(--sp-xs) var(--sp-sm); font-size: .82rem; cursor: pointer; }
+.column-menu-list label:hover { background: var(--surface); border-radius: var(--r-sm); }
+.filter-chips { display: flex; gap: var(--sp-xs); flex-wrap: wrap; align-items: center; }

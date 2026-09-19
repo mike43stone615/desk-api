@@ -50,6 +50,25 @@ each key may call.
 7. **Key management is session-only.** Create/list/revoke need a real session;
    a key can't reach them.
 
+8. **The API Library's own web pages are served from api.deskbusiness.co**
+   (`library-ui/`, registered by `src/routes/libraryUi.ts`). It is a copy of the
+   desk_business web app (`web_app/public`): the sign-in page, the shared shell,
+   the stylesheet, the logo and the API Library page. The **only** differences:
+   the brand text reads "Desk API Library" instead of "Desk Business" (page title
+   and sign-in heading), and sign-in leads to the API Library page (`/developer`)
+   instead of the business list. Because the shell here has no business pages,
+   it also points its default route at `/developer`, uses same-origin API URLs,
+   hides the back arrow, drops the menu entries for business pages, and loads
+   only the two page modules it has. Same origin as the API means the session
+   cookie is first-party and no CORS is involved. Files are served from a fixed
+   scan of `library-ui/` at startup; no path is built from the request.
+   **Keeping the copy in sync:** `style.css`, `desk_logo.png` and
+   `pages/developer.js` should stay byte-identical to desk_business's; for
+   `app.js` and `pages/auth.js`, re-copy and re-apply the differences listed
+   above (`diff` the two to see them).
+   Password-reset and email-confirmation *links* still point at the web app
+   (`APP_BASE_URL`), so those two steps complete there.
+
 ## Operations
 
 - **Deploys do not run migrations.** Apply `0008` with `npm run migrate`
