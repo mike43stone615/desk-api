@@ -62,6 +62,22 @@ const schema = z.object({
   REGISTRY_API_ADMIN_KEY: z.string().optional(),
   MARKET_API_URL: z.string().optional(),
   MARKET_API_KEY: z.string().optional(),
+  // market-validation-api's ADMIN_API_KEY, used only to mint/revoke the
+  // per-developer keys behind API Library grants (see
+  // src/domain/gateway/broker.ts). Unset = market_validation_api grants are
+  // reported unavailable rather than failing at request time.
+  MARKET_API_ADMIN_KEY: z.string().optional(),
+  // 32 bytes as 64 hex chars (openssl rand -hex 32). Encrypts the real
+  // backend keys stored for registry_api/market_validation_api grants
+  // (src/domain/gateway/crypto.ts). Unset = only desk_api grants work.
+  // A blank value (as in .env.example) counts as unset, not as invalid.
+  GATEWAY_KEY_ENCRYPTION_SECRET: z.preprocess(
+    (v) => (v === '' ? undefined : v),
+    z
+      .string()
+      .regex(/^[0-9a-fA-F]{64}$/, 'GATEWAY_KEY_ENCRYPTION_SECRET must be 64 hex characters')
+      .optional(),
+  ),
 
   OPENAI_API_KEY: z.string().optional(),
   OPENAI_MODEL: z.string().default('gpt-4.1-mini'),
@@ -127,6 +143,8 @@ export interface AppConfig {
   registryApiAdminKey: string | undefined;
   marketApiUrl: string | undefined;
   marketApiKey: string | undefined;
+  marketApiAdminKey: string | undefined;
+  gatewayKeyEncryptionSecret: string | undefined;
   openaiApiKey: string | undefined;
   openaiModel: string;
   googlePlacesApiKey: string | undefined;
@@ -161,6 +179,8 @@ export const config: AppConfig = {
   registryApiAdminKey: env.REGISTRY_API_ADMIN_KEY ?? env.REGISTRY_API_SECRET,
   marketApiUrl: env.MARKET_API_URL,
   marketApiKey: env.MARKET_API_KEY,
+  marketApiAdminKey: env.MARKET_API_ADMIN_KEY,
+  gatewayKeyEncryptionSecret: env.GATEWAY_KEY_ENCRYPTION_SECRET,
   openaiApiKey: env.OPENAI_API_KEY,
   openaiModel: env.OPENAI_MODEL,
   googlePlacesApiKey: env.GOOGLE_PLACES_API_KEY,

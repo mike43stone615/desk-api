@@ -79,6 +79,13 @@ import {
   recommendBusinessStructuresHandler,
 } from './routes/integrations/registry';
 import { marketResearchAnalyzeHandler } from './routes/integrations/marketResearch';
+import {
+  createGatewayKeyHandler,
+  listGatewayKeysHandler,
+  listGatewayServicesHandler,
+  revokeGatewayKeyHandler,
+} from './routes/gateway';
+import { gatewayMarketProxyHandler, gatewayRegistryProxyHandler } from './routes/gatewayProxy';
 
 // Captured once at module load (= process start for all practical purposes)
 // specifically so /health can answer "is this actually the process I think
@@ -283,4 +290,16 @@ async function registerLegacyAndVersionedRoutes(instance: FastifyInstance) {
   instance.get('/integrations/compliance/requirements/search', requirementsSearchHandler);
   instance.get('/integrations/compliance/jurisdictions', jurisdictionsHandler);
   instance.post('/integrations/market-research/analyze', marketResearchAnalyzeHandler);
+
+  // ── API Library: developer key management (session-only) ─────────────────
+  instance.get('/gateway/services', listGatewayServicesHandler);
+  instance.get('/gateway/api-keys', listGatewayKeysHandler);
+  instance.post('/gateway/api-keys', createGatewayKeyHandler);
+  instance.delete('/gateway/api-keys/:id', revokeGatewayKeyHandler);
+
+  // ── API Library: key-authenticated proxies to registry-api / market-validation-api ──
+  instance.get('/gateway/registry/*', gatewayRegistryProxyHandler);
+  instance.post('/gateway/registry/*', gatewayRegistryProxyHandler);
+  instance.get('/gateway/market/*', gatewayMarketProxyHandler);
+  instance.post('/gateway/market/*', gatewayMarketProxyHandler);
 }

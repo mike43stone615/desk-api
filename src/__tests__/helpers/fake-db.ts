@@ -25,6 +25,8 @@ export function createFakeDb() {
   const memberships = new Map<string, FakeRow>(); // keyed by id
   const mutationAuditLog: FakeRow[] = [];
   const idempotencyKeys = new Map<string, FakeRow>(); // keyed by key
+  const gatewayKeys = new Map<string, FakeRow>(); // keyed by id
+  const gatewayGrants: FakeRow[] = [];
 
   function findUserByEmail(email: string): FakeRow | undefined {
     return [...users.values()].find((u) => u.email === email);
@@ -473,6 +475,80 @@ export function createFakeDb() {
       return { rows: [], rowCount: 1 };
     }
 
+    // ── API Library keys (src/domain/gateway/keys.ts) ──────────────────────
+    if (s.includes('FROM gateway_api_keys WHERE revoked_at IS NULL AND owner_user_id = $1 ORDER BY')) {
+      const rows = [...gatewayKeys.values()]
+        .filter((k) => k.owner_user_id === p[0] && !k.revoked_at)
+        .sort((a, b) => String(b.created_at).localeCompare(String(a.created_at)));
+      return { rows, rowCount: rows.length };
+    }
+    if (s.startsWith('SELECT g.api_key_id, g.service FROM gateway_api_key_grants g JOIN gateway_api_keys k')) {
+      const rows = gatewayGrants
+        .filter((g) => {
+          const k = gatewayKeys.get(g.api_key_id as string);
+          return k && k.owner_user_id === p[0] && !k.revoked_at;
+        })
+        .map((g) => ({ api_key_id: g.api_key_id, service: g.service }));
+      return { rows, rowCount: rows.length };
+    }
+    if (s.startsWith('SELECT COUNT(*) AS count FROM gateway_api_keys')) {
+      const n = [...gatewayKeys.values()].filter((k) => k.owner_user_id === p[0] && !k.revoked_at).length;
+      return { rows: [{ count: String(n) }], rowCount: 1 };
+    }
+    if (s.startsWith('INSERT INTO gateway_api_keys')) {
+      const [id, owner_user_id, label, key_hash, key_prefix] = p;
+      const row: FakeRow = {
+        id, owner_user_id, label, key_hash, key_prefix,
+        created_at: nowIso(), last_used_at: null, revoked_at: null,
+      };
+      gatewayKeys.set(id, row);
+      return { rows: [row], rowCount: 1 };
+    }
+    if (s.startsWith('INSERT INTO gateway_api_key_grants')) {
+      const [id, api_key_id, service, backend_key_id, encrypted_backend_key] = p;
+      gatewayGrants.push({ id, api_key_id, service, backend_key_id, encrypted_backend_key });
+      return { rows: [], rowCount: 1 };
+    }
+    if (s.startsWith('SELECT id, revoked_at FROM gateway_api_keys WHERE id = $1 AND owner_user_id = $2')) {
+      const k = gatewayKeys.get(p[0]);
+      const row = k && k.owner_user_id === p[1] ? [{ id: k.id, revoked_at: k.revoked_at }] : [];
+      return { rows: row, rowCount: row.length };
+    }
+    if (s.startsWith('UPDATE gateway_api_keys SET revoked_at')) {
+      const k = gatewayKeys.get(p[0]);
+      if (k) k.revoked_at = nowIso();
+      return { rows: [], rowCount: k ? 1 : 0 };
+    }
+    if (s.startsWith('SELECT service, backend_key_id FROM gateway_api_key_grants WHERE api_key_id = $1')) {
+      const rows = gatewayGrants
+        .filter((g) => g.api_key_id === p[0])
+        .map((g) => ({ service: g.service, backend_key_id: g.backend_key_id }));
+      return { rows, rowCount: rows.length };
+    }
+    if (s.startsWith('UPDATE gateway_api_key_grants SET encrypted_backend_key = NULL')) {
+      for (const g of gatewayGrants) if (g.api_key_id === p[0]) g.encrypted_backend_key = null;
+      return { rows: [], rowCount: 1 };
+    }
+    if (s.startsWith('SELECT id, owner_user_id, revoked_at FROM gateway_api_keys WHERE key_hash = $1')) {
+      const k = [...gatewayKeys.values()].find((x) => x.key_hash === p[0]);
+      const rows = k ? [{ id: k.id, owner_user_id: k.owner_user_id, revoked_at: k.revoked_at }] : [];
+      return { rows, rowCount: rows.length };
+    }
+    if (s.startsWith('SELECT service FROM gateway_api_key_grants WHERE api_key_id = $1')) {
+      const rows = gatewayGrants.filter((g) => g.api_key_id === p[0]).map((g) => ({ service: g.service }));
+      return { rows, rowCount: rows.length };
+    }
+    if (s.startsWith('UPDATE gateway_api_keys SET last_used_at')) {
+      const k = gatewayKeys.get(p[0]);
+      if (k) k.last_used_at = nowIso();
+      return { rows: [], rowCount: k ? 1 : 0 };
+    }
+    if (s.startsWith('SELECT encrypted_backend_key FROM gateway_api_key_grants WHERE api_key_id = $1 AND service = $2')) {
+      const g = gatewayGrants.find((x) => x.api_key_id === p[0] && x.service === p[1]);
+      const rows = g ? [{ encrypted_backend_key: g.encrypted_backend_key }] : [];
+      return { rows, rowCount: rows.length };
+    }
+
     // ── transaction control (setup.ts's completeDraftHandler) ─────────────
     if (s === 'BEGIN' || s === 'COMMIT' || s === 'ROLLBACK') return { rows: [], rowCount: 0 };
 
@@ -499,5 +575,7 @@ export function createFakeDb() {
     memberships,
     mutationAuditLog,
     idempotencyKeys,
+    gatewayKeys,
+    gatewayGrants,
   };
 }

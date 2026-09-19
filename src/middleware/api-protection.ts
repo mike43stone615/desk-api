@@ -8,8 +8,10 @@
 // session + email-allowlist, not a shared secret header.
 import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { randomUUID } from 'crypto';
+import { createHash } from 'crypto';
 import { getRedis } from './redis-client';
 import { config } from '../config';
+import { GATEWAY_KEY_PREFIX } from '../domain/gateway/keys';
 
 interface RateLimitResult {
   allowed: boolean;
@@ -207,6 +209,19 @@ export function registerApiProtection(app: FastifyInstance) {
     const result = await redisCheck(bucketKey);
     if (!result.allowed) {
       return reply.status(429).send({ error: result.reason, retryAfterSeconds: 60 });
+    }
+
+    // An API Library key gets its OWN bucket on top of the IP one (both must
+    // pass): one developer's key is limited no matter how many IPs it's used
+    // from, and a shared IP (a cloud host) can't let one key starve another.
+    // Keyed by a hash of whatever was presented, so an invalid key still costs
+    // a bucket entry but the header value itself is never stored.
+    const presentedKey = request.headers['x-api-key'];
+    if (typeof presentedKey === 'string' && presentedKey.startsWith(GATEWAY_KEY_PREFIX)) {
+      const keyResult = await redisCheck(`key:${createHash('sha256').update(presentedKey).digest('hex')}`);
+      if (!keyResult.allowed) {
+        return reply.status(429).send({ error: keyResult.reason, retryAfterSeconds: 60 });
+      }
     }
 
     reply.header('X-RateLimit-Limit', String(config.rateLimitPerMinute));

@@ -56,6 +56,11 @@ export const OPENAPI_SPEC = {
     { name: 'Admin', description: 'Table browser + upstream aggregation (email-allowlisted admins only)' },
     { name: 'Functions', description: 'Business-setup-wizard support endpoints' },
     { name: 'Integrations', description: 'Compliance-OS / registry-api / market-validation-api proxies' },
+    {
+      name: 'API Library',
+      description:
+        'Developer API keys. Sign in, create a key, and choose which APIs it can call. Send the key as an x-api-key header. Key management itself requires a signed-in session.',
+    },
     { name: 'System', description: 'Health and metrics' },
   ],
   components: {
@@ -64,6 +69,13 @@ export const OPENAPI_SPEC = {
         type: 'http',
         scheme: 'bearer',
         description: 'Opaque session token from POST /auth/signin, sent as Authorization: Bearer <token>.',
+      },
+      ApiLibraryKey: {
+        type: 'apiKey',
+        in: 'header',
+        name: 'x-api-key',
+        description:
+          "An API Library key (deskgw_...) created under /gateway/api-keys. On the Desk API it can only call the read-only endpoints marked with this scheme, and only ever returns the key owner's own data.",
       },
     },
     schemas: {
@@ -199,7 +211,7 @@ export const OPENAPI_SPEC = {
       post: { tags: ['Auth'], summary: 'Update password while authenticated', security: [{ SessionToken: [] }], responses: { '200': { description: 'OK' } } },
     },
     '/setup/drafts': {
-      get: { tags: ['Setup'], summary: 'List the caller\'s setup drafts', security: [{ SessionToken: [] }], responses: { '200': { description: 'OK' } } },
+      get: { tags: ['Setup'], summary: 'List the caller\'s setup drafts', security: [{ SessionToken: [] }, { ApiLibraryKey: [] }], responses: { '200': { description: 'OK' } } },
       post: {
         tags: ['Setup'],
         summary: 'Create a new setup draft (max 5 incomplete per user)',
@@ -209,7 +221,7 @@ export const OPENAPI_SPEC = {
       },
     },
     '/setup/drafts/{id}': {
-      get: { tags: ['Setup'], summary: 'Get a draft', security: [{ SessionToken: [] }], responses: { '200': { description: 'OK' }, '404': { description: 'Not found' } } },
+      get: { tags: ['Setup'], summary: 'Get a draft', security: [{ SessionToken: [] }, { ApiLibraryKey: [] }], responses: { '200': { description: 'OK' }, '404': { description: 'Not found' } } },
       patch: { tags: ['Setup'], summary: 'Update a draft (256KB cap)', security: [{ SessionToken: [] }], responses: { '200': { description: 'OK' }, '413': { description: 'Draft too large' } } },
       delete: { tags: ['Setup'], summary: 'Delete a draft', security: [{ SessionToken: [] }], responses: { '200': { description: 'OK' }, '404': { description: 'Not found' } } },
     },
@@ -223,7 +235,7 @@ export const OPENAPI_SPEC = {
       },
     },
     '/setup/businesses': {
-      get: { tags: ['Setup'], summary: 'List businesses the caller belongs to', security: [{ SessionToken: [] }], responses: { '200': { description: 'OK' } } },
+      get: { tags: ['Setup'], summary: 'List businesses the caller belongs to', security: [{ SessionToken: [] }, { ApiLibraryKey: [] }], responses: { '200': { description: 'OK' } } },
     },
     '/setup/businesses/{id}/members': {
       get: { tags: ['Setup'], summary: 'List a business\'s members', security: [{ SessionToken: [] }], responses: { '200': { description: 'OK' } } },
@@ -412,6 +424,77 @@ export const OPENAPI_SPEC = {
         summary: 'Proxies to market-validation-api\'s POST /research/analyze',
         description: 'Returns 503 (not a locally-computed fallback score) if market-validation-api is unreachable, misconfigured, or times out.',
         responses: { '200': { description: 'Market-validation score' }, '503': { description: 'Market validation is temporarily unavailable.' } },
+      },
+    },
+
+    '/gateway/services': {
+      get: {
+        tags: ['API Library'],
+        summary: 'List the APIs available to enable on a key',
+        security: [{ SessionToken: [] }],
+        responses: { '200': { description: 'Each API with a description and whether it is currently available' } },
+      },
+    },
+    '/gateway/api-keys': {
+      get: {
+        tags: ['API Library'],
+        summary: 'List your active API keys and the APIs each one can call',
+        security: [{ SessionToken: [] }],
+        responses: { '200': { description: 'Keys (never including the secret itself)' } },
+      },
+      post: {
+        tags: ['API Library'],
+        summary: 'Create an API key',
+        description:
+          'Body: { "label": string (max 64), "services": ["desk_api" | "registry_api" | "market_validation_api", ...] }. The secret is returned exactly once, in this response. At most 10 active keys per account.',
+        security: [{ SessionToken: [] }],
+        responses: {
+          '201': { description: 'Created; includes the one-time plaintext key' },
+          '400': { description: 'Invalid label or services' },
+          '403': { description: 'Email not confirmed' },
+          '409': { description: 'Active key limit reached' },
+          '502': { description: 'An upstream API could not issue access; nothing was created' },
+          '503': { description: 'A selected API is not available right now' },
+        },
+      },
+    },
+    '/gateway/api-keys/{id}': {
+      delete: {
+        tags: ['API Library'],
+        summary: 'Revoke an API key',
+        description: 'Takes effect immediately for every API the key was enabled on.',
+        security: [{ SessionToken: [] }],
+        parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }],
+        responses: { '204': { description: 'Revoked' }, '404': { description: 'Not found' }, '409': { description: 'Already revoked' } },
+      },
+    },
+    '/gateway/registry/{path}': {
+      post: {
+        tags: ['API Library'],
+        summary: 'Registry API (requires a key with the Registry API enabled)',
+        description:
+          'Forwards to registry-api. Allowed: POST functions/v1/check-business-name-availability, check-dba-name-availability, check-trademark-availability, check-name-multi-state, check-names-batch; POST business-structures/recommend. Anything else is 404.',
+        security: [{ ApiLibraryKey: [] }],
+        parameters: [{ name: 'path', in: 'path', required: true, schema: { type: 'string' } }],
+        responses: { '200': { description: 'Upstream response, passed through' }, '401': { description: 'Missing or invalid key' }, '403': { description: 'Key not enabled for this API' }, '404': { description: 'Unknown endpoint' } },
+      },
+      get: {
+        tags: ['API Library'],
+        summary: 'Registry API (requires a key with the Registry API enabled)',
+        description: 'Allowed: GET functions/v1/registry-sync-status, business-structures, business-structures/{slug}.',
+        security: [{ ApiLibraryKey: [] }],
+        parameters: [{ name: 'path', in: 'path', required: true, schema: { type: 'string' } }],
+        responses: { '200': { description: 'Upstream response, passed through' }, '401': { description: 'Missing or invalid key' }, '403': { description: 'Key not enabled for this API' }, '404': { description: 'Unknown endpoint' } },
+      },
+    },
+    '/gateway/market/{path}': {
+      post: {
+        tags: ['API Library'],
+        summary: 'Market Validation API (requires a key with it enabled)',
+        description: 'Allowed: POST research/analyze. Anything else is 404.',
+        security: [{ ApiLibraryKey: [] }],
+        parameters: [{ name: 'path', in: 'path', required: true, schema: { type: 'string' } }],
+        responses: { '200': { description: 'Upstream response, passed through' }, '401': { description: 'Missing or invalid key' }, '403': { description: 'Key not enabled for this API' }, '404': { description: 'Unknown endpoint' } },
       },
     },
   },

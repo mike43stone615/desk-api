@@ -5,7 +5,8 @@
 import { timingSafeEqual } from 'crypto';
 import type { FastifyReply, FastifyRequest } from 'fastify';
 import { HttpError } from './http-error';
-import { authService } from '../infrastructure/auth';
+import { authDb, authService } from '../infrastructure/auth';
+import { gatewayApiKeys, looksLikeGatewayKey, type VerifiedGatewayKey } from '../domain/gateway/keys';
 import { SESSION_COOKIE_NAME } from '../infrastructure/auth/session-cookie';
 import { config } from '../config';
 import type { User } from '../interfaces/database';
@@ -13,7 +14,50 @@ import type { User } from '../interfaces/database';
 declare module 'fastify' {
   interface FastifyRequest {
     currentUser?: User;
+    /** Set only when the request authenticated with an API Library key (not a session). */
+    gatewayKey?: VerifiedGatewayKey;
   }
+}
+
+/**
+ * The ONLY desk-api routes an API Library key (with the desk_api grant) may
+ * call. Deliberately narrow and read-only: a leaked key must not be able to
+ * change the account (password, members, drafts, businesses), mint more keys,
+ * or reach /admin. Everything else answers 403 for a key even though the same
+ * route works for a signed-in session. Widening this is a security decision,
+ * so it lives in one readable list. Keys are "METHOD /pattern" with the /v1
+ * prefix stripped.
+ */
+export const GATEWAY_KEY_ALLOWED_ROUTES: ReadonlySet<string> = new Set([
+  'GET /auth/session',
+  'GET /setup/drafts',
+  'GET /setup/drafts/:id',
+  'GET /setup/businesses',
+  'GET /setup/businesses/:id/members',
+  'GET /setup/invites',
+]);
+
+function gatewayRouteKey(request: FastifyRequest): string | null {
+  const pattern = request.routeOptions?.url;
+  if (!pattern) return null;
+  const unversioned = pattern === '/v1' ? '/' : pattern.startsWith('/v1/') ? pattern.slice(3) : pattern;
+  return `${request.method} ${unversioned}`;
+}
+
+async function authenticateWithGatewayKey(request: FastifyRequest, apiKey: string): Promise<void> {
+  const verified = await gatewayApiKeys.verify(apiKey);
+  if (!verified) throw new HttpError(401, 'Invalid or revoked API key.');
+  if (!verified.services.has('desk_api')) {
+    throw new HttpError(403, 'This API key is not enabled for the Desk API.');
+  }
+  const routeKey = gatewayRouteKey(request);
+  if (!routeKey || !GATEWAY_KEY_ALLOWED_ROUTES.has(routeKey)) {
+    throw new HttpError(403, 'This API key cannot call this endpoint.');
+  }
+  const owner = await authDb.findUserById(verified.ownerUserId);
+  if (!owner) throw new HttpError(401, 'Invalid or revoked API key.');
+  request.currentUser = owner;
+  request.gatewayKey = verified;
 }
 
 export function extractBearerToken(request: FastifyRequest): string | null {
@@ -33,7 +77,11 @@ export function extractSessionToken(request: FastifyRequest): string | null {
 /** Fastify preHandler — resolves the calling user onto request.currentUser, or throws 401. */
 export async function requireAuth(request: FastifyRequest, _reply: FastifyReply): Promise<void> {
   const token = extractSessionToken(request);
-  if (!token) throw new HttpError(401, 'Authentication required.');
+  if (!token) {
+    const apiKey = request.headers['x-api-key'];
+    if (looksLikeGatewayKey(apiKey)) return authenticateWithGatewayKey(request, apiKey);
+    throw new HttpError(401, 'Authentication required.');
+  }
   const user = await authService.verifySession(token);
   if (!user) throw new HttpError(401, 'Session expired or invalid.');
   request.currentUser = user;
@@ -64,6 +112,9 @@ export async function requireConfirmedEmail(
 export async function requireAdmin(request: FastifyRequest, _reply: FastifyReply): Promise<void> {
   const user = request.currentUser;
   if (!user) throw new HttpError(401, 'Authentication required.');
+  // Belt and braces: GATEWAY_KEY_ALLOWED_ROUTES already keeps keys off /admin,
+  // but admin access must never be reachable through an API key regardless.
+  if (request.gatewayKey) throw new HttpError(403, 'Admin access is not available with an API key.');
   const email = user.email.trim().toLowerCase();
   if (!config.adminEmails.includes(email)) throw new HttpError(403, 'Admin access required.');
 }
