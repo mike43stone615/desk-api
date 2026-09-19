@@ -445,18 +445,24 @@ export function createFakeDb() {
     }
 
     // ── idempotency keys ─────────────────────────────────────────────────
+    // (DELETE first: its text also contains "FROM idempotency_keys WHERE key = $1".)
+    if (s.startsWith('DELETE FROM idempotency_keys WHERE key = $1')) {
+      idempotencyKeys.delete(p[0]);
+      return { rows: [], rowCount: 1 };
+    }
     if (s.includes('FROM idempotency_keys WHERE key = $1')) {
       const row = idempotencyKeys.get(p[0]);
       return { rows: row ? [row] : [], rowCount: row ? 1 : 0 };
     }
     if (s.startsWith('INSERT INTO idempotency_keys') && s.includes('ON CONFLICT (key) DO NOTHING')) {
-      const [key, request_hash, response_status, response_body, expires_at] = p;
+      // Same shape as the real INSERT: response_status/response_body are literal NULLs.
+      const [key, request_hash, expires_at] = p;
       if (idempotencyKeys.has(key)) return { rows: [], rowCount: 0 };
       idempotencyKeys.set(key, {
         key,
         request_hash,
-        response_status,
-        response_body,
+        response_status: null,
+        response_body: null,
         expires_at,
         created_at: new Date().toISOString(),
       });
@@ -468,10 +474,6 @@ export function createFakeDb() {
       if (!row) return { rows: [], rowCount: 0 };
       row.response_status = response_status;
       row.response_body = response_body;
-      return { rows: [], rowCount: 1 };
-    }
-    if (s.startsWith('DELETE FROM idempotency_keys WHERE key = $1')) {
-      idempotencyKeys.delete(p[0]);
       return { rows: [], rowCount: 1 };
     }
 

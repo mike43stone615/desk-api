@@ -32,13 +32,65 @@ const publicUserSchema = {
 
 const okSchema = { type: 'object', properties: { ok: { type: 'boolean' } } };
 
+// List endpoints: `?limit=` (1-200, default 100) and `?offset=`; the body says whether more remain.
+const pageParameters = [
+  { name: 'limit', in: 'query', required: false, schema: { type: 'integer', minimum: 1, maximum: 200, default: 100 } },
+  { name: 'offset', in: 'query', required: false, schema: { type: 'integer', minimum: 0, default: 0 } },
+];
+
+// ── API Library proxy endpoints ─────────────────────────────────────────────
+// One entry per endpoint a key can reach through /gateway/registry and
+// /gateway/market (the allowlist in src/routes/gatewayProxy.ts; the test in
+// gateway.test.ts fails if the two drift apart).
+const proxyResponses = {
+  '200': { description: "The API's own answer, passed through" },
+  '400': { description: 'The input was not valid (same error body as every other error)' },
+  '401': { description: 'Missing, invalid or revoked key' },
+  '403': { description: 'This key is not enabled for this API' },
+  '404': { description: 'No such endpoint' },
+  '405': { description: 'Wrong HTTP method for this endpoint (see the Allow header)' },
+  '429': { description: 'Too many requests (see Retry-After)' },
+  '502': { description: 'The upstream API could not be reached or refused the request' },
+};
+
+function proxyPath(method: 'get' | 'post', summary: string, description?: string, deprecatedAlias?: string) {
+  return {
+    [method]: {
+      tags: ['API Library'],
+      summary,
+      description: [description, deprecatedAlias ? `The older path ${deprecatedAlias} still works but is deprecated.` : '']
+        .filter(Boolean)
+        .join(' '),
+      security: [{ ApiLibraryKey: [] }],
+      responses: proxyResponses,
+    },
+  };
+}
+
+const REGISTRY = '/gateway/registry';
+const MARKET = '/gateway/market';
+const gatewayProxyPaths = {
+  [`${REGISTRY}/name-availability`]: proxyPath('post', 'Is a business name available in a state?', 'Body: { "businessName", "stateOfFormation" }.', `${REGISTRY}/functions/v1/check-business-name-availability`),
+  [`${REGISTRY}/dba-availability`]: proxyPath('post', 'Is a DBA (assumed) name available in a state?', 'Body: { "businessName", "stateOfFormation" }.', `${REGISTRY}/functions/v1/check-dba-name-availability`),
+  [`${REGISTRY}/trademark-availability`]: proxyPath('post', 'Is a name free of trademark conflicts?', 'Body: { "businessName" }.', `${REGISTRY}/functions/v1/check-trademark-availability`),
+  [`${REGISTRY}/multi-state-availability`]: proxyPath('post', 'Check one name across up to 15 states', 'Body: { "businessName", "states": [...] }.', `${REGISTRY}/functions/v1/check-name-multi-state`),
+  [`${REGISTRY}/batch-availability`]: proxyPath('post', 'Check up to 10 names in one state', 'Body: { "names": [...], "stateOfFormation" }.', `${REGISTRY}/functions/v1/check-names-batch`),
+  [`${REGISTRY}/name-trend`]: proxyPath('post', 'How crowded is a name? Recent filings for it', 'Body: { "businessName", "stateOfFormation"? }.', `${REGISTRY}/functions/v1/check-name-trend`),
+  [`${REGISTRY}/sync-status`]: proxyPath('get', "How fresh is each state's registry data?", undefined, `${REGISTRY}/functions/v1/registry-sync-status`),
+  [`${REGISTRY}/business-structures`]: proxyPath('get', 'List legal business structures', 'Optional query: category, family, country, q.'),
+  [`${REGISTRY}/business-structures/{slug}`]: proxyPath('get', 'One business structure by slug'),
+  [`${REGISTRY}/business-structures/recommend`]: proxyPath('post', 'Recommend business structures for a situation', 'Body: the owner count, liability and tax preferences.'),
+  [`${MARKET}/research/analyze`]: proxyPath('post', 'Score a business idea', 'Body: { "businessIdea", "formationState", ...optional refinements }. Text fields are limited to 2000 characters (200 for most). Can take up to a minute.'),
+  [`${MARKET}/scoring-methodology`]: proxyPath('get', 'How each score is calculated'),
+};
+
 export const OPENAPI_SPEC = {
   openapi: '3.0.3',
   info: {
     title: 'Desk API',
     version: '2.0.0',
     description:
-      'Desk business-management API — self-service email/password auth, business-setup drafts/businesses/memberships, and an admin table browser aggregating this service plus registry-api and compliance-os. Rewritten from the original Hono/Cloudflare Workers/D1 implementation onto Fastify/TypeScript/Postgres.',
+      'Desk business-management API — self-service email/password auth, business-setup drafts/businesses/memberships, and an admin table browser aggregating this service plus registry-api and compliance-os. Rewritten from the original Hono/Cloudflare Workers/D1 implementation onto Fastify/TypeScript/Postgres.\n\n**Errors** always use one shape (RFC 7807: type, title, status, detail, instance; plus `error`, a copy of `detail`). An unknown URL is 404; a known URL with the wrong method is 405 with an `Allow` header. **API Library keys** are for servers: browsers are not allowed to send the `x-api-key` header cross-site, so keep keys out of web pages.',
   },
   // Every path below is registered twice in src/app.ts — once unprefixed
   // (legacy, kept working identically for the current Flutter client) and
@@ -151,6 +203,7 @@ export const OPENAPI_SPEC = {
       post: {
         tags: ['Auth'],
         summary: 'Sign in with email + password',
+        description: 'Sets the httpOnly session cookie and returns the session token in the body. A browser app can send `X-Session-Transport: cookie` to receive only the user, so its JavaScript never holds the token.',
         requestBody: {
           required: true,
           content: {
@@ -235,10 +288,10 @@ export const OPENAPI_SPEC = {
       },
     },
     '/setup/businesses': {
-      get: { tags: ['Setup'], summary: 'List businesses the caller belongs to', security: [{ SessionToken: [] }, { ApiLibraryKey: [] }], responses: { '200': { description: 'OK' } } },
+      get: { tags: ['Setup'], summary: 'List businesses the caller belongs to', security: [{ SessionToken: [] }, { ApiLibraryKey: [] }], parameters: pageParameters, responses: { '200': { description: 'OK — `hasMore` says whether another page exists' } } },
     },
     '/setup/businesses/{id}/members': {
-      get: { tags: ['Setup'], summary: 'List a business\'s members', security: [{ SessionToken: [] }], responses: { '200': { description: 'OK' } } },
+      get: { tags: ['Setup'], summary: 'List a business\'s members', security: [{ SessionToken: [] }, { ApiLibraryKey: [] }], parameters: pageParameters, responses: { '200': { description: 'OK — `hasMore` says whether another page exists' } } },
       post: {
         tags: ['Setup'],
         summary: 'Invite a member — pending until they accept (owner/admin only)',
@@ -267,7 +320,7 @@ export const OPENAPI_SPEC = {
       },
     },
     '/setup/invites': {
-      get: { tags: ['Setup'], summary: 'List the caller\'s own pending invites', security: [{ SessionToken: [] }], responses: { '200': { description: 'OK' } } },
+      get: { tags: ['Setup'], summary: 'List the caller\'s own pending invites', security: [{ SessionToken: [] }, { ApiLibraryKey: [] }], parameters: pageParameters, responses: { '200': { description: 'OK — `hasMore` says whether another page exists' } } },
     },
     '/setup/invites/{membershipId}/accept': {
       post: { tags: ['Setup'], summary: 'Accept a pending invite (must be the invited user)', security: [{ SessionToken: [] }], responses: { '200': { description: 'OK' }, '404': { description: 'Invite not found' } } },
@@ -448,6 +501,7 @@ export const OPENAPI_SPEC = {
         description:
           'Body: { "label": string (max 64), "services": ["desk_api" | "registry_api" | "market_validation_api", ...] }. The secret is returned exactly once, in this response. At most 10 active keys per account.',
         security: [{ SessionToken: [] }],
+        parameters: [{ name: 'Idempotency-Key', in: 'header', required: false, schema: { type: 'string' }, description: 'Protects against creating two keys when a request is retried. The secret is never stored for replay: a retry with the same key answers 409 ("already created") instead of showing the key again.' }],
         responses: {
           '201': { description: 'Created; includes the one-time plaintext key' },
           '400': { description: 'Invalid label or services' },
@@ -468,42 +522,42 @@ export const OPENAPI_SPEC = {
         responses: { '204': { description: 'Revoked' }, '404': { description: 'Not found' }, '409': { description: 'Already revoked' } },
       },
     },
-    '/gateway/registry/{path}': {
-      post: {
-        tags: ['API Library'],
-        summary: 'Registry API (requires a key with the Registry API enabled)',
-        description:
-          'Forwards to registry-api. Allowed: POST functions/v1/check-business-name-availability, check-dba-name-availability, check-trademark-availability, check-name-multi-state, check-names-batch, check-name-trend; POST business-structures/recommend. Anything else is 404.',
-        security: [{ ApiLibraryKey: [] }],
-        parameters: [{ name: 'path', in: 'path', required: true, schema: { type: 'string' } }],
-        responses: { '200': { description: 'Upstream response, passed through' }, '401': { description: 'Missing or invalid key' }, '403': { description: 'Key not enabled for this API' }, '404': { description: 'Unknown endpoint' } },
-      },
-      get: {
-        tags: ['API Library'],
-        summary: 'Registry API (requires a key with the Registry API enabled)',
-        description: 'Allowed: GET functions/v1/registry-sync-status, business-structures, business-structures/{slug}.',
-        security: [{ ApiLibraryKey: [] }],
-        parameters: [{ name: 'path', in: 'path', required: true, schema: { type: 'string' } }],
-        responses: { '200': { description: 'Upstream response, passed through' }, '401': { description: 'Missing or invalid key' }, '403': { description: 'Key not enabled for this API' }, '404': { description: 'Unknown endpoint' } },
-      },
-    },
-    '/gateway/market/{path}': {
-      get: {
-        tags: ['API Library'],
-        summary: 'Market Validation API reference (requires a key with it enabled)',
-        description: 'Allowed: GET scoring-methodology (how each score is calculated). Anything else is 404.',
-        security: [{ ApiLibraryKey: [] }],
-        parameters: [{ name: 'path', in: 'path', required: true, schema: { type: 'string' } }],
-        responses: { '200': { description: 'Upstream response, passed through' }, '401': { description: 'Missing or invalid key' }, '403': { description: 'Key not enabled for this API' }, '404': { description: 'Unknown endpoint' } },
-      },
-      post: {
-        tags: ['API Library'],
-        summary: 'Market Validation API (requires a key with it enabled)',
-        description: 'Allowed: POST research/analyze. Anything else is 404.',
-        security: [{ ApiLibraryKey: [] }],
-        parameters: [{ name: 'path', in: 'path', required: true, schema: { type: 'string' } }],
-        responses: { '200': { description: 'Upstream response, passed through' }, '401': { description: 'Missing or invalid key' }, '403': { description: 'Key not enabled for this API' }, '404': { description: 'Unknown endpoint' } },
-      },
-    },
+    ...gatewayProxyPaths,
   },
 };
+
+/**
+ * The public subset for developers: only what an API Library key or the key
+ * screens use. No admin, no auth internals, no legacy proxies. Served without
+ * a key at GET /v1/gateway/openapi.json.
+ */
+type SpecOperation = { security?: Array<Record<string, unknown>> };
+
+function buildLibrarySpec() {
+  const paths: Record<string, Record<string, unknown>> = {};
+  for (const [path, operations] of Object.entries(OPENAPI_SPEC.paths as Record<string, Record<string, SpecOperation>>)) {
+    const kept: Record<string, unknown> = {};
+    for (const [method, op] of Object.entries(operations)) {
+      const usesKey = (op.security ?? []).some((entry) => 'ApiLibraryKey' in entry);
+      if (path.startsWith('/gateway/') || usesKey) kept[method] = op;
+    }
+    if (Object.keys(kept).length > 0) paths[path] = kept;
+  }
+  return {
+    openapi: OPENAPI_SPEC.openapi,
+    info: {
+      title: 'Desk API Library',
+      version: OPENAPI_SPEC.info.version,
+      description: OPENAPI_SPEC.info.description,
+    },
+    servers: [{ url: '/v1', description: 'Versioned base path' }],
+    tags: [
+      { name: 'API Library', description: 'Keys, and the Registry and Market Validation APIs they unlock' },
+      { name: 'Setup', description: 'Read-only access to your own businesses and drafts (Desk API)' },
+    ],
+    components: OPENAPI_SPEC.components,
+    paths,
+  };
+}
+
+export const LIBRARY_OPENAPI_SPEC = buildLibrarySpec();

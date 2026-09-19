@@ -11,9 +11,15 @@ import { gatewayApiKeys, GatewayKeyError } from '../domain/gateway/keys';
 import { BrokerError } from '../domain/gateway/broker';
 import { getServiceCatalog } from '../domain/gateway/services';
 import { CreateGatewayKeySchema } from '../validators/gateway';
+import { LIBRARY_OPENAPI_SPEC } from '../openapi';
 
 function auditKey(request: FastifyRequest, event: string, meta: Record<string, unknown>) {
   request.log.info({ level: 'audit', event, requestId: request.id, ts: new Date().toISOString(), ...meta });
+}
+
+/** The developer-facing API description. Public: it documents only what a key can do. */
+export async function libraryOpenApiHandler(_request: FastifyRequest, reply: FastifyReply) {
+  return reply.send(LIBRARY_OPENAPI_SPEC);
 }
 
 export async function listGatewayServicesHandler(request: FastifyRequest, reply: FastifyReply) {

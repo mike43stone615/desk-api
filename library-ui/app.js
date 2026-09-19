@@ -125,9 +125,9 @@ export function passwordValidationMessage(password) {
 // AuthController.forceSignOutLocally() wired to onSessionExpired in the
 // Flutter app's main.dart. A 401 while not signed in (e.g. a bad sign-in
 // attempt) is just a normal on-screen error.
-export async function api(path, { method = 'GET', body, timeoutMs = 15000 } = {}) {
+export async function api(path, { method = 'GET', body, headers: extraHeaders = {}, timeoutMs = 15000 } = {}) {
   const wasSignedIn = Boolean(state.user);
-  const headers = {};
+  const headers = { ...extraHeaders };
   if (body !== undefined) headers['content-type'] = 'application/json';
 
   const controller = new AbortController();
@@ -203,7 +203,9 @@ export async function restoreSession() {
 
 export async function signIn(email, password) {
   try {
-    const res = await api('/auth/signin', { method: 'POST', body: { email, password } });
+    // Cookie transport: this app lives on the httpOnly cookie, so ask the server not to
+    // put the session token in the response body where this page's JavaScript could read it.
+    const res = await api('/auth/signin', { method: 'POST', body: { email, password }, headers: { 'x-session-transport': 'cookie' } });
     state.pendingPasswordResetEmail = null;
     state.user = res.user;
   } catch (err) {

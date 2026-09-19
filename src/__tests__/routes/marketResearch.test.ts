@@ -65,6 +65,27 @@ describe('POST /integrations/market-research/analyze', () => {
     expect(JSON.parse(res.body)).toEqual({ overallScore: 70 });
   });
 
+  it('turns an upstream validation rejection into a 400 with the reason, not a "service unavailable"', async () => {
+    global.fetch = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ detail: 'businessIdea must be at most 2000 characters' }), {
+        status: 400,
+        headers: { 'content-type': 'application/problem+json' },
+      }),
+    ) as unknown as typeof fetch;
+
+    const res = await app.inject({ method: 'POST', url: '/integrations/market-research/analyze', payload: BODY });
+    expect(res.statusCode).toBe(400);
+    expect(JSON.parse(res.body).detail).toBe('businessIdea must be at most 2000 characters');
+  });
+
+  it('forwards the request id so the call can be traced into market-validation-api', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response('{}', { status: 200 }));
+    global.fetch = fetchMock as unknown as typeof fetch;
+    const res = await app.inject({ method: 'POST', url: '/integrations/market-research/analyze', payload: BODY });
+    const sent = (fetchMock.mock.calls[0][1] as { headers: Record<string, string> }).headers;
+    expect(sent['x-request-id']).toBe(res.headers['x-request-id']);
+  });
+
   it('returns 503 (not a crash, not a computed fallback) when the upstream call throws', async () => {
     global.fetch = vi.fn().mockRejectedValue(new Error('ECONNREFUSED')) as unknown as typeof fetch;
 

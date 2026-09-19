@@ -22,6 +22,7 @@ import { pool } from './db';
 import { config } from './config';
 import { getRedis } from './middleware/redis-client';
 import { registerErrorHandler } from './middleware/http-error';
+import { registerNotFound } from './middleware/not-found';
 import { registerApiProtection } from './middleware/api-protection';
 import { registerIdempotency } from './middleware/idempotency';
 import { requireMetricsDocsKey } from './middleware/auth';
@@ -81,6 +82,7 @@ import {
 import { marketResearchAnalyzeHandler } from './routes/integrations/marketResearch';
 import {
   createGatewayKeyHandler,
+  libraryOpenApiHandler,
   listGatewayKeysHandler,
   listGatewayServicesHandler,
   revokeGatewayKeyHandler,
@@ -106,10 +108,28 @@ export async function buildApp(): Promise<FastifyInstance> {
     logger: { level: config.logLevel },
     requestIdHeader: 'x-request-id',
     genReqId: () => randomUUID(),
+    // /setup/drafts/ and //health reach the same handler as /setup/drafts and
+    // /health, instead of one being a 404 and another matching a :param route
+    // with an empty value.
+    ignoreTrailingSlash: true,
+    ignoreDuplicateSlashes: true,
   });
+
+  // Must come before any route is registered: it records them for 405 answers.
+  registerNotFound(app);
 
   app.addHook('onRequest', async (request, reply) => {
     reply.header('x-request-id', request.id);
+  });
+
+  // API answers (JSON, including errors) carry account data or a one-time key,
+  // so nothing between here and the client may store them. Static pages set
+  // their own Cache-Control and are not JSON.
+  app.addHook('onSend', async (_request, reply, payload) => {
+    if (!reply.hasHeader('cache-control') && String(reply.getHeader('content-type') ?? '').includes('json')) {
+      reply.header('cache-control', 'no-store');
+    }
+    return payload;
   });
 
   // Password-reset and email-confirmation requests intentionally return 200
@@ -127,8 +147,12 @@ export async function buildApp(): Promise<FastifyInstance> {
   await app.register(cors, {
     origin: config.corsOrigins,
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization', 'Idempotency-Key'],
+    // No x-api-key on purpose: API Library keys are for servers. A key placed in
+    // browser JavaScript is visible to every visitor of that page.
+    allowedHeaders: ['Content-Type', 'Authorization', 'Idempotency-Key', 'X-Session-Transport'],
     credentials: true,
+    // Browsers may reuse a preflight answer instead of asking before every call.
+    maxAge: 600,
   });
 
   // Backs the httpOnly session cookie (see routes/auth.ts) that web_app uses
@@ -153,17 +177,11 @@ export async function buildApp(): Promise<FastifyInstance> {
   // this same origin. See routes/libraryUi.ts.
   registerLibraryUi(app);
 
-  // OpenAPI spec + Swagger UI — publicly reachable by default, optionally
-  // gated behind METRICS_DOCS_API_KEY (see middleware/auth.ts's
-  // requireMetricsDocsKey, a no-op unless that env var is set).
-  app.get(
-    '/docs/openapi.json',
-    { preHandler: requireMetricsDocsKey },
-    async (_req, reply) => reply.send(OPENAPI_SPEC),
-  );
-  app.get('/docs', { preHandler: requireMetricsDocsKey }, async (_req, reply) => {
-    reply.header('Content-Type', 'text/html; charset=utf-8');
-    return reply.send(`<!DOCTYPE html>
+  // OpenAPI spec + Swagger UI — optionally gated behind METRICS_DOCS_API_KEY
+  // (see middleware/auth.ts's requireMetricsDocsKey, a no-op unless that env var
+  // is set). Ops routes exist both plain and under /v1 so a client that always
+  // uses the versioned base never has to special-case them.
+  const docsHtml = (base: string) => `<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="utf-8"/>
@@ -174,11 +192,10 @@ export async function buildApp(): Promise<FastifyInstance> {
   <div id="swagger-ui"></div>
   <script src="https://unpkg.com/swagger-ui-dist@5/swagger-ui-bundle.js"></script>
   <script>
-    SwaggerUIBundle({ url: '/docs/openapi.json', dom_id: '#swagger-ui', presets: [SwaggerUIBundle.presets.apis, SwaggerUIBundle.SwaggerUIStandalonePreset] });
+    SwaggerUIBundle({ url: '${base}/docs/openapi.json', dom_id: '#swagger-ui', presets: [SwaggerUIBundle.presets.apis, SwaggerUIBundle.SwaggerUIStandalonePreset] });
   </script>
 </body>
-</html>`);
-  });
+</html>`;
 
   async function getReadiness(): Promise<{ ok: boolean; checks: Record<string, 'ok' | 'error'> }> {
     const checks: Record<string, 'ok' | 'error'> = {};
@@ -203,20 +220,37 @@ export async function buildApp(): Promise<FastifyInstance> {
     return { ok, checks };
   }
 
-  app.get('/health/live', async (_req, reply) => reply.status(200).send({ ok: true, service: 'desk-api', processStartedAt: PROCESS_STARTED_AT }));
-  app.get('/health/ready', async (_req, reply) => {
-    const { ok, checks } = await getReadiness();
-    return reply.status(ok ? 200 : 503).send({ ok, checks, processStartedAt: PROCESS_STARTED_AT });
-  });
-  // Back-compat alias for the original Hono version's GET /health (basic liveness,
-  // no dependency checks) — kept cheap/dependency-free since nothing in the Flutter
-  // client depends on it reflecting DB health specifically.
-  app.get('/health', async (_req, reply) => reply.send({ ok: true, service: 'desk-api', ts: new Date().toISOString(), processStartedAt: PROCESS_STARTED_AT }));
+  for (const base of ['', '/v1']) {
+    app.get(`${base}/docs/openapi.json`, { preHandler: requireMetricsDocsKey }, async (_req, reply) => reply.send(OPENAPI_SPEC));
+    app.get(`${base}/docs`, { preHandler: requireMetricsDocsKey }, async (_req, reply) => {
+      reply.header('Content-Type', 'text/html; charset=utf-8');
+      return reply.send(docsHtml(base));
+    });
+    app.get(`${base}/health/live`, async (_req, reply) => reply.status(200).send({ ok: true, service: 'desk-api', processStartedAt: PROCESS_STARTED_AT }));
+    app.get(`${base}/health/ready`, async (_req, reply) => {
+      const { ok, checks } = await getReadiness();
+      return reply.status(ok ? 200 : 503).send({ ok, checks, processStartedAt: PROCESS_STARTED_AT });
+    });
+    // Back-compat alias for the original Hono version's GET /health (basic liveness,
+    // no dependency checks) — kept cheap/dependency-free since nothing in the Flutter
+    // client depends on it reflecting DB health specifically.
+    app.get(`${base}/health`, async (_req, reply) => reply.send({ ok: true, service: 'desk-api', ts: new Date().toISOString(), processStartedAt: PROCESS_STARTED_AT }));
+    app.get(`${base}/metrics`, { preHandler: requireMetricsDocsKey }, async (_req, reply) => {
+      reply.header('Content-Type', metricsRegistry.contentType);
+      return reply.send(await metricsRegistry.metrics());
+    });
+  }
 
-  app.get('/metrics', { preHandler: requireMetricsDocsKey }, async (_req, reply) => {
-    reply.header('Content-Type', metricsRegistry.contentType);
-    return reply.send(await metricsRegistry.metrics());
-  });
+  // Where a client that starts from /v1 finds everything else.
+  app.get('/v1', async (_req, reply) =>
+    reply.send({
+      service: 'desk-api',
+      version: 'v1',
+      health: '/v1/health',
+      libraryDocs: '/v1/gateway/openapi.json',
+      apiLibrary: '/',
+    }),
+  );
 
   registerErrorHandler(app);
   registerApiProtection(app);
@@ -297,6 +331,7 @@ async function registerLegacyAndVersionedRoutes(instance: FastifyInstance) {
   instance.post('/integrations/market-research/analyze', marketResearchAnalyzeHandler);
 
   // ── API Library: developer key management (session-only) ─────────────────
+  instance.get('/gateway/openapi.json', libraryOpenApiHandler);
   instance.get('/gateway/services', listGatewayServicesHandler);
   instance.get('/gateway/api-keys', listGatewayKeysHandler);
   instance.post('/gateway/api-keys', createGatewayKeyHandler);

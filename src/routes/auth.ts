@@ -96,11 +96,15 @@ export async function signInHandler(request: FastifyRequest, reply: FastifyReply
 
   if (!result) {
     audit(request, 'signin_failed', 'error', { email: email.trim() });
-    return reply.status(401).send({ error: 'Invalid email or password.' });
+    throw new HttpError(401, 'Invalid email or password.');
   }
 
   audit(request, 'signin_success', 'ok', { userId: result.user.id });
   setSessionCookie(reply, result.token);
+  // The web app lives on the httpOnly cookie and asks not to be handed the token
+  // (nothing in its JavaScript should ever hold it). Native clients don't send
+  // this header and still receive the token exactly as before.
+  if (request.headers['x-session-transport'] === 'cookie') return reply.send({ user: result.user });
   return reply.send({ token: result.token, user: result.user });
 }
 

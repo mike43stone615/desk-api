@@ -28,6 +28,7 @@ let fetchCalls: FetchCall[] = [];
 let backendKeyCounter = 0;
 let failMarketProvisioning = false;
 let upstreamProxyStatus = 200;
+let upstreamProxyOverride: (() => Response) | null = null;
 
 function json(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
@@ -57,6 +58,7 @@ const fetchMock = vi.fn(async (input: unknown, init?: RequestInit) => {
   }
   if (method === 'DELETE' && url.includes('/admin/api-keys/')) return new Response(null, { status: 204 });
   if (url.startsWith('http://registry.test/') || url.startsWith('http://market.test/')) {
+    if (upstreamProxyOverride) return upstreamProxyOverride();
     return json({ ok: true, from: 'upstream' }, upstreamProxyStatus);
   }
   return json({ error: 'unexpected fetch in test' }, 500);
@@ -115,6 +117,8 @@ beforeEach(() => {
   fetchCalls = [];
   failMarketProvisioning = false;
   upstreamProxyStatus = 200;
+  upstreamProxyOverride = null;
+  fakeDb.idempotencyKeys.clear();
   fakeDb.gatewayKeys.clear();
   fakeDb.gatewayGrants.length = 0;
 });
@@ -441,6 +445,7 @@ describe('proxying to registry-api and market-validation-api', () => {
     const key = JSON.parse((await createKey(user, ['registry_api', 'market_validation_api'])).body).apiKey.key;
     const cases: Array<['GET' | 'POST', string, string]> = [
       ['POST', '/gateway/registry/functions/v1/check-name-trend', 'http://registry.test/functions/v1/check-name-trend'],
+      ['POST', '/gateway/registry/name-trend', 'http://registry.test/functions/v1/check-name-trend'],
       ['GET', '/gateway/market/scoring-methodology', 'http://market.test/scoring-methodology'],
     ];
     for (const [method, url, upstream] of cases) {
@@ -453,15 +458,25 @@ describe('proxying to registry-api and market-validation-api', () => {
 
   it('documents every proxied endpoint in the OpenAPI spec', async () => {
     const { OPENAPI_SPEC } = await import('../../openapi');
-    const docs = JSON.stringify((OPENAPI_SPEC as { paths: Record<string, unknown> }).paths['/gateway/registry/{path}']);
-    for (const name of [
-      'check-business-name-availability', 'check-dba-name-availability', 'check-trademark-availability',
-      'check-name-multi-state', 'check-names-batch', 'check-name-trend', 'registry-sync-status',
-      'business-structures', 'business-structures/recommend',
-    ]) expect(docs, name).toContain(name);
-    const market = (OPENAPI_SPEC as { paths: Record<string, Record<string, unknown>> }).paths['/gateway/market/{path}'];
-    expect(JSON.stringify(market.post)).toContain('research/analyze');
-    expect(JSON.stringify(market.get)).toContain('scoring-methodology');
+    const paths = (OPENAPI_SPEC as { paths: Record<string, Record<string, unknown>> }).paths;
+    const documented: Array<['get' | 'post', string]> = [
+      ['post', '/gateway/registry/name-availability'], ['post', '/gateway/registry/dba-availability'],
+      ['post', '/gateway/registry/trademark-availability'], ['post', '/gateway/registry/multi-state-availability'],
+      ['post', '/gateway/registry/batch-availability'], ['post', '/gateway/registry/name-trend'],
+      ['get', '/gateway/registry/sync-status'], ['get', '/gateway/registry/business-structures'],
+      ['get', '/gateway/registry/business-structures/{slug}'], ['post', '/gateway/registry/business-structures/recommend'],
+      ['post', '/gateway/market/research/analyze'], ['get', '/gateway/market/scoring-methodology'],
+    ];
+    for (const [method, path] of documented) expect(paths[path]?.[method], `${method} ${path}`).toBeTruthy();
+
+    // ...and every documented path really is served by the proxy (never a 404 "no such endpoint").
+    const user = seedUser('docs-sync@example.com');
+    const key = JSON.parse((await createKey(user, ['registry_api', 'market_validation_api'])).body).apiKey.key;
+    for (const [method, path] of documented) {
+      const url = `/v1${path.replace('{slug}', 'llc')}`;
+      const res = await app.inject({ method: method === 'get' ? 'GET' : 'POST', url, headers: { 'x-api-key': key }, payload: method === 'post' ? {} : undefined });
+      expect(res.statusCode, `${method} ${url}`).not.toBe(404);
+    }
   });
 
   it('only reaches allowlisted upstream endpoints — no admin, no traversal', async () => {
@@ -511,5 +526,141 @@ describe('proxying to registry-api and market-validation-api', () => {
     expect((await app.inject({ method: 'POST', url: NAME_CHECK, headers: { 'x-api-key': apiKey.key }, payload: {} })).statusCode).toBe(200);
     await app.inject({ method: 'DELETE', url: `/gateway/api-keys/${apiKey.id}`, headers: user.headers });
     expect((await app.inject({ method: 'POST', url: NAME_CHECK, headers: { 'x-api-key': apiKey.key }, payload: {} })).statusCode).toBe(401);
+  });
+});
+
+describe('errors from the backends look like every other error', () => {
+  async function callWith(override: () => Response) {
+    const user = seedUser(`err-${Math.random()}@example.com`);
+    const key = JSON.parse((await createKey(user, ['registry_api'])).body).apiKey.key;
+    upstreamProxyOverride = override;
+    return app.inject({
+      method: 'POST',
+      url: '/v1/gateway/registry/name-availability',
+      headers: { 'x-api-key': key },
+      payload: { businessName: 'Acme' },
+    });
+  }
+
+  it("turns a backend's own error body into the standard problem shape, keeping the status", async () => {
+    const res = await callWith(() => json({ responseId: 'r1', servedAt: 'now', error: 'stateOfFormation is required' }, 400));
+    expect(res.statusCode).toBe(400);
+    expect(res.headers['content-type']).toMatch(/application\/problem\+json/);
+    const body = JSON.parse(res.body);
+    expect(body).toMatchObject({ status: 400, title: 'Bad Request', detail: 'stateOfFormation is required', error: 'stateOfFormation is required' });
+    expect(body.instance).toBe('/v1/gateway/registry/name-availability');
+  });
+
+  it('keeps a backend validation list and reads the message from other field names', async () => {
+    const res = await callWith(() => json({ message: 'Invalid request.', errors: [{ path: ['names'], message: 'too many' }] }, 400));
+    const body = JSON.parse(res.body);
+    expect(body.detail).toBe('Invalid request.');
+    expect(body.errors).toEqual([{ path: ['names'], message: 'too many' }]);
+  });
+
+  it('keeps Retry-After on a rate limit and copes with a non-JSON failure body', async () => {
+    const limited = await callWith(
+      () => new Response(JSON.stringify({ error: 'Rate limit exceeded (per-minute).' }), { status: 429, headers: { 'content-type': 'application/json', 'retry-after': '42' } }),
+    );
+    expect(limited.statusCode).toBe(429);
+    expect(limited.headers['retry-after']).toBe('42');
+    expect(JSON.parse(limited.body).detail).toBe('Rate limit exceeded (per-minute).');
+
+    const html = await callWith(() => new Response('<html>oops</html>', { status: 504, statusText: 'Gateway Timeout' }));
+    expect(html.statusCode).toBe(504);
+    expect(html.headers['content-type']).toMatch(/problem\+json/);
+    expect(JSON.parse(html.body).title).toBe('Error');
+  });
+
+  it('leaves a successful answer exactly as the backend sent it', async () => {
+    const res = await callWith(() => json({ available: true }, 200));
+    expect(JSON.parse(res.body)).toEqual({ available: true });
+  });
+
+  it('forwards the request id, so one id follows the call into the backend logs', async () => {
+    const res = await callWith(() => json({ ok: true }));
+    const forwarded = fetchCalls.at(-1)!;
+    expect(forwarded.headers['x-request-id']).toBeTruthy();
+    expect(forwarded.headers['x-request-id']).toBe(res.headers['x-request-id']);
+  });
+});
+
+describe('clean public endpoint names', () => {
+  it.each([
+    ['POST', '/name-availability', '/functions/v1/check-business-name-availability'],
+    ['POST', '/dba-availability', '/functions/v1/check-dba-name-availability'],
+    ['POST', '/trademark-availability', '/functions/v1/check-trademark-availability'],
+    ['POST', '/multi-state-availability', '/functions/v1/check-name-multi-state'],
+    ['POST', '/batch-availability', '/functions/v1/check-names-batch'],
+    ['POST', '/name-trend', '/functions/v1/check-name-trend'],
+    ['GET', '/sync-status', '/functions/v1/registry-sync-status'],
+  ])('%s %s reaches %s, and the old path still does too', async (method, publicPath, upstreamPath) => {
+    const user = seedUser(`names-${Math.random()}@example.com`);
+    const key = JSON.parse((await createKey(user, ['registry_api'])).body).apiKey.key;
+    for (const path of [publicPath, upstreamPath]) {
+      fetchCalls = [];
+      const res = await app.inject({
+        method: method as 'GET' | 'POST',
+        url: `/v1/gateway/registry${path}`,
+        headers: { 'x-api-key': key },
+        payload: method === 'POST' ? { businessName: 'Acme' } : undefined,
+      });
+      expect(res.statusCode, path).toBe(200);
+      expect(fetchCalls[0].url, path).toBe(`http://registry.test${upstreamPath}`);
+    }
+  });
+});
+
+describe('creating a key twice by accident (Idempotency-Key)', () => {
+  const create = (user: { headers: Record<string, string> }, idem: string, payload: Record<string, unknown> = { label: 'one', services: ['desk_api'] }) =>
+    app.inject({ method: 'POST', url: '/gateway/api-keys', headers: { ...user.headers, 'idempotency-key': idem }, payload });
+
+  it('a retry with the same Idempotency-Key does not create a second key, and never replays the secret', async () => {
+    const user = seedUser('idem@example.com');
+    const first = await create(user, 'attempt-1');
+    expect(first.statusCode).toBe(201);
+    const secret = JSON.parse(first.body).apiKey.key as string;
+
+    const retry = await create(user, 'attempt-1');
+    expect(retry.statusCode).toBe(409);
+    expect(JSON.parse(retry.body).detail).toMatch(/already created.*only once/i);
+    expect(retry.body).not.toContain(secret);
+    expect(fakeDb.gatewayKeys.size).toBe(1);
+
+    // The secret is not kept in the idempotency table either.
+    expect(JSON.stringify([...fakeDb.idempotencyKeys.values()])).not.toContain(secret);
+  });
+
+  it('a failed attempt does not use up the key: the corrected retry goes through', async () => {
+    const user = seedUser('idem-fail@example.com');
+    const bad = await create(user, 'attempt-2', { label: '', services: [] });
+    expect(bad.statusCode).toBe(400);
+    const good = await create(user, 'attempt-2', { label: 'fixed', services: ['desk_api'] });
+    expect(good.statusCode).toBe(201);
+  });
+
+  it('without the header nothing changes: two requests make two keys', async () => {
+    const user = seedUser('idem-none@example.com');
+    expect((await createKey(user, ['desk_api'])).statusCode).toBe(201);
+    expect((await createKey(user, ['desk_api'])).statusCode).toBe(201);
+    expect(fakeDb.gatewayKeys.size).toBe(2);
+  });
+});
+
+describe('the public API description', () => {
+  it('needs no key or sign-in, and lists only what developers can use', async () => {
+    for (const url of ['/gateway/openapi.json', '/v1/gateway/openapi.json']) {
+      const res = await app.inject({ method: 'GET', url });
+      expect(res.statusCode, url).toBe(200);
+      const spec = JSON.parse(res.body);
+      const paths = Object.keys(spec.paths);
+      expect(paths).toContain('/gateway/registry/name-availability');
+      expect(paths).toContain('/gateway/api-keys');
+      expect(paths).toContain('/setup/businesses');
+      expect(paths.filter((p) => p.startsWith('/admin') || p.startsWith('/auth') || p.startsWith('/functions') || p.startsWith('/integrations'))).toEqual([]);
+      expect(spec.components.securitySchemes.ApiLibraryKey).toBeTruthy();
+      // Only the operations a key can call are kept on the Desk API paths.
+      expect(Object.keys(spec.paths['/setup/drafts'])).toEqual(['get']);
+    }
   });
 });

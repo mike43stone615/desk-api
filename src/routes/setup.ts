@@ -16,6 +16,7 @@ import { requireAuth, requireConfirmedEmail } from '../middleware/auth';
 import { generateId, nowUtc } from '../domain/auth/tokens';
 import { pool } from '../db';
 import { DraftPatchSchema, MemberInviteSchema } from '../validators/setup';
+import { parsePage, slicePage } from '../validators/pagination';
 import { config } from '../config';
 import { sendBusinessInviteEmail } from '../infrastructure/email/resend';
 
@@ -239,15 +240,19 @@ export async function listBusinessesHandler(request: FastifyRequest, reply: Fast
   await requireAuth(request, reply);
   await requireConfirmedEmail(request, reply);
   const user = request.currentUser!;
-  const { rows } = await pool.query<{ id: string; name: string; industry: string | null; role: BusinessMemberRole }>(
+  const page = parsePage(request.query);
+  const { rows: fetched } = await pool.query<{ id: string; name: string; industry: string | null; role: BusinessMemberRole }>(
     `SELECT b.id, b.name, b.industry, bm.role
      FROM businesses b
      INNER JOIN business_memberships bm ON bm.business_id = b.id
      WHERE bm.user_id = $1 AND bm.accepted_at IS NOT NULL
-     ORDER BY b.updated_at DESC`,
-    [user.id],
+     ORDER BY b.updated_at DESC, b.id
+     LIMIT $2 OFFSET $3`,
+    [user.id, page.limit + 1, page.offset],
   );
+  const { rows, hasMore } = slicePage(fetched, page);
   return reply.send({
+    hasMore,
     businesses: rows.map((row) => ({
       id: row.id,
       name: row.name,
@@ -264,18 +269,21 @@ export async function listBusinessMembersHandler(request: FastifyRequest, reply:
   const user = request.currentUser!;
   const { id: businessId } = request.params as { id: string };
   await requireBusinessMembership(businessId, user.id);
+  const page = parsePage(request.query);
 
-  const { rows } = await pool.query<Record<string, unknown>>(
+  const { rows: fetched } = await pool.query<Record<string, unknown>>(
     `SELECT bm.id, bm.business_id, bm.user_id, bm.role, bm.invited_by_user_id,
             bm.invited_at, bm.accepted_at, bm.created_at, bm.updated_at,
             u.email, u.first_name, u.last_name
      FROM business_memberships bm
      INNER JOIN users u ON u.id = bm.user_id
      WHERE bm.business_id = $1
-     ORDER BY (bm.role = 'owner') DESC, u.email ASC`,
-    [businessId],
+     ORDER BY (bm.role = 'owner') DESC, u.email ASC, bm.id
+     LIMIT $2 OFFSET $3`,
+    [businessId, page.limit + 1, page.offset],
   );
-  return reply.send({ members: rows.map(formatMemberRow) });
+  const { rows, hasMore } = slicePage(fetched, page);
+  return reply.send({ hasMore, members: rows.map(formatMemberRow) });
 }
 
 export async function inviteBusinessMemberHandler(request: FastifyRequest, reply: FastifyReply) {
@@ -337,19 +345,23 @@ export async function listPendingInvitesHandler(request: FastifyRequest, reply: 
   await requireAuth(request, reply);
   await requireConfirmedEmail(request, reply);
   const user = request.currentUser!;
+  const page = parsePage(request.query);
 
-  const { rows } = await pool.query<Record<string, unknown>>(
+  const { rows: fetched } = await pool.query<Record<string, unknown>>(
     `SELECT bm.id, bm.business_id, b.name AS business_name, bm.role, bm.invited_at,
             u.email AS invited_by_email, u.first_name AS invited_by_first_name, u.last_name AS invited_by_last_name
      FROM business_memberships bm
      INNER JOIN businesses b ON b.id = bm.business_id
      LEFT JOIN users u ON u.id = bm.invited_by_user_id
      WHERE bm.user_id = $1 AND bm.accepted_at IS NULL
-     ORDER BY bm.invited_at DESC`,
-    [user.id],
+     ORDER BY bm.invited_at DESC, bm.id
+     LIMIT $2 OFFSET $3`,
+    [user.id, page.limit + 1, page.offset],
   );
+  const { rows, hasMore } = slicePage(fetched, page);
 
   return reply.send({
+    hasMore,
     invites: rows.map((row) => ({
       id: row.id,
       businessId: row.business_id,

@@ -9,6 +9,12 @@ import {
 
 const MAX_LABEL_LENGTH = 64;
 
+// Sent with a create so a retry of the same request can never make a second key.
+function newIdempotencyKey() {
+  const c = globalThis.crypto;
+  return c && typeof c.randomUUID === 'function' ? c.randomUUID() : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+}
+
 const SERVICE_ICONS = {
   desk_api: 'business_outlined',
   registry_api: 'search',
@@ -30,6 +36,7 @@ registerRoute('/developer', async (app) => {
     label: '',
     selected: new Set(),
     isCreating: false,
+    createAttempt: null,
     fieldErrors: {},
     formError: null,
     revealed: null,
@@ -81,7 +88,15 @@ registerRoute('/developer', async (app) => {
     render();
     try {
       const services = s.services.map((x) => x.service).filter((id) => s.selected.has(id));
-      const res = await api('/gateway/api-keys', { method: 'POST', body: { label: s.label.trim(), services } });
+      const body = { label: s.label.trim(), services };
+      // The same form submitted again (after a dropped connection, say) reuses its
+      // Idempotency-Key; a changed form gets a new one.
+      const signature = JSON.stringify(body);
+      if (!s.createAttempt || s.createAttempt.signature !== signature) {
+        s.createAttempt = { signature, key: newIdempotencyKey() };
+      }
+      const res = await api('/gateway/api-keys', { method: 'POST', body, headers: { 'idempotency-key': s.createAttempt.key } });
+      s.createAttempt = null;
       const { key, ...summary } = res.apiKey;
       s.keys = [summary, ...s.keys];
       s.revealed = { ...summary, key };
@@ -91,6 +106,17 @@ registerRoute('/developer', async (app) => {
     } catch (err) {
       reportHandledException(err, 'createApiKey');
       s.formError = friendlyError(err, 'We could not create that key. Please try again.');
+      // 409 on a retry means the first attempt did create the key (its answer was lost).
+      // Show the list as it really is so the orphan can be revoked.
+      if (err && err.statusCode === 409 && s.createAttempt) {
+        s.createAttempt = null;
+        try {
+          const list = await api('/gateway/api-keys');
+          s.keys = list.apiKeys || [];
+        } catch {
+          /* the message above still tells the user what to do */
+        }
+      }
     } finally {
       s.isCreating = false;
       if (isCurrent()) render();

@@ -10,6 +10,7 @@ import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { randomUUID } from 'crypto';
 import { createHash } from 'crypto';
 import { getRedis } from './redis-client';
+import { problemBody } from './http-error';
 import { config } from '../config';
 import { GATEWAY_KEY_PREFIX } from '../domain/gateway/keys';
 
@@ -200,6 +201,15 @@ export function normalizePath(url: string): string {
 
 // ── Registration ──────────────────────────────────────────────────────────────
 
+/** Same error shape as everywhere else, plus the standard Retry-After header. */
+function tooManyRequests(request: FastifyRequest, reply: FastifyReply, reason: string | undefined) {
+  return reply
+    .status(429)
+    .header('Content-Type', 'application/problem+json')
+    .header('Retry-After', '60')
+    .send(problemBody(request.url, 429, reason ?? 'Rate limit exceeded.', { retryAfterSeconds: 60 }));
+}
+
 export function registerApiProtection(app: FastifyInstance) {
   app.addHook('preHandler', async (request: FastifyRequest, reply: FastifyReply) => {
     const path = normalizePath(request.url);
@@ -208,7 +218,7 @@ export function registerApiProtection(app: FastifyInstance) {
     const bucketKey = `ip:${getClientIp(request)}`;
     const result = await redisCheck(bucketKey);
     if (!result.allowed) {
-      return reply.status(429).send({ error: result.reason, retryAfterSeconds: 60 });
+      return tooManyRequests(request, reply, result.reason);
     }
 
     // An API Library key gets its OWN bucket on top of the IP one (both must
@@ -220,7 +230,7 @@ export function registerApiProtection(app: FastifyInstance) {
     if (typeof presentedKey === 'string' && presentedKey.startsWith(GATEWAY_KEY_PREFIX)) {
       const keyResult = await redisCheck(`key:${createHash('sha256').update(presentedKey).digest('hex')}`);
       if (!keyResult.allowed) {
-        return reply.status(429).send({ error: keyResult.reason, retryAfterSeconds: 60 });
+        return tooManyRequests(request, reply, keyResult.reason);
       }
     }
 

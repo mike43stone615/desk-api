@@ -26,7 +26,7 @@ export async function marketResearchAnalyzeHandler(request: FastifyRequest, repl
   }
 
   const targetUrl = `${config.marketApiUrl.replace(/\/$/, '')}/research/analyze`;
-  const headers: Record<string, string> = { 'content-type': 'application/json' };
+  const headers: Record<string, string> = { 'content-type': 'application/json', 'x-request-id': request.id };
   if (config.marketApiKey) headers['x-api-key'] = config.marketApiKey;
 
   let resp: Response;
@@ -40,6 +40,20 @@ export async function marketResearchAnalyzeHandler(request: FastifyRequest, repl
   } catch (err) {
     request.log.error({ err }, 'market-validation-api proxy failed');
     throw new HttpError(503, UNAVAILABLE_MESSAGE);
+  }
+
+  // The caller's input was rejected (missing idea, too long...): say so, instead of
+  // implying the service is down.
+  if (resp.status === 400 || resp.status === 422) {
+    let detail = 'The request was not valid.';
+    try {
+      const parsed = (await resp.json()) as Record<string, unknown>;
+      const message = parsed.detail ?? parsed.error ?? parsed.message;
+      if (typeof message === 'string' && message) detail = message;
+    } catch {
+      /* keep the generic message */
+    }
+    throw new HttpError(400, detail);
   }
 
   if (!resp.ok) {

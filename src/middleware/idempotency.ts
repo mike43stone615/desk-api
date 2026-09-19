@@ -35,7 +35,19 @@ function isIdempotencyEligible(method: string, url: string): boolean {
   const path = normalizePath(url);
   if (method === 'POST' && path === '/setup/drafts') return true;
   if (method === 'POST' && /^\/setup\/drafts\/[^/]+\/complete$/.test(path)) return true;
+  if (isSecretBearing(method, url)) return true;
   return false;
+}
+
+/**
+ * Endpoints whose response contains a secret shown exactly once (a new API
+ * Library key). They still get duplicate protection -- a retry with the same
+ * Idempotency-Key never creates a second key -- but the response is NOT stored
+ * (that would keep the plaintext secret in this table) and so cannot be
+ * replayed: the retry is told the key already exists.
+ */
+function isSecretBearing(method: string, url: string): boolean {
+  return method === 'POST' && normalizePath(url) === '/gateway/api-keys';
 }
 
 function hashRequestBody(body: unknown): string {
@@ -144,6 +156,14 @@ export function registerIdempotency(app: FastifyInstance) {
         return conflictProblem(request, reply, 'This request is already being processed. Retry shortly.');
       }
 
+      if (isSecretBearing(request.method, request.url)) {
+        return conflictProblem(
+          request,
+          reply,
+          'This key was already created, and its secret is shown only once. Revoke it from your key list and create a new one.',
+        );
+      }
+
       reply.header('Idempotency-Replayed', 'true');
       if (existing.response_body === null || existing.response_body === undefined) {
         return reply.status(existing.response_status).send();
@@ -161,12 +181,20 @@ export function registerIdempotency(app: FastifyInstance) {
     if (!key || !requestHash) return payload;
 
     let responseBody: unknown = null;
-    if (typeof payload === 'string' && payload.length > 0) {
+    if (!isSecretBearing(request.method, request.url) && typeof payload === 'string' && payload.length > 0) {
       try {
         responseBody = JSON.parse(payload);
       } catch {
         responseBody = null;
       }
+    }
+
+    // A failed key creation (bad input, not signed in, a backend hiccup) created
+    // nothing, so it must not use up the Idempotency-Key: the caller's retry
+    // has to be able to run for real.
+    if (isSecretBearing(request.method, request.url) && reply.statusCode >= 400) {
+      await pool.query(`DELETE FROM idempotency_keys WHERE key = $1`, [key]).catch(() => {});
+      return payload;
     }
 
     // Awaited (not fire-and-forget): the response shouldn't reach the client

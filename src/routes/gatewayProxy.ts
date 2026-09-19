@@ -11,7 +11,7 @@
 // for the one parameterised endpoint, a strict slug pattern, so traversal
 // (`..`, encoded slashes) can't reach /admin or anything else.
 import type { FastifyReply, FastifyRequest } from 'fastify';
-import { HttpError } from '../middleware/http-error';
+import { HttpError, problemBody } from '../middleware/http-error';
 import { config } from '../config';
 import { gatewayApiKeys, looksLikeGatewayKey } from '../domain/gateway/keys';
 import type { BrokeredService } from '../domain/gateway/services';
@@ -24,17 +24,27 @@ interface UpstreamRoute {
 }
 
 const exact = (p: string) => (path: string) => (path === p ? p : null);
+/** A clean public name (`/name-availability`) that maps onto the backend's own path. */
+const alias = (publicPath: string, upstreamPath: string) => (path: string) => (path === publicPath ? upstreamPath : null);
 const SLUG = /^[a-z0-9][a-z0-9_-]{0,80}$/i;
 
+// The public names are the ones to document and use. The backend's own
+// `functions/v1/...` paths stay reachable, unchanged, for anyone already on them.
+const REGISTRY_NAME_CHECKS: Array<[publicPath: string, upstreamPath: string]> = [
+  ['/name-availability', '/functions/v1/check-business-name-availability'],
+  ['/dba-availability', '/functions/v1/check-dba-name-availability'],
+  ['/trademark-availability', '/functions/v1/check-trademark-availability'],
+  ['/multi-state-availability', '/functions/v1/check-name-multi-state'],
+  ['/batch-availability', '/functions/v1/check-names-batch'],
+  ['/name-trend', '/functions/v1/check-name-trend'],
+];
+
 const REGISTRY_ROUTES: UpstreamRoute[] = [
-  ...[
-    '/functions/v1/check-business-name-availability',
-    '/functions/v1/check-dba-name-availability',
-    '/functions/v1/check-trademark-availability',
-    '/functions/v1/check-name-multi-state',
-    '/functions/v1/check-names-batch',
-    '/functions/v1/check-name-trend',
-  ].map((p): UpstreamRoute => ({ method: 'POST', match: exact(p) })),
+  ...REGISTRY_NAME_CHECKS.flatMap(([publicPath, upstreamPath]): UpstreamRoute[] => [
+    { method: 'POST', match: alias(publicPath, upstreamPath) },
+    { method: 'POST', match: exact(upstreamPath) },
+  ]),
+  { method: 'GET', match: alias('/sync-status', '/functions/v1/registry-sync-status') },
   { method: 'GET', match: exact('/functions/v1/registry-sync-status') },
   { method: 'GET', match: exact('/business-structures'), forwardQuery: true },
   { method: 'POST', match: exact('/business-structures/recommend') },
@@ -96,6 +106,8 @@ async function forward(service: BrokeredService, request: FastifyRequest, reply:
       method: route.method,
       headers: {
         'x-api-key': backendKey,
+        // One id follows the call through desk-api and into the backend's own logs.
+        'x-request-id': request.id,
         ...(route.method === 'POST' ? { 'content-type': 'application/json' } : {}),
       },
       body: route.method === 'POST' ? JSON.stringify(request.body ?? {}) : undefined,
@@ -115,7 +127,25 @@ async function forward(service: BrokeredService, request: FastifyRequest, reply:
     const value = upstream.headers.get(name);
     if (value) reply.header(name, value);
   }
-  return reply.status(upstream.status).send(await upstream.text());
+  const text = await upstream.text();
+  if (upstream.ok) return reply.status(upstream.status).send(text);
+
+  // A failed call gets the same error body as any other desk-api error, whatever
+  // shape the backend used (`{error}`, `{message}`, a validation list...).
+  let detail = upstream.statusText || 'The request failed.';
+  let errors: unknown;
+  try {
+    const parsed = JSON.parse(text) as Record<string, unknown>;
+    const message = parsed.error ?? parsed.detail ?? parsed.message;
+    if (typeof message === 'string' && message) detail = message;
+    if (parsed.errors !== undefined) errors = parsed.errors;
+  } catch {
+    /* not JSON — keep the status text */
+  }
+  return reply
+    .status(upstream.status)
+    .header('Content-Type', 'application/problem+json')
+    .send(problemBody(request.url, upstream.status, detail, errors !== undefined ? { errors } : undefined));
 }
 
 export async function gatewayRegistryProxyHandler(request: FastifyRequest, reply: FastifyReply) {

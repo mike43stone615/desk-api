@@ -19,8 +19,10 @@ const TITLES: Record<number, string> = {
   401: 'Unauthorized',
   403: 'Forbidden',
   404: 'Not Found',
+  405: 'Method Not Allowed',
   409: 'Conflict',
   413: 'Payload Too Large',
+  415: 'Unsupported Media Type',
   429: 'Too Many Requests',
   500: 'Internal Server Error',
   502: 'Bad Gateway',
@@ -43,17 +45,21 @@ interface ProblemDetails {
   error: string;
 }
 
-function problem(request: FastifyRequest, status: number, detail: string, errors?: unknown): ProblemDetails {
-  const body: ProblemDetails = {
+/** The one error body every response uses (RFC 7807 + the legacy `error` member). */
+export function problemBody(instance: string, status: number, detail: string, extra?: Record<string, unknown>): ProblemDetails {
+  return {
     type: 'about:blank',
     title: TITLES[status] ?? 'Error',
     status,
     detail,
-    instance: request.url,
+    instance,
     error: detail,
+    ...extra,
   };
-  if (errors !== undefined) body.errors = errors;
-  return body;
+}
+
+function problem(request: FastifyRequest, status: number, detail: string, errors?: unknown): ProblemDetails {
+  return problemBody(request.url, status, detail, errors !== undefined ? { errors } : undefined);
 }
 
 /**

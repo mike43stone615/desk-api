@@ -70,6 +70,40 @@ each key may call.
    Password-reset and email-confirmation *links* still point at the web app
    (`APP_BASE_URL`), so those two steps complete there.
 
+9. **The shape of the API (structure audit, 2026-09-19).**
+   - *One error body.* Every error, from any route, is RFC 7807 plus the legacy
+     `error` member. That includes unknown URLs (404), wrong verbs (405 with an
+     `Allow` header), rate limits (429 with `Retry-After`), failed sign-in, and
+     failures from the registry/market backends, which the gateway rewrites into
+     the same shape (keeping status, message, validation list and `Retry-After`).
+     Successful gateway answers pass through unchanged. See `middleware/not-found.ts`.
+   - *Clean public names.* The gateway's registry endpoints are `name-availability`,
+     `dba-availability`, `trademark-availability`, `multi-state-availability`,
+     `batch-availability`, `name-trend` and `sync-status`. The backend's own
+     `functions/v1/...` paths keep working (deprecated), so nobody breaks; document
+     only the clean ones. A test fails if the OpenAPI spec and the proxy disagree.
+   - *Public developer spec:* `GET /v1/gateway/openapi.json` (no key needed) lists
+     only what a key can call. The full `/docs` stays behind `METRICS_DOCS_API_KEY`.
+   - *Not cached:* JSON answers carry `Cache-Control: no-store`.
+   - *Browsers:* CORS allows only the app origin and does not allow the `x-api-key`
+     header, on purpose: a key in page JavaScript is visible to every visitor. Keys
+     are for servers. Preflight answers are cacheable (10 min).
+   - *Retry-safe key creation:* `POST /gateway/api-keys` honours `Idempotency-Key`.
+     A retry never makes a second key, and because the secret is shown once and is
+     not stored for replay, the retry gets 409 ("already created; revoke it and make
+     a new one"). Failed attempts do not use up the key. The web page sends one per
+     form submission and refreshes the list on that 409.
+   - *Tracing:* `x-request-id` is forwarded to registry-api and market-validation-api.
+   - *Web sign-in* sends `X-Session-Transport: cookie` and then receives no token in
+     the response body. Native clients (no header) are unchanged.
+   - *Lists* (`/setup/businesses`, `/setup/businesses/:id/members`, `/setup/invites`)
+     take `?limit=` (1-200, default 100) and `?offset=` and return `hasMore`.
+   - *Versioned ops routes:* `/v1/health`, `/v1/health/live`, `/v1/health/ready`,
+     `/v1/docs`, `/v1/metrics`, and an index at `GET /v1`. Trailing and doubled
+     slashes reach the same handler (no more empty `:id`).
+   - *Market research (legacy route)* now answers a validation rejection from the
+     backend with 400 and its reason, instead of "temporarily unavailable" (503).
+
 ## Operations
 
 - **Deploys do not run migrations.** Apply `0008` with `npm run migrate`
