@@ -429,13 +429,6 @@ input[type="password"]::-ms-reveal { display: none; }
 .library-body .hint { margin-top: var(--sp-2xs); }
 .reveal-key { display: flex; gap: var(--sp-sm); align-items: stretch; }
 .reveal-key input { flex: 1; }
-/* Monospace is deliberate and limited to copy-paste code samples; every other
-   piece of text stays on the theme's Inter stack. */
-.code-block {
-  margin: 0 0 var(--sp-md); padding: var(--sp-md); overflow-x: auto; white-space: pre;
-  background: var(--input-bg); border: 1px solid var(--line); border-radius: var(--r-md);
-  color: var(--ink-soft); font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: .8rem; line-height: 1.5;
-}
 
 .empty-state { text-align: center; color: var(--ink-faint); padding: var(--sp-4xl) 0; }
 .toast { position: fixed; bottom: var(--sp-xl); right: var(--sp-xl); background: var(--surface-2); border: 1px solid var(--line); color: var(--ink); padding: var(--sp-md) var(--sp-lg); border-radius: var(--r-md); font-size: .85rem; box-shadow: var(--shadow); z-index: 100; }

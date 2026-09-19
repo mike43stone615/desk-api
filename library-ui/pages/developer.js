@@ -7,21 +7,12 @@ import {
   reportHandledException, currentEpoch, submitOnEnter,
 } from '../app.js';
 
-// The public address developers call, shown in the copy-paste examples. Not
-// API_BASE: that is empty in local dev, and these examples are for outsiders.
-const DOCS_BASE_URL = 'https://api.deskbusiness.co';
 const MAX_LABEL_LENGTH = 64;
 
 const SERVICE_ICONS = {
   desk_api: 'business_outlined',
   registry_api: 'search',
   market_validation_api: 'table_chart_outlined',
-};
-
-const USAGE_EXAMPLES = {
-  desk_api: (key) => `curl ${DOCS_BASE_URL}/v1/setup/businesses \\\n  -H "x-api-key: ${key}"`,
-  registry_api: (key) => `curl -X POST ${DOCS_BASE_URL}/v1/gateway/registry/functions/v1/check-business-name-availability \\\n  -H "x-api-key: ${key}" -H "content-type: application/json" \\\n  -d '{"businessName":"Acme Coffee","stateOfFormation":"FL"}'`,
-  market_validation_api: (key) => `curl -X POST ${DOCS_BASE_URL}/v1/gateway/market/research/analyze \\\n  -H "x-api-key: ${key}" -H "content-type: application/json" \\\n  -d '{"businessIdea":"mobile coffee cart"}'`,
 };
 
 function formatDate(iso) {
@@ -163,10 +154,6 @@ registerRoute('/developer', async (app) => {
 
   function revealHtml() {
     const r = s.revealed;
-    const examples = r.services.filter((id) => USAGE_EXAMPLES[id]).map((id) => `
-      <div class="field-header"><label>${esc(serviceName(id))}</label></div>
-      <pre class="code-block">${esc(USAGE_EXAMPLES[id](r.key))}</pre>
-    `).join('');
     return `
       <div class="card fold-in${s.animateReveal ? ' fold-in-animate' : ''}" id="reveal-card" style="max-height:1600px;margin-bottom:var(--sp-lg);">
         <h2 class="biz-section-title">Copy your new key</h2>
@@ -175,7 +162,6 @@ registerRoute('/developer', async (app) => {
           <input id="reveal-input" readonly value="${esc(r.key)}" aria-label="Your new API key" />
           <button type="button" class="btn btn-primary" id="copy-key-btn">${icon('content_copy')} Copy</button>
         </div>
-        <div style="margin-top:var(--sp-lg);">${examples}</div>
         <button type="button" class="btn" id="dismiss-reveal-btn" style="margin-top:var(--sp-lg);">I've saved my key</button>
       </div>
     `;
