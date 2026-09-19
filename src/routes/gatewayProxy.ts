@@ -33,6 +33,7 @@ const REGISTRY_ROUTES: UpstreamRoute[] = [
     '/functions/v1/check-trademark-availability',
     '/functions/v1/check-name-multi-state',
     '/functions/v1/check-names-batch',
+    '/functions/v1/check-name-trend',
   ].map((p): UpstreamRoute => ({ method: 'POST', match: exact(p) })),
   { method: 'GET', match: exact('/functions/v1/registry-sync-status') },
   { method: 'GET', match: exact('/business-structures'), forwardQuery: true },
@@ -46,7 +47,10 @@ const REGISTRY_ROUTES: UpstreamRoute[] = [
   },
 ];
 
-const MARKET_ROUTES: UpstreamRoute[] = [{ method: 'POST', match: exact('/research/analyze') }];
+const MARKET_ROUTES: UpstreamRoute[] = [
+  { method: 'POST', match: exact('/research/analyze') },
+  { method: 'GET', match: exact('/scoring-methodology') },
+];
 
 const SERVICES: Record<
   BrokeredService,

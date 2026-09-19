@@ -436,6 +436,21 @@ describe('proxying to registry-api and market-validation-api', () => {
     expect(fetchCalls).toHaveLength(0);
   });
 
+  it('reaches every endpoint each backend gates behind a key (name trend, scoring methodology included)', async () => {
+    const user = seedUser('coverage@example.com');
+    const key = JSON.parse((await createKey(user, ['registry_api', 'market_validation_api'])).body).apiKey.key;
+    const cases: Array<['GET' | 'POST', string, string]> = [
+      ['POST', '/gateway/registry/functions/v1/check-name-trend', 'http://registry.test/functions/v1/check-name-trend'],
+      ['GET', '/gateway/market/scoring-methodology', 'http://market.test/scoring-methodology'],
+    ];
+    for (const [method, url, upstream] of cases) {
+      fetchCalls = [];
+      const res = await app.inject({ method, url, headers: { 'x-api-key': key }, payload: method === 'POST' ? { businessName: 'Acme' } : undefined });
+      expect(res.statusCode, url).toBe(200);
+      expect(fetchCalls[0].url, url).toBe(upstream);
+    }
+  });
+
   it('only reaches allowlisted upstream endpoints — no admin, no traversal', async () => {
     const user = seedUser('escape@example.com');
     const key = JSON.parse((await createKey(user, ['registry_api', 'market_validation_api'])).body).apiKey.key;
