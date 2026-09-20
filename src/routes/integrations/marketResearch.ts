@@ -24,7 +24,7 @@ const UNAVAILABLE_MESSAGE =
 
 export async function marketResearchAnalyzeHandler(request: FastifyRequest, reply: FastifyReply) {
   if (!config.marketApiUrl) {
-    throw new HttpError(503, UNAVAILABLE_MESSAGE);
+    throw new HttpError(503, UNAVAILABLE_MESSAGE, 'upstream_unavailable');
   }
 
   const targetUrl = `${config.marketApiUrl.replace(/\/$/, '')}/research/analyze`;
@@ -44,7 +44,7 @@ export async function marketResearchAnalyzeHandler(request: FastifyRequest, repl
   } catch (err) {
     if (err instanceof UpstreamError && err.status === 429) throw err; // the caller's own limit: say so
     request.log.error({ err }, 'market-validation-api proxy failed');
-    throw new HttpError(503, UNAVAILABLE_MESSAGE);
+    throw new HttpError(503, UNAVAILABLE_MESSAGE, 'upstream_unavailable');
   }
 
   // The caller's input was rejected (missing idea, too long...): say so, instead of
@@ -58,7 +58,7 @@ export async function marketResearchAnalyzeHandler(request: FastifyRequest, repl
     } catch {
       /* keep the generic message */
     }
-    throw new HttpError(400, detail);
+    throw new HttpError(400, detail, 'invalid_request');
   }
 
   if (resp.status < 200 || resp.status >= 300) {
@@ -66,7 +66,7 @@ export async function marketResearchAnalyzeHandler(request: FastifyRequest, repl
       { status: resp.status },
       'market-validation-api proxy returned a non-OK status',
     );
-    throw new HttpError(503, UNAVAILABLE_MESSAGE);
+    throw new HttpError(503, UNAVAILABLE_MESSAGE, 'upstream_unavailable');
   }
 
   const data = JSON.parse(resp.text) as unknown;

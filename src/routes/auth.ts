@@ -45,7 +45,7 @@ function authErrorToHttpError(err: AuthError): HttpError {
         : err.code === 'email_not_confirmed'
           ? 403
           : 400;
-  return new HttpError(status, safeMessage(err.code));
+  return new HttpError(status, safeMessage(err.code), err.code);
 }
 
 function safeMessage(code: string): string {
@@ -89,7 +89,7 @@ function audit(request: FastifyRequest, event: string, outcome: 'ok' | 'error', 
 
 export async function signInHandler(request: FastifyRequest, reply: FastifyReply) {
   const parsed = SignInSchema.safeParse(request.body ?? {});
-  if (!parsed.success) throw new HttpError(400, parsed.error.issues.map((i) => i.message).join('; '));
+  if (!parsed.success) throw new HttpError(400, parsed.error.issues.map((i) => i.message).join('; '), 'validation_error');
   const { email, password } = parsed.data;
 
   // Refuse before checking the password, so a locked-out caller cannot learn whether a guess was right.
@@ -98,7 +98,7 @@ export async function signInHandler(request: FastifyRequest, reply: FastifyReply
   if (lockedFor > 0) {
     audit(request, 'signin_locked', 'error');
     reply.header('Retry-After', String(lockedFor));
-    throw new HttpError(429, `Too many failed sign-in attempts. Try again in ${Math.ceil(lockedFor / 60)} minute(s).`);
+    throw new HttpError(429, `Too many failed sign-in attempts. Try again in ${Math.ceil(lockedFor / 60)} minute(s).`, 'signin_locked');
   }
 
   let result;
@@ -112,7 +112,7 @@ export async function signInHandler(request: FastifyRequest, reply: FastifyReply
   if (!result) {
     audit(request, 'signin_failed', 'error', { account: emailFingerprint(email) });
     await recordSigninFailure(ip, email);
-    throw new HttpError(401, 'Invalid email or password.');
+    throw new HttpError(401, 'Invalid email or password.', 'invalid_credentials');
   }
   await clearSigninFailures(ip, email);
 
@@ -131,10 +131,10 @@ export async function signInHandler(request: FastifyRequest, reply: FastifyReply
 
 export async function signUpHandler(request: FastifyRequest, reply: FastifyReply) {
   if (!checkSignupRateLimit(getClientIp(request))) {
-    throw new HttpError(429, 'Too many signup attempts. Please try again later.');
+    throw new HttpError(429, 'Too many signup attempts. Please try again later.', 'rate_limited');
   }
   const parsed = SignUpSchema.safeParse(request.body ?? {});
-  if (!parsed.success) throw new HttpError(400, parsed.error.issues.map((i) => i.message).join('; '));
+  if (!parsed.success) throw new HttpError(400, parsed.error.issues.map((i) => i.message).join('; '), 'validation_error');
   const { email, password, firstName, lastName } = parsed.data;
 
   const trimmedEmail = email.trim();
@@ -170,7 +170,7 @@ export async function signUpHandler(request: FastifyRequest, reply: FastifyReply
 
 export async function requestEmailConfirmationHandler(request: FastifyRequest, reply: FastifyReply) {
   const parsed = EmailOnlySchema.safeParse(request.body ?? {});
-  if (!parsed.success) throw new HttpError(400, parsed.error.issues.map((i) => i.message).join('; '));
+  if (!parsed.success) throw new HttpError(400, parsed.error.issues.map((i) => i.message).join('; '), 'validation_error');
   const email = parsed.data.email.trim();
 
   const token = await authService.requestEmailConfirmation(email);
@@ -186,10 +186,10 @@ export async function requestEmailConfirmationHandler(request: FastifyRequest, r
 
 export async function confirmEmailHandler(request: FastifyRequest, reply: FastifyReply) {
   const parsed = ConfirmEmailSchema.safeParse(request.body ?? {});
-  if (!parsed.success) throw new HttpError(400, parsed.error.issues.map((i) => i.message).join('; '));
+  if (!parsed.success) throw new HttpError(400, parsed.error.issues.map((i) => i.message).join('; '), 'validation_error');
 
   const ok = await authService.confirmEmail(parsed.data.token);
-  if (!ok) throw new HttpError(400, 'Confirmation link is invalid or has expired.');
+  if (!ok) throw new HttpError(400, 'Confirmation link is invalid or has expired.', 'invalid_or_expired_token');
 
   audit(request, 'email_confirmed', 'ok');
   return reply.send({ ok: true });
@@ -265,7 +265,7 @@ export async function revokeSessionHandler(request: FastifyRequest, reply: Fasti
   const { id } = request.params as { id: string };
   const token = extractSessionToken(request);
   const current = token ? await authService.currentSession(token) : null;
-  if (!(await authService.revokeSessionById(user.id, id))) throw new HttpError(404, 'Session not found.');
+  if (!(await authService.revokeSessionById(user.id, id))) throw new HttpError(404, 'Session not found.', 'session_not_found');
   audit(request, 'session_revoked', 'ok', { userId: user.id });
   if (current && current.id === id) clearSessionCookie(reply);
   return reply.send({ ok: true });
@@ -310,7 +310,7 @@ export async function sessionHandler(request: FastifyRequest, reply: FastifyRepl
 
 export async function requestPasswordResetHandler(request: FastifyRequest, reply: FastifyReply) {
   const parsed = EmailOnlySchema.safeParse(request.body ?? {});
-  if (!parsed.success) throw new HttpError(400, parsed.error.issues.map((i) => i.message).join('; '));
+  if (!parsed.success) throw new HttpError(400, parsed.error.issues.map((i) => i.message).join('; '), 'validation_error');
   const email = parsed.data.email.trim();
 
   const token = await authService.requestPasswordReset(email);
@@ -326,12 +326,12 @@ export async function requestPasswordResetHandler(request: FastifyRequest, reply
 
 export async function confirmPasswordResetHandler(request: FastifyRequest, reply: FastifyReply) {
   const parsed = PasswordResetConfirmSchema.safeParse(request.body ?? {});
-  if (!parsed.success) throw new HttpError(400, parsed.error.issues.map((i) => i.message).join('; '));
+  if (!parsed.success) throw new HttpError(400, parsed.error.issues.map((i) => i.message).join('; '), 'validation_error');
 
   try {
     const owner = await authService.resetTokenOwner(parsed.data.token);
     const ok = await authService.confirmPasswordReset(parsed.data.token, parsed.data.password);
-    if (!ok) throw new HttpError(400, 'Reset link is invalid or has expired.');
+    if (!ok) throw new HttpError(400, 'Reset link is invalid or has expired.', 'invalid_or_expired_token');
     audit(request, 'password_reset_confirmed', 'ok', owner ? { userId: owner.id } : {});
     if (owner) notifySecurityEvent(request, owner.email, 'password_reset');
     return reply.send({ ok: true });
@@ -344,7 +344,7 @@ export async function confirmPasswordResetHandler(request: FastifyRequest, reply
 export async function updatePasswordHandler(request: FastifyRequest, reply: FastifyReply) {
   await requireAuth(request, reply);
   const parsed = UpdatePasswordSchema.safeParse(request.body ?? {});
-  if (!parsed.success) throw new HttpError(400, parsed.error.issues.map((i) => i.message).join('; '));
+  if (!parsed.success) throw new HttpError(400, parsed.error.issues.map((i) => i.message).join('; '), 'validation_error');
 
   const user = request.currentUser!;
   try {

@@ -661,7 +661,9 @@ describe('the public API description', () => {
       expect(paths).toContain('/gateway/registry/name-availability');
       expect(paths).toContain('/gateway/api-keys');
       expect(paths).toContain('/setup/businesses');
-      expect(paths.filter((p) => p.startsWith('/admin') || p.startsWith('/auth') || p.startsWith('/functions') || p.startsWith('/integrations'))).toEqual([]);
+      // The one /auth route a key may call is GET /auth/session; nothing else under /auth, and no admin or wizard routes.
+      expect(paths.filter((p) => p.startsWith('/admin') || (p.startsWith('/auth') && p !== '/auth/session') || p.startsWith('/functions') || p.startsWith('/integrations'))).toEqual([]);
+      expect(Object.keys(spec.paths['/auth/session'])).toEqual(['get']);
       expect(spec.components.securitySchemes.ApiLibraryKey).toBeTruthy();
       // Only the operations a key can call are kept on the Desk API paths.
       expect(Object.keys(spec.paths['/setup/drafts'])).toEqual(['get']);

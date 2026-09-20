@@ -269,7 +269,7 @@ export function createFakeDb() {
     }
     if (
       s.startsWith(
-        'SELECT id, draft_json, created_at, updated_at FROM business_setup_drafts WHERE id = $1 AND user_id = $2',
+        'SELECT id, draft_json, version, created_at, updated_at FROM business_setup_drafts WHERE id = $1 AND user_id = $2',
       )
     ) {
       const row = drafts.get(p[0]);
@@ -285,19 +285,36 @@ export function createFakeDb() {
       const match = row && row.user_id === p[1] ? row : undefined;
       return { rows: match ? [match] : [], rowCount: match ? 1 : 0 };
     }
+    if (s.startsWith('SELECT id FROM users WHERE id = $1 FOR UPDATE')) {
+      const u = users.get(p[0]);
+      return { rows: u ? [{ id: u.id }] : [], rowCount: u ? 1 : 0 };
+    }
+    if (s.startsWith('SELECT id FROM businesses WHERE id = $1 FOR UPDATE')) {
+      const b = businesses.get(p[0]);
+      return { rows: b ? [{ id: b.id }] : [], rowCount: b ? 1 : 0 };
+    }
+    if (s.startsWith('SELECT accepted_at, role, invited_at FROM business_memberships WHERE business_id = $1 AND user_id = $2')) {
+      const m = [...memberships.values()].find((x) => x.business_id === p[0] && x.user_id === p[1]);
+      return { rows: m ? [{ accepted_at: m.accepted_at, role: m.role, invited_at: m.invited_at }] : [], rowCount: m ? 1 : 0 };
+    }
+    if (s.startsWith('SELECT role, invited_at FROM business_email_invites WHERE business_id = $1 AND email = $2')) {
+      const i = [...emailInvites.values()].find((x) => x.business_id === p[0] && x.email === p[1]);
+      return { rows: i ? [{ role: i.role, invited_at: i.invited_at }] : [], rowCount: i ? 1 : 0 };
+    }
     if (s.startsWith('INSERT INTO business_setup_drafts')) {
       const [id, user_id, draft_json, created_at] = p;
-      const row: FakeRow = { id, user_id, draft_json, created_at, updated_at: created_at };
+      const row: FakeRow = { id, user_id, draft_json, created_at, updated_at: created_at, version: 1 };
       drafts.set(id, row);
       return { rows: [row], rowCount: 1 };
     }
     if (s.startsWith('UPDATE business_setup_drafts SET draft_json')) {
-      const [draft_json, updated_at, id, user_id] = p;
+      const [draft_json, updated_at, id, user_id, expected] = p;
       const row = drafts.get(id);
-      if (row && row.user_id === user_id) {
+      if (row && row.user_id === user_id && (expected === undefined || Number(row.version ?? 1) === Number(expected))) {
         row.draft_json = draft_json;
         row.updated_at = updated_at;
-        return { rows: [], rowCount: 1 };
+        row.version = Number(row.version ?? 1) + 1;
+        return { rows: [{ version: row.version }], rowCount: 1 };
       }
       return { rows: [], rowCount: 0 };
     }

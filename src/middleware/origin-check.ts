@@ -33,12 +33,12 @@ export function registerOriginCheck(app: FastifyInstance): void {
     if (typeof origin === 'string') {
       if (!isAllowedOrigin(origin, request.headers.host, config.corsOrigins)) {
         request.log.warn({ level: 'audit', event: 'cross_site_request_refused', origin, requestId: request.id });
-        throw new HttpError(403, 'Requests from this origin are not allowed.');
+        throw new HttpError(403, 'Requests from this origin are not allowed.', 'origin_not_allowed');
       }
       return;
     }
     if (request.headers['sec-fetch-site'] === 'cross-site') {
-      throw new HttpError(403, 'Cross-site requests are not allowed.');
+      throw new HttpError(403, 'Cross-site requests are not allowed.', 'cross_site_blocked');
     }
   });
 }

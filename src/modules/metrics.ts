@@ -40,6 +40,13 @@ export const upstreamCallsTotal = new Counter({
   registers: [metricsRegistry],
 });
 
+export const providerCallsTotal = new Counter({
+  name: 'desk_provider_calls_total',
+  help: 'Calls to outside providers (openai, google_places, resend) by outcome: ok, auth_error (key refused), quota (limit reached), error',
+  labelNames: ['provider', 'outcome'] as const,
+  registers: [metricsRegistry],
+});
+
 export const dependencyUp = new Gauge({
   name: 'desk_dependency_up',
   help: '1 when a backend service desk-api relies on answered its health check the last time it was checked, else 0',

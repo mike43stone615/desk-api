@@ -17,7 +17,7 @@ export interface Page {
 /** `?limit=&offset=` for list endpoints; absent values mean the first DEFAULT_PAGE_SIZE rows. */
 export function parsePage(query: unknown): Page {
   const parsed = PageQuerySchema.safeParse(query ?? {});
-  if (!parsed.success) throw new HttpError(400, parsed.error.issues.map((i) => i.message).join('; '));
+  if (!parsed.success) throw new HttpError(400, parsed.error.issues.map((i) => i.message).join('; '), 'validation_error');
   return parsed.data;
 }
 

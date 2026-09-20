@@ -7,6 +7,8 @@
 // and instead point at what's proxied, the fallback behavior when the
 // upstream isn't configured, and the failure-mode status code.
 
+import { ERROR_CODES } from './middleware/error-codes';
+
 const problemSchema = {
   type: 'object',
   properties: {
@@ -16,7 +18,15 @@ const problemSchema = {
     detail: { type: 'string' },
     instance: { type: 'string' },
     error: { type: 'string', description: 'Duplicates detail — kept for the current Flutter client.' },
+    code: {
+      type: 'string',
+      description: 'Stable machine-readable identifier of what went wrong. Branch on this, not on the wording of detail. The full list with meanings is in the ErrorCode schema.',
+      enum: Object.keys(ERROR_CODES),
+    },
+    errors: { type: 'array', items: { type: 'object' }, description: 'Present on validation errors: the individual field problems.' },
+    retryAfterSeconds: { type: 'number', description: 'Present on rate-limit and temporary-unavailable answers; the Retry-After header carries the same.' },
   },
+  required: ['type', 'title', 'status', 'detail', 'instance', 'error', 'code'],
 };
 
 const publicUserSchema = {
@@ -84,13 +94,13 @@ const gatewayProxyPaths = {
   [`${MARKET}/scoring-methodology`]: proxyPath('get', 'How each score is calculated'),
 };
 
-export const OPENAPI_SPEC = {
+const BASE_SPEC = {
   openapi: '3.0.3',
   info: {
     title: 'Desk API',
     version: '2.0.0',
     description:
-      'Desk business-management API — self-service email/password auth, business-setup drafts/businesses/memberships, and an admin table browser aggregating this service plus registry-api and compliance-os. Rewritten from the original Hono/Cloudflare Workers/D1 implementation onto Fastify/TypeScript/Postgres.\n\n**Errors** always use one shape (RFC 7807: type, title, status, detail, instance; plus `error`, a copy of `detail`). An unknown URL is 404; a known URL with the wrong method is 405 with an `Allow` header. **API Library keys** are for servers: browsers are not allowed to send the `x-api-key` header cross-site, so keep keys out of web pages.',
+      'Desk business-management API — self-service email/password auth, business-setup drafts/businesses/memberships, and an admin table browser aggregating this service plus registry-api and compliance-os. Rewritten from the original Hono/Cloudflare Workers/D1 implementation onto Fastify/TypeScript/Postgres.\n\n**Errors** always use one shape (RFC 7807: type, title, status, detail, instance; plus `error`, a copy of `detail`, and `code`, a stable machine-readable identifier: branch on that, not on the wording). An unknown URL is 404; a known URL with the wrong method is 405 with an `Allow` header. **API Library keys** are for servers: browsers are not allowed to send the `x-api-key` header cross-site, so keep keys out of web pages.',
   },
   // Every path below is registered twice in src/app.ts — once unprefixed
   // (legacy, kept working identically for the current Flutter client) and
@@ -132,6 +142,7 @@ export const OPENAPI_SPEC = {
     },
     schemas: {
       Problem: problemSchema,
+      ErrorCode: { type: 'string', enum: Object.keys(ERROR_CODES), description: Object.entries(ERROR_CODES).map(([c, d]) => c + ': ' + d).join(String.fromCharCode(10)) },
       PublicUser: publicUserSchema,
       Ok: okSchema,
     },
@@ -296,7 +307,7 @@ export const OPENAPI_SPEC = {
       get: {
         tags: ['Auth'],
         summary: 'Get the current session user',
-        security: [{ SessionToken: [] }],
+        security: [{ SessionToken: [] }, { ApiLibraryKey: [] }],
         responses: {
           '200': { description: 'OK', content: { 'application/json': { schema: { type: 'object', properties: { user: { $ref: '#/components/schemas/PublicUser' } } } } } },
           '401': { description: 'Session expired or invalid' },
@@ -594,7 +605,47 @@ export const OPENAPI_SPEC = {
  * screens use. No admin, no auth internals, no legacy proxies. Served without
  * a key at GET /v1/gateway/openapi.json.
  */
-type SpecOperation = { security?: Array<Record<string, unknown>> };
+type SpecOperation = {
+  security?: Array<Record<string, unknown>>;
+  requestBody?: unknown;
+  parameters?: unknown[];
+  responses?: Record<string, unknown>;
+};
+
+const problemContent = { 'application/problem+json': { schema: { $ref: '#/components/schemas/Problem' } } };
+const problemResponse = (description: string) => ({ description, content: problemContent });
+
+/**
+ * Every operation documents the errors it can answer with, in the one error shape, without each entry repeating them:
+ * 400 when it takes a body or parameters, 401 when it needs credentials, 404 when the path names a thing, 429 always
+ * (rate limits), 500 always. An entry that already documents a status keeps its own wording (given the Problem body).
+ */
+function withStandardResponses<T extends { paths: Record<string, Record<string, unknown>> }>(spec: T): T {
+  for (const [path, operations] of Object.entries(spec.paths)) {
+    for (const [method, raw] of Object.entries(operations)) {
+      const op = raw as SpecOperation;
+      const responses = (op.responses ??= {});
+      const add = (status: string, description: string) => {
+        const existing = responses[status] as { description?: string; content?: unknown } | undefined;
+        if (!existing) responses[status] = problemResponse(description);
+        else if (!existing.content) responses[status] = { ...existing, content: problemContent };
+      };
+      if (op.requestBody || (op.parameters && op.parameters.length > 0) || method === 'post' || method === 'patch') add('400', 'The request was not valid (see `code` and `errors`)');
+      if ((op.security ?? []).length > 0) add('401', 'Missing, invalid or expired credentials');
+      if (path.includes('{')) add('404', 'No such item');
+      add('429', 'Too many requests (see the Retry-After header)');
+      add('500', 'Something went wrong on our side');
+      // Any other error status an entry already documents gets the same body.
+      for (const [status, response] of Object.entries(responses)) {
+        const r = response as { content?: unknown };
+        if (/^[45]/.test(status) && !r.content && !path.startsWith('/health')) responses[status] = { ...r, content: problemContent };
+      }
+    }
+  }
+  return spec;
+}
+
+export const OPENAPI_SPEC = withStandardResponses(BASE_SPEC);
 
 function buildLibrarySpec() {
   const paths: Record<string, Record<string, unknown>> = {};

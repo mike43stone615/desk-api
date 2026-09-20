@@ -114,6 +114,12 @@ import { registerLibraryUi } from './routes/libraryUi';
 // did I last edit this service" would catch that immediately.
 const PROCESS_STARTED_AT = new Date().toISOString();
 
+const REQUEST_ID_PATTERN = /^[A-Za-z0-9._:-]{8,64}$/;
+/** The caller x-request-id if it is safe to log and echo back, else undefined. */
+export function acceptableRequestId(value: unknown): string | undefined {
+  return typeof value === 'string' && REQUEST_ID_PATTERN.test(value) ? value : undefined;
+}
+
 // Request body sizes. The default is spelled out (instead of relying on Fastify's) and the small routes, whose real
 // bodies are a few hundred bytes, get a far lower ceiling so they cannot be used to make the server buffer megabytes.
 const BODY_LIMIT_DEFAULT = 1_048_576; // 1 MiB: drafts (up to 256 KB) and forwarded research requests
@@ -127,8 +133,10 @@ const signedIn = { preHandler: requireAuth };
 export async function buildApp(options: { logStream?: { write: (line: string) => void } } = {}): Promise<FastifyInstance> {
   const app = Fastify({
     logger: options.logStream ? { ...loggerOptions(config.logLevel), stream: options.logStream } : loggerOptions(config.logLevel),
-    requestIdHeader: 'x-request-id',
-    genReqId: () => randomUUID(),
+    // A caller may supply its own request id (to follow a call through the logs), but only if it is short and plain:
+    // anything else (huge, containing newlines or control characters, log-injection attempts) is replaced by a fresh id.
+    requestIdHeader: false,
+    genReqId: (req) => acceptableRequestId(req.headers['x-request-id']) ?? randomUUID(),
     // /setup/drafts/ and //health reach the same handler as /setup/drafts and
     // /health, instead of one being a 404 and another matching a :param route
     // with an empty value.
@@ -142,6 +150,18 @@ export async function buildApp(options: { logStream?: { write: (line: string) =>
 
   app.addHook('onRequest', async (request, reply) => {
     reply.header('x-request-id', request.id);
+  });
+
+  // /v1 conventions. A successful DELETE answers 204 No Content with no body, instead of the legacy unprefixed
+  // 200 {"ok":true} (which existing clients rely on and keep getting). See docs/API-VERSIONING.md.
+  app.addHook('onSend', async (request, reply, payload) => {
+    if (request.method === 'DELETE' && request.url.startsWith('/v1/') && reply.statusCode === 200 && payload === '{"ok":true}') {
+      reply.code(204);
+      reply.removeHeader('content-type');
+      reply.removeHeader('content-length');
+      return '';
+    }
+    return payload;
   });
 
   // API answers (JSON, including errors) carry account data or a one-time key,

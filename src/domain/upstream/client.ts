@@ -32,8 +32,9 @@ export class UpstreamError extends HttpError {
     status: number,
     message: string,
     readonly retryAfterSeconds?: number,
+    code?: string,
   ) {
-    super(status, message);
+    super(status, message, code);
     this.name = 'UpstreamError';
   }
 }
@@ -83,7 +84,7 @@ async function readCapped(res: Response, maxBytes: number): Promise<string> {
   const declared = Number(res.headers.get('content-length'));
   if (Number.isFinite(declared) && declared > maxBytes) {
     await res.body?.cancel().catch(() => {});
-    throw new UpstreamError(502, 'The upstream API sent an answer that was too large.');
+    throw new UpstreamError(502, 'The upstream API sent an answer that was too large.', undefined, 'upstream_response_too_large');
   }
   if (!res.body) return '';
   const reader = res.body.getReader();
@@ -95,7 +96,7 @@ async function readCapped(res: Response, maxBytes: number): Promise<string> {
     total += value.byteLength;
     if (total > maxBytes) {
       await reader.cancel().catch(() => {});
-      throw new UpstreamError(502, 'The upstream API sent an answer that was too large.');
+      throw new UpstreamError(502, 'The upstream API sent an answer that was too large.', undefined, 'upstream_response_too_large');
     }
     chunks.push(value);
   }
@@ -107,11 +108,11 @@ function acquire(policy: UpstreamPolicy, holder: string | undefined): () => void
   const holderKey = holder ? `holder:${policy.service}:${holder}` : undefined;
   if ((inFlight.get(serviceKey) ?? 0) >= policy.maxInFlight) {
     upstreamCallsTotal.inc({ service: policy.service, outcome: 'overloaded' });
-    throw new UpstreamError(503, 'This API is busy right now. Please try again in a moment.', 2);
+    throw new UpstreamError(503, 'This API is busy right now. Please try again in a moment.', 2, 'service_busy');
   }
   if (holderKey && policy.maxInFlightPerHolder && (inFlight.get(holderKey) ?? 0) >= policy.maxInFlightPerHolder) {
     upstreamCallsTotal.inc({ service: policy.service, outcome: 'caller_limited' });
-    throw new UpstreamError(429, 'Too many of your requests are already in progress. Wait for one to finish.', 1);
+    throw new UpstreamError(429, 'Too many of your requests are already in progress. Wait for one to finish.', 1, 'too_many_in_flight');
   }
   inFlight.set(serviceKey, (inFlight.get(serviceKey) ?? 0) + 1);
   if (holderKey) inFlight.set(holderKey, (inFlight.get(holderKey) ?? 0) + 1);
@@ -136,7 +137,7 @@ export async function callUpstream(
   const state = breakerState(policy.service, now);
   if (state === 'open') {
     upstreamCallsTotal.inc({ service: policy.service, outcome: 'circuit_open' });
-    throw new UpstreamError(503, 'This API is temporarily unavailable. Please try again shortly.', Math.ceil(BREAKER_OPEN_MS / 1000));
+    throw new UpstreamError(503, 'This API is temporarily unavailable. Please try again shortly.', Math.ceil(BREAKER_OPEN_MS / 1000), 'upstream_unavailable');
   }
 
   const release = acquire(policy, holder);
@@ -145,7 +146,7 @@ export async function callUpstream(
     if (b.trialInFlight) {
       release();
       upstreamCallsTotal.inc({ service: policy.service, outcome: 'circuit_open' });
-      throw new UpstreamError(503, 'This API is temporarily unavailable. Please try again shortly.', 5);
+      throw new UpstreamError(503, 'This API is temporarily unavailable. Please try again shortly.', 5, 'upstream_unavailable');
     }
     b.trialInFlight = true; // exactly one call tests whether the backend is back
   }
@@ -177,7 +178,7 @@ export async function callUpstream(
           recordFailure(policy.service, Date.now());
           throw err;
         }
-        lastError = new UpstreamError(502, 'The upstream API could not be reached.');
+        lastError = new UpstreamError(502, 'The upstream API could not be reached.', undefined, 'upstream_unreachable');
         if (attempt < attempts) {
           upstreamCallsTotal.inc({ service: policy.service, outcome: 'retried' });
           await sleep(RETRY_DELAY_MS[attempt - 1] ?? 300);
@@ -187,7 +188,7 @@ export async function callUpstream(
         upstreamCallsTotal.inc({ service: policy.service, outcome: 'error' });
       }
     }
-    throw lastError ?? new UpstreamError(502, 'The upstream API could not be reached.');
+    throw lastError ?? new UpstreamError(502, 'The upstream API could not be reached.', undefined, 'upstream_unreachable');
   } finally {
     release();
   }

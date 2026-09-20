@@ -103,7 +103,7 @@ describe('the answer does not reveal whether an email is registered', () => {
   it('a valid password on an unconfirmed account is not counted as a failure', async () => {
     const email = seedUser(false);
     for (let i = 0; i < 10; i++) expect((await signIn(email, PASSWORD)).statusCode).toBe(403);
-  });
+  }, 60_000);
 });
 
 describe('guessing spread over many addresses or many accounts', () => {

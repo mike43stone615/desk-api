@@ -40,7 +40,7 @@ function parseDraftJson(raw: string): Record<string, unknown> {
       ? (parsed as Record<string, unknown>)
       : {};
   } catch {
-    throw new HttpError(500, 'Saved setup draft could not be read.');
+    throw new HttpError(500, 'Saved setup draft could not be read.', 'draft_unreadable');
   }
 }
 
@@ -86,7 +86,7 @@ async function requireBusinessMembership(
     [businessId, userId],
   );
   const row = rows[0];
-  if (!row) throw new HttpError(404, 'Business not found.');
+  if (!row) throw new HttpError(404, 'Business not found.', 'business_not_found');
   return row;
 }
 
@@ -109,6 +109,23 @@ function formatMemberRow(row: Record<string, unknown>) {
   };
 }
 
+/** An invitation made in the last 24 hours: repeating it is a no-op rather than another email. */
+function isRecent(iso: string): boolean {
+  const t = Date.parse(iso);
+  return Number.isFinite(t) && Date.now() - t < 24 * 3_600_000;
+}
+
+const etagFor = (version: number) => `"${version}"`;
+
+/** null = no header; '*' = any version; a number = that version; 'invalid' = unusable. Accepts "3", W/"3" and 3. */
+function parseIfMatch(header: unknown): number | '*' | null | 'invalid' {
+  if (header === undefined) return null;
+  if (typeof header !== 'string') return 'invalid';
+  const value = header.trim().replace(/^W\//, '').replace(/^"(.*)"$/, '$1');
+  if (value === '*') return '*';
+  return /^\d{1,9}$/.test(value) ? Number(value) : 'invalid';
+}
+
 export async function listDraftsHandler(request: FastifyRequest, reply: FastifyReply) {
   await requireAuth(request, reply);
   await requireConfirmedEmail(request, reply);
@@ -125,13 +142,14 @@ export async function getDraftHandler(request: FastifyRequest, reply: FastifyRep
   await requireConfirmedEmail(request, reply);
   const user = request.currentUser!;
   const { id } = request.params as { id: string };
-  const { rows } = await pool.query<DraftRow>(
-    `SELECT id, draft_json, created_at, updated_at FROM business_setup_drafts WHERE id = $1 AND user_id = $2`,
+  const { rows } = await pool.query<DraftRow & { version: number }>(
+    `SELECT id, draft_json, version, created_at, updated_at FROM business_setup_drafts WHERE id = $1 AND user_id = $2`,
     [id, user.id],
   );
   const row = rows[0];
-  if (!row) throw new HttpError(404, 'Draft not found.');
-  return reply.send({ id: row.id, draft: parseDraftJson(row.draft_json), updatedAt: row.updated_at });
+  if (!row) throw new HttpError(404, 'Draft not found.', 'draft_not_found');
+  reply.header('ETag', etagFor(row.version));
+  return reply.send({ id: row.id, draft: parseDraftJson(row.draft_json), updatedAt: row.updated_at, version: row.version });
 }
 
 export async function createDraftHandler(request: FastifyRequest, reply: FastifyReply) {
@@ -139,22 +157,36 @@ export async function createDraftHandler(request: FastifyRequest, reply: Fastify
   await requireConfirmedEmail(request, reply);
   const user = request.currentUser!;
 
-  const { rows: countRows } = await pool.query<{ count: string }>(
-    `SELECT COUNT(*)::text AS count FROM business_setup_drafts WHERE user_id = $1`,
-    [user.id],
-  );
-  if (Number(countRows[0]?.count ?? 0) >= MAX_INCOMPLETE_DRAFTS) {
-    throw new HttpError(409, 'Too many incomplete business registrations. Finish one before starting a new one.');
-  }
-
+  // Counting and inserting must be one indivisible step per person, or several simultaneous requests all see "4 of 5" and
+  // all insert. Locking the person row makes them queue: the fifth passes, the sixth is refused.
   const id = generateId();
   const now = nowUtc();
-  await pool.query(
-    `INSERT INTO business_setup_drafts (id, user_id, draft_json, created_at, updated_at) VALUES ($1, $2, $3, $4, $4)`,
-    [id, user.id, JSON.stringify({}), now],
-  );
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    await client.query(`SELECT id FROM users WHERE id = $1 FOR UPDATE`, [user.id]);
+    const { rows: countRows } = await client.query<{ count: string }>(
+      `SELECT COUNT(*)::text AS count FROM business_setup_drafts WHERE user_id = $1`,
+      [user.id],
+    );
+    if (Number(countRows[0]?.count ?? 0) >= MAX_INCOMPLETE_DRAFTS) {
+      await client.query('ROLLBACK');
+      throw new HttpError(409, 'Too many incomplete business registrations. Finish one before starting a new one.', 'draft_limit_reached');
+    }
+    await client.query(
+      `INSERT INTO business_setup_drafts (id, user_id, draft_json, created_at, updated_at) VALUES ($1, $2, $3, $4, $4)`,
+      [id, user.id, JSON.stringify({}), now],
+    );
+    await client.query('COMMIT');
+  } catch (err) {
+    if (!(err instanceof HttpError)) await client.query('ROLLBACK').catch(() => {});
+    throw err;
+  } finally {
+    client.release();
+  }
 
-  return reply.status(201).send({ id, draft: {} });
+  reply.header('ETag', etagFor(1));
+  return reply.status(201).send({ id, draft: {}, version: 1 });
 }
 
 export async function patchDraftHandler(request: FastifyRequest, reply: FastifyReply) {
@@ -165,20 +197,35 @@ export async function patchDraftHandler(request: FastifyRequest, reply: FastifyR
 
   const parsed = DraftPatchSchema.safeParse(request.body ?? {});
   if (!parsed.success) {
-    throw new HttpError(400, parsed.error.issues.find((i) => i.code === 'custom')?.message ?? 'Draft must be a JSON object.');
+    throw new HttpError(400, parsed.error.issues.find((i) => i.code === 'custom')?.message ?? 'Draft must be a JSON object.', 'validation_error');
   }
 
   const draftJson = JSON.stringify(parsed.data.draft);
-  if (draftJson.length > MAX_DRAFT_BYTES) throw new HttpError(413, 'Setup draft is too large.');
+  if (draftJson.length > MAX_DRAFT_BYTES) throw new HttpError(413, 'Setup draft is too large.', 'draft_too_large');
 
   const now = nowUtc();
-  const result = await pool.query(
-    `UPDATE business_setup_drafts SET draft_json = $1, updated_at = $2 WHERE id = $3 AND user_id = $4`,
-    [draftJson, now, id, user.id],
+  // If-Match: the version the client last read. A save that would overwrite someone else's newer save is refused.
+  const expected = parseIfMatch(request.headers['if-match']);
+  if (expected === 'invalid') throw new HttpError(400, 'If-Match must be a draft ETag such as "3", or *.', 'validation_error');
+  const result = await pool.query<{ version: number }>(
+    expected === null || expected === '*'
+      ? `UPDATE business_setup_drafts SET draft_json = $1, updated_at = $2, version = version + 1 WHERE id = $3 AND user_id = $4 RETURNING version`
+      : `UPDATE business_setup_drafts SET draft_json = $1, updated_at = $2, version = version + 1 WHERE id = $3 AND user_id = $4 AND version = $5 RETURNING version`,
+    expected === null || expected === '*' ? [draftJson, now, id, user.id] : [draftJson, now, id, user.id, expected],
   );
-  if (result.rowCount === 0) throw new HttpError(404, 'Draft not found.');
+  if (result.rowCount === 0) {
+    const { rows: still } = await pool.query<{ id: string; version: number }>(
+      `SELECT id, draft_json, version, created_at, updated_at FROM business_setup_drafts WHERE id = $1 AND user_id = $2`,
+      [id, user.id],
+    );
+    if (still.length === 0) throw new HttpError(404, 'Draft not found.', 'draft_not_found');
+    reply.header('ETag', etagFor(still[0].version));
+    throw new HttpError(412, 'This draft was changed somewhere else since you loaded it. Reload it before saving.', 'draft_version_conflict');
+  }
 
-  return reply.send({ ok: true, updatedAt: now });
+  const version = result.rows[0]?.version ?? 0;
+  reply.header('ETag', etagFor(version));
+  return reply.send({ ok: true, updatedAt: now, version });
 }
 
 export async function deleteDraftHandler(request: FastifyRequest, reply: FastifyReply) {
@@ -187,7 +234,7 @@ export async function deleteDraftHandler(request: FastifyRequest, reply: Fastify
   const user = request.currentUser!;
   const { id } = request.params as { id: string };
   const result = await pool.query(`DELETE FROM business_setup_drafts WHERE id = $1 AND user_id = $2`, [id, user.id]);
-  if (result.rowCount === 0) throw new HttpError(404, 'Draft not found.');
+  if (result.rowCount === 0) throw new HttpError(404, 'Draft not found.', 'draft_not_found');
   return reply.send({ ok: true });
 }
 
@@ -202,17 +249,17 @@ export async function completeDraftHandler(request: FastifyRequest, reply: Fasti
     [id, user.id],
   );
   const row = rows[0];
-  if (!row) throw new HttpError(404, 'Draft not found.');
+  if (!row) throw new HttpError(404, 'Draft not found.', 'draft_not_found');
 
   const draft = parseDraftJson(row.draft_json);
   const name = typeof draft.businessName === 'string' ? draft.businessName.trim() : '';
-  if (!name) throw new HttpError(400, 'Enter a business name before finishing setup.');
+  if (!name) throw new HttpError(400, 'Enter a business name before finishing setup.', 'business_name_required');
   if (name.length > MAX_BUSINESS_NAME_LENGTH) {
-    throw new HttpError(400, `Business name must be at most ${MAX_BUSINESS_NAME_LENGTH} characters.`);
+    throw new HttpError(400, `Business name must be at most ${MAX_BUSINESS_NAME_LENGTH} characters.`, 'business_name_too_long');
   }
   const industry = typeof draft.industry === 'string' && draft.industry.trim() ? draft.industry.trim() : null;
   if (industry && industry.length > MAX_INDUSTRY_LENGTH) {
-    throw new HttpError(400, `Industry must be at most ${MAX_INDUSTRY_LENGTH} characters.`);
+    throw new HttpError(400, `Industry must be at most ${MAX_INDUSTRY_LENGTH} characters.`, 'industry_too_long');
   }
 
   const businessId = generateId();
@@ -313,18 +360,18 @@ export async function inviteBusinessMemberHandler(request: FastifyRequest, reply
   const { id: businessId } = request.params as { id: string };
   const requester = await requireBusinessMembership(businessId, user.id);
   if (!canManageMembers(requester.role)) {
-    throw new HttpError(403, 'Only owners and admins can manage business access.');
+    throw new HttpError(403, 'Only owners and admins can manage business access.', 'insufficient_role');
   }
 
   const parsed = MemberInviteSchema.safeParse(request.body ?? {});
   if (!parsed.success) {
     const tooLong = parsed.error.issues.find((i) => i.code === 'too_big');
-    throw new HttpError(400, tooLong ? tooLong.message : 'Member email is required.');
+    throw new HttpError(400, tooLong ? tooLong.message : 'Member email is required.', 'validation_error');
   }
   const email = parsed.data.email.trim().toLowerCase();
   const role = parseMemberRole(parsed.data.role);
   if (role === 'owner' && requester.role !== 'owner') {
-    throw new HttpError(403, 'Only owners can add another owner.');
+    throw new HttpError(403, 'Only owners can add another owner.', 'owner_role_required');
   }
 
   const { rows: invitedRows } = await pool.query<{ id: string }>(`SELECT id FROM users WHERE email = $1`, [email]);
@@ -346,8 +393,14 @@ export async function inviteBusinessMemberHandler(request: FastifyRequest, reply
       [businessId, email],
     );
     if (Number(waiting[0]?.count ?? 0) >= MAX_EMAIL_INVITES_PER_BUSINESS) {
-      throw new HttpError(409, 'This business has too many invitations waiting. Remove some before inviting more people.');
+      throw new HttpError(409, 'This business has too many invitations waiting. Remove some before inviting more people.', 'invite_limit_reached');
     }
+    // Sending the same invitation again (a double click, a retry) changes nothing and sends no second email.
+    const { rows: already } = await pool.query<{ role: string; invited_at: string }>(
+      `SELECT role, invited_at FROM business_email_invites WHERE business_id = $1 AND email = $2`,
+      [businessId, email],
+    );
+    if (already[0] && already[0].role === role && isRecent(already[0].invited_at)) return reply.send({ ok: true });
     await pool.query(
       `INSERT INTO business_email_invites (id, business_id, email, role, invited_by_user_id, invited_at)
        VALUES ($1, $2, $3, $4, $5, $6)
@@ -357,6 +410,14 @@ export async function inviteBusinessMemberHandler(request: FastifyRequest, reply
     );
     await sendBusinessInviteSignupEmail(config, email, businessName, user.email, request.id);
     return reply.send({ ok: true });
+  }
+
+  const { rows: existing } = await pool.query<{ accepted_at: string | null; role: string; invited_at: string | null }>(
+    `SELECT accepted_at, role, invited_at FROM business_memberships WHERE business_id = $1 AND user_id = $2`,
+    [businessId, invitedUser.id],
+  );
+  if (existing[0] && !existing[0].accepted_at && existing[0].role === role && existing[0].invited_at && isRecent(existing[0].invited_at)) {
+    return reply.send({ ok: true }); // the same pending invitation again: nothing to change, no second email
   }
 
   // Pending until the invited user accepts — see acceptBusinessInviteHandler.
@@ -376,7 +437,7 @@ export async function inviteBusinessMemberHandler(request: FastifyRequest, reply
     [generateId(), businessId, invitedUser.id, role, user.id, now],
   );
   if (result.rowCount === 0) {
-    throw new HttpError(409, 'That person is already a member of this business.');
+    throw new HttpError(409, 'That person is already a member of this business.', 'already_member');
   }
 
   // Best-effort: sendEmail already swallows its own failures (logged, not
@@ -434,7 +495,7 @@ export async function acceptBusinessInviteHandler(request: FastifyRequest, reply
      WHERE id = $2 AND user_id = $3 AND accepted_at IS NULL`,
     [now, membershipId, user.id],
   );
-  if (result.rowCount === 0) throw new HttpError(404, 'Invite not found.');
+  if (result.rowCount === 0) throw new HttpError(404, 'Invite not found.', 'invite_not_found');
 
   return reply.send({ ok: true });
 }
@@ -449,7 +510,7 @@ export async function declineBusinessInviteHandler(request: FastifyRequest, repl
     `DELETE FROM business_memberships WHERE id = $1 AND user_id = $2 AND accepted_at IS NULL`,
     [membershipId, user.id],
   );
-  if (result.rowCount === 0) throw new HttpError(404, 'Invite not found.');
+  if (result.rowCount === 0) throw new HttpError(404, 'Invite not found.', 'invite_not_found');
 
   return reply.send({ ok: true });
 }
@@ -461,33 +522,49 @@ export async function removeBusinessMemberHandler(request: FastifyRequest, reply
   const { id: businessId, membershipId } = request.params as { id: string; membershipId: string };
   const requester = await requireBusinessMembership(businessId, user.id);
   if (!canManageMembers(requester.role)) {
-    throw new HttpError(403, 'Only owners and admins can manage business access.');
+    throw new HttpError(403, 'Only owners and admins can manage business access.', 'insufficient_role');
   }
 
-  const { rows: targetRows } = await pool.query<{ id: string; user_id: string; role: BusinessMemberRole }>(
-    `SELECT id, user_id, role FROM business_memberships WHERE id = $1 AND business_id = $2`,
-    [membershipId, businessId],
-  );
-  const target = targetRows[0];
-  if (!target) {
-    // Not a member: it may be an invitation to an address with no account yet.
-    const removedInvite = await pool.query(`DELETE FROM business_email_invites WHERE id = $1 AND business_id = $2`, [membershipId, businessId]);
-    if ((removedInvite.rowCount ?? 0) > 0) return reply.send({ ok: true });
-    throw new HttpError(404, 'Membership not found.');
-  }
-  if (target.role === 'owner' && requester.role !== 'owner') {
-    throw new HttpError(403, 'Only owners can remove another owner.');
-  }
-  if (target.role === 'owner') {
-    const { rows: ownerRows } = await pool.query<{ count: string }>(
-      `SELECT COUNT(*)::text AS count FROM business_memberships WHERE business_id = $1 AND role = 'owner'`,
-      [businessId],
+  // Checking "is this the last owner?" and deleting must be one indivisible step per business. Otherwise two owners
+  // removing each other at the same moment each see "two owners", both delete, and the business has none. Locking the
+  // business row makes the second request wait and then see the truth.
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    await client.query(`SELECT id FROM businesses WHERE id = $1 FOR UPDATE`, [businessId]);
+    const { rows: targetRows } = await client.query<{ id: string; user_id: string; role: BusinessMemberRole }>(
+      `SELECT id, user_id, role FROM business_memberships WHERE id = $1 AND business_id = $2`,
+      [membershipId, businessId],
     );
-    if (Number(ownerRows[0]?.count ?? 0) <= 1) {
-      throw new HttpError(409, 'A business must have at least one owner.');
+    const target = targetRows[0];
+    if (!target) {
+      // Not a member: it may be an invitation to an address with no account yet.
+      const removedInvite = await client.query(`DELETE FROM business_email_invites WHERE id = $1 AND business_id = $2`, [membershipId, businessId]);
+      if ((removedInvite.rowCount ?? 0) > 0) {
+        await client.query('COMMIT');
+        return reply.send({ ok: true });
+      }
+      throw new HttpError(404, 'Membership not found.', 'membership_not_found');
     }
+    if (target.role === 'owner' && requester.role !== 'owner') {
+      throw new HttpError(403, 'Only owners can remove another owner.', 'owner_role_required');
+    }
+    if (target.role === 'owner') {
+      const { rows: ownerRows } = await client.query<{ count: string }>(
+        `SELECT COUNT(*)::text AS count FROM business_memberships WHERE business_id = $1 AND role = 'owner' AND accepted_at IS NOT NULL`,
+        [businessId],
+      );
+      if (Number(ownerRows[0]?.count ?? 0) <= 1) {
+        throw new HttpError(409, 'A business must have at least one owner.', 'last_owner');
+      }
+    }
+    await client.query(`DELETE FROM business_memberships WHERE id = $1 AND business_id = $2`, [membershipId, businessId]);
+    await client.query('COMMIT');
+  } catch (err) {
+    await client.query('ROLLBACK').catch(() => {});
+    throw err;
+  } finally {
+    client.release();
   }
-
-  await pool.query(`DELETE FROM business_memberships WHERE id = $1 AND business_id = $2`, [membershipId, businessId]);
   return reply.send({ ok: true });
 }

@@ -40,7 +40,7 @@ export async function createGatewayKeyHandler(request: FastifyRequest, reply: Fa
   await requireAuth(request, reply);
   await requireConfirmedEmail(request, reply);
   const parsed = CreateGatewayKeySchema.safeParse(request.body ?? {});
-  if (!parsed.success) throw new HttpError(400, parsed.error.issues.map((i) => i.message).join('; '));
+  if (!parsed.success) throw new HttpError(400, parsed.error.issues.map((i) => i.message).join('; '), 'validation_error');
   const user = request.currentUser!;
 
   try {
@@ -54,11 +54,11 @@ export async function createGatewayKeyHandler(request: FastifyRequest, reply: Fa
     return reply.status(201).send({ apiKey: created });
   } catch (err) {
     if (err instanceof GatewayKeyError) {
-      throw new HttpError(err.code === 'limit_reached' ? 409 : 503, err.message);
+      throw new HttpError(err.code === 'limit_reached' ? 409 : 503, err.message, `api_key_${err.code}`);
     }
     if (err instanceof BrokerError) {
       request.log.error({ err }, 'gateway key provisioning failed');
-      throw new HttpError(502, 'Could not set up access to one of the selected APIs. Nothing was created; please try again.');
+      throw new HttpError(502, 'Could not set up access to one of the selected APIs. Nothing was created; please try again.', 'upstream_provisioning_failed');
     }
     throw err;
   }
@@ -80,7 +80,7 @@ export async function revokeGatewayKeyHandler(request: FastifyRequest, reply: Fa
     return reply.status(204).send();
   } catch (err) {
     if (err instanceof GatewayKeyError) {
-      throw new HttpError(err.code === 'not_found' ? 404 : 409, err.message);
+      throw new HttpError(err.code === 'not_found' ? 404 : 409, err.message, `api_key_${err.code}`);
     }
     throw err;
   }

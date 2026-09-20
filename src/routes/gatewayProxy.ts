@@ -25,6 +25,8 @@ interface UpstreamRoute {
   forwardQuery?: boolean;
   /** A lookup that can safely be sent twice, so one quick retry is allowed on a network error / 502 / 503 / 504. */
   idempotent?: boolean;
+  /** This spelling still works but is superseded: the public path to use instead (answered with Deprecation + Link headers). */
+  deprecatedFor?: string;
 }
 
 const exact = (p: string) => (path: string) => (path === p ? p : null);
@@ -46,10 +48,10 @@ const REGISTRY_NAME_CHECKS: Array<[publicPath: string, upstreamPath: string]> = 
 const REGISTRY_ROUTES: UpstreamRoute[] = [
   ...REGISTRY_NAME_CHECKS.flatMap(([publicPath, upstreamPath]): UpstreamRoute[] => [
     { method: 'POST', match: alias(publicPath, upstreamPath), idempotent: true },
-    { method: 'POST', match: exact(upstreamPath), idempotent: true },
+    { method: 'POST', match: exact(upstreamPath), idempotent: true, deprecatedFor: publicPath },
   ]),
   { method: 'GET', match: alias('/sync-status', '/functions/v1/registry-sync-status'), idempotent: true },
-  { method: 'GET', match: exact('/functions/v1/registry-sync-status'), idempotent: true },
+  { method: 'GET', match: exact('/functions/v1/registry-sync-status'), idempotent: true, deprecatedFor: '/sync-status' },
   { method: 'GET', match: exact('/business-structures'), forwardQuery: true, idempotent: true },
   { method: 'POST', match: exact('/business-structures/recommend'), idempotent: true },
   {
@@ -79,10 +81,10 @@ const PASSTHROUGH_HEADERS = ['content-type', 'retry-after', 'x-ratelimit-limit',
 
 async function forward(service: BrokeredService, request: FastifyRequest, reply: FastifyReply) {
   const presented = request.headers['x-api-key'];
-  if (!looksLikeGatewayKey(presented)) throw new HttpError(401, 'An API key is required (x-api-key header).');
+  if (!looksLikeGatewayKey(presented)) throw new HttpError(401, 'An API key is required (x-api-key header).', 'api_key_required');
   const verified = await gatewayApiKeys.verify(presented);
-  if (!verified) throw new HttpError(401, 'Invalid or revoked API key.');
-  if (!verified.services.has(service)) throw new HttpError(403, 'This API key is not enabled for this API.');
+  if (!verified) throw new HttpError(401, 'Invalid or revoked API key.', 'invalid_api_key');
+  if (!verified.services.has(service)) throw new HttpError(403, 'This API key is not enabled for this API.', 'api_key_service_not_enabled');
 
   const spec = SERVICES[service];
   const rest = '/' + ((request.params as { '*': string })['*'] ?? '');
@@ -97,11 +99,19 @@ async function forward(service: BrokeredService, request: FastifyRequest, reply:
       break;
     }
   }
-  if (!upstreamPath || !route) throw new HttpError(404, 'Unknown endpoint for this API.');
+  if (!upstreamPath || !route) throw new HttpError(404, 'Unknown endpoint for this API.', 'unknown_endpoint');
+
+  if (route.deprecatedFor) {
+    // RFC 9745 / RFC 8288: this spelling keeps working, and says what to use instead.
+    const prefix = request.url.startsWith('/v1/') ? '/v1' : '';
+    const successor = `${prefix}/gateway/${service === 'registry_api' ? 'registry' : 'market'}${route.deprecatedFor}`;
+    reply.header('Deprecation', 'true');
+    reply.header('Link', `<${successor}>; rel="successor-version"`);
+  }
 
   const baseUrl = spec.baseUrl();
   const backendKey = await gatewayApiKeys.getBackendKey(verified.id, service);
-  if (!baseUrl || !backendKey) throw new HttpError(503, 'This API is temporarily unavailable for this key.');
+  if (!baseUrl || !backendKey) throw new HttpError(503, 'This API is temporarily unavailable for this key.', 'api_unavailable');
 
   const queryIndex = request.url.indexOf('?');
   const query = route.forwardQuery && queryIndex >= 0 ? request.url.slice(queryIndex) : '';
@@ -127,7 +137,7 @@ async function forward(service: BrokeredService, request: FastifyRequest, reply:
   // the developer's mistake — so it must not look like their key failing.
   if (upstream.status === 401 || upstream.status === 403) {
     request.log.error({ service, keyId: verified.id, status: upstream.status }, 'gateway upstream rejected brokered key');
-    throw new HttpError(502, 'The upstream API rejected this request. Please contact support.');
+    throw new HttpError(502, 'The upstream API rejected this request. Please contact support.', 'upstream_rejected');
   }
   for (const name of PASSTHROUGH_HEADERS) {
     const value = upstream.headers.get(name);

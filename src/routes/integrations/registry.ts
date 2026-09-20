@@ -18,7 +18,7 @@ import { callUpstream } from '../../domain/upstream/client';
 import { REGISTRY_POLICY } from '../../domain/upstream/policies';
 
 async function proxyGet(reply: FastifyReply, path: string) {
-  if (!config.registryApiUrl) throw new HttpError(503, 'Registry service is not configured.');
+  if (!config.registryApiUrl) throw new HttpError(503, 'Registry service is not configured.', 'upstream_not_configured');
   const headers: Record<string, string> = {};
   if (config.registryApiSecret) headers['x-api-key'] = config.registryApiSecret;
   // Matches marketResearch.ts's existing timeout - a hung registry-api instance
@@ -29,7 +29,7 @@ async function proxyGet(reply: FastifyReply, path: string) {
 }
 
 async function proxyPostWithBody(reply: FastifyReply, path: string, body: unknown) {
-  if (!config.registryApiUrl) throw new HttpError(503, 'Registry service is not configured.');
+  if (!config.registryApiUrl) throw new HttpError(503, 'Registry service is not configured.', 'upstream_not_configured');
   const headers: Record<string, string> = { 'Content-Type': 'application/json' };
   if (config.registryApiSecret) headers['x-api-key'] = config.registryApiSecret;
   // These POSTs are name/structure lookups: repeating one is harmless.
@@ -106,7 +106,7 @@ export async function businessStructureBySlugHandler(request: FastifyRequest, re
   const { slug } = request.params as { slug: string };
   return proxyGetOrFallback(reply, `/business-structures/${slug}`, () => {
     const structure = getBusinessStructure(slug);
-    if (!structure) throw new HttpError(404, 'Business structure not found.');
+    if (!structure) throw new HttpError(404, 'Business structure not found.', 'structure_not_found');
     return { structure };
   });
 }

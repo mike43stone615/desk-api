@@ -40,16 +40,16 @@ export const GATEWAY_KEY_ALLOWED_ROUTES: ReadonlySet<string> = new Set([
 
 async function authenticateWithGatewayKey(request: FastifyRequest, apiKey: string): Promise<void> {
   const verified = await gatewayApiKeys.verify(apiKey);
-  if (!verified) throw new HttpError(401, 'Invalid or revoked API key.');
+  if (!verified) throw new HttpError(401, 'Invalid or revoked API key.', 'invalid_api_key');
   if (!verified.services.has('desk_api')) {
-    throw new HttpError(403, 'This API key is not enabled for the Desk API.');
+    throw new HttpError(403, 'This API key is not enabled for the Desk API.', 'api_key_service_not_enabled');
   }
   const matched = routeKey(request);
   if (!matched || !GATEWAY_KEY_ALLOWED_ROUTES.has(matched)) {
-    throw new HttpError(403, 'This API key cannot call this endpoint.');
+    throw new HttpError(403, 'This API key cannot call this endpoint.', 'api_key_endpoint_not_allowed');
   }
   const owner = await authDb.findUserById(verified.ownerUserId);
-  if (!owner) throw new HttpError(401, 'Invalid or revoked API key.');
+  if (!owner) throw new HttpError(401, 'Invalid or revoked API key.', 'invalid_api_key');
   request.currentUser = owner;
   request.gatewayKey = verified;
 }
@@ -73,11 +73,11 @@ export async function requireAuth(request: FastifyRequest, reply: FastifyReply):
   const token = extractSessionToken(request);
   if (!token) {
     const apiKey = request.headers['x-api-key'];
-    if (!looksLikeGatewayKey(apiKey)) throw new HttpError(401, 'Authentication required.');
+    if (!looksLikeGatewayKey(apiKey)) throw new HttpError(401, 'Authentication required.', 'authentication_required');
     await authenticateWithGatewayKey(request, apiKey);
   } else {
     const user = await authService.verifySession(token);
-    if (!user) throw new HttpError(401, 'Session expired or invalid.');
+    if (!user) throw new HttpError(401, 'Session expired or invalid.', 'session_invalid');
     request.currentUser = user;
   }
   await enforceUserRouteLimit(request, reply);
@@ -94,9 +94,9 @@ export async function requireConfirmedEmail(
   _reply: FastifyReply,
 ): Promise<void> {
   const user = request.currentUser;
-  if (!user) throw new HttpError(401, 'Authentication required.');
+  if (!user) throw new HttpError(401, 'Authentication required.', 'authentication_required');
   if (!user.emailConfirmedAt) {
-    throw new HttpError(403, 'Please confirm your email address before continuing.');
+    throw new HttpError(403, 'Please confirm your email address before continuing.', 'email_not_confirmed');
   }
 }
 
@@ -107,12 +107,12 @@ export async function requireConfirmedEmail(
  */
 export async function requireAdmin(request: FastifyRequest, _reply: FastifyReply): Promise<void> {
   const user = request.currentUser;
-  if (!user) throw new HttpError(401, 'Authentication required.');
+  if (!user) throw new HttpError(401, 'Authentication required.', 'authentication_required');
   // Belt and braces: GATEWAY_KEY_ALLOWED_ROUTES already keeps keys off /admin,
   // but admin access must never be reachable through an API key regardless.
-  if (request.gatewayKey) throw new HttpError(403, 'Admin access is not available with an API key.');
+  if (request.gatewayKey) throw new HttpError(403, 'Admin access is not available with an API key.', 'admin_not_available_for_keys');
   const email = user.email.trim().toLowerCase();
-  if (!config.adminEmails.includes(email)) throw new HttpError(403, 'Admin access required.');
+  if (!config.adminEmails.includes(email)) throw new HttpError(403, 'Admin access required.', 'admin_required');
 }
 
 /**
@@ -138,6 +138,6 @@ export async function requireMetricsDocsKey(
   const matches =
     expectedBuf.length === providedBuf.length && timingSafeEqual(expectedBuf, providedBuf);
   if (!matches) {
-    throw new HttpError(401, 'A valid x-api-key header is required to access this endpoint.');
+    throw new HttpError(401, 'A valid x-api-key header is required to access this endpoint.', 'api_key_required');
   }
 }

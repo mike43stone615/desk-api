@@ -61,6 +61,141 @@
       "url": "http://localhost:3459/health",
       "timeoutSec": 5,
       "expectStatus": 200
+    },
+    {
+      "name": "name-check-co",
+      "what": "a real business-name lookup for Colorado (checks the state's data source is answering and understood)",
+      "url": "http://localhost:3456/functions/v1/check-business-name-availability",
+      "method": "POST",
+      "body": {
+        "businessName": "Uptime Probe Widgets LLC",
+        "stateOfFormation": "CO"
+      },
+      "headers": {
+        "x-api-key": "env:REGISTRY_API_SECRET"
+      },
+      "timeoutSec": 30,
+      "expectStatus": 200,
+      "expectKeys": [
+        "status",
+        "available"
+      ],
+      "everyMinutes": 360
+    },
+    {
+      "name": "name-check-dc",
+      "what": "a real business-name lookup for the District of Columbia (checks the state's data source is answering and understood)",
+      "url": "http://localhost:3456/functions/v1/check-business-name-availability",
+      "method": "POST",
+      "body": {
+        "businessName": "Uptime Probe Widgets LLC",
+        "stateOfFormation": "DC"
+      },
+      "headers": {
+        "x-api-key": "env:REGISTRY_API_SECRET"
+      },
+      "timeoutSec": 30,
+      "expectStatus": 200,
+      "expectKeys": [
+        "status",
+        "available"
+      ],
+      "everyMinutes": 360
+    },
+    {
+      "name": "name-check-hi",
+      "what": "a real business-name lookup for Hawaii (checks the state's data source is answering and understood)",
+      "url": "http://localhost:3456/functions/v1/check-business-name-availability",
+      "method": "POST",
+      "body": {
+        "businessName": "Uptime Probe Widgets LLC",
+        "stateOfFormation": "HI"
+      },
+      "headers": {
+        "x-api-key": "env:REGISTRY_API_SECRET"
+      },
+      "timeoutSec": 30,
+      "expectStatus": 200,
+      "expectKeys": [
+        "status",
+        "available"
+      ],
+      "everyMinutes": 360
+    },
+    {
+      "name": "name-check-ny",
+      "what": "a real business-name lookup for New York (checks the state's data source is answering and understood)",
+      "url": "http://localhost:3456/functions/v1/check-business-name-availability",
+      "method": "POST",
+      "body": {
+        "businessName": "Uptime Probe Widgets LLC",
+        "stateOfFormation": "NY"
+      },
+      "headers": {
+        "x-api-key": "env:REGISTRY_API_SECRET"
+      },
+      "timeoutSec": 30,
+      "expectStatus": 200,
+      "expectKeys": [
+        "status",
+        "available"
+      ],
+      "everyMinutes": 360
+    },
+    {
+      "name": "name-check-or",
+      "what": "a real business-name lookup for Oregon (checks the state's data source is answering and understood)",
+      "url": "http://localhost:3456/functions/v1/check-business-name-availability",
+      "method": "POST",
+      "body": {
+        "businessName": "Uptime Probe Widgets LLC",
+        "stateOfFormation": "OR"
+      },
+      "headers": {
+        "x-api-key": "env:REGISTRY_API_SECRET"
+      },
+      "timeoutSec": 30,
+      "expectStatus": 200,
+      "expectKeys": [
+        "status",
+        "available"
+      ],
+      "everyMinutes": 360
+    },
+    {
+      "name": "registry-data-fresh",
+      "what": "the Florida and Virginia business-record imports (weekly sync; a whole month without new data means the sync or its source has stopped)",
+      "kind": "freshness",
+      "url": "http://localhost:3456/functions/v1/registry-sync-status",
+      "headers": {
+        "x-api-key": "env:REGISTRY_API_SECRET"
+      },
+      "timeoutSec": 15,
+      "path": "states",
+      "field": "lastSyncedAt",
+      "only": [
+        "FL",
+        "VA"
+      ],
+      "maxAgeHours": 1080,
+      "everyMinutes": 720
+    },
+    {
+      "name": "provider-keys-and-quotas",
+      "what": "OpenAI, Google Places or Resend refused our key or reported the quota used up",
+      "kind": "counter",
+      "url": "http://localhost:3458/metrics",
+      "headers": {
+        "x-api-key": "env:METRICS_DOCS_API_KEY"
+      },
+      "timeoutSec": 10,
+      "metric": "desk_provider_calls_total",
+      "labels": {
+        "outcome": "auth_error|quota"
+      },
+      "maxIncrease": 0,
+      "unit": "refused calls",
+      "failuresBeforeAlert": 1
     }
   ],
   "processes": [

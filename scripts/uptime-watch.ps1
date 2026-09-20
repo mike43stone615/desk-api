@@ -48,7 +48,7 @@ function Show-Toast([string]$title, [string]$message) {
 }
 
 function Get-DeployedSetting([string]$name) {
-  $envFile = 'C:\actions-runners\desk-api\_work\desk-api\desk-api\.env'
+  $envFile = 'C:\actions-runners\desk-api\_work\live\.env'
   if (-not (Test-Path $envFile)) { return $null }
   $line = Select-String -Path $envFile -Pattern ("^{0}\s*=" -f [regex]::Escape($name)) | Select-Object -First 1
   if (-not $line) { return $null }
@@ -86,22 +86,84 @@ function Test-Json($actual, $expected) {
   return $null
 }
 
-# Each check returns $null when fine, or a short reason.
-function Invoke-UrlCheck($check) {
+# Header values written as "env:NAME" are read from the deployed service's settings (never stored in this file).
+function Resolve-Headers($headers) {
+  $out = @{}
+  if ($null -eq $headers) { return $out }
+  foreach ($p in $headers.PSObject.Properties) {
+    $v = [string]$p.Value
+    if ($v.StartsWith('env:')) { $v = Get-DeployedSetting $v.Substring(4); if (-not $v) { return $null } }
+    $out[$p.Name] = $v
+  }
+  return $out
+}
+
+function Get-Page($check) {
+  $headers = Resolve-Headers $check.headers
+  if ($null -eq $headers) { return @{ error = 'a setting this check needs is missing from the deployed settings' } }
+  $req = @{ Uri = $check.url; UseBasicParsing = $true; TimeoutSec = [int]$check.timeoutSec; MaximumRedirection = 0; Headers = $headers }
+  if ($check.method) { $req.Method = $check.method }
+  if ($check.body) { $req.Body = ($check.body | ConvertTo-Json -Compress); $req.ContentType = 'application/json' }
   try {
-    $res = Invoke-WebRequest -Uri $check.url -UseBasicParsing -TimeoutSec ([int]$check.timeoutSec) -MaximumRedirection 0
-    $status = [int]$res.StatusCode
+    $res = Invoke-WebRequest @req
+    return @{ status = [int]$res.StatusCode; content = $res.Content }
   } catch {
     $r = $_.Exception.Response
-    if ($null -ne $r) { $status = [int]$r.StatusCode; $res = $null }
-    else { return "no answer ($($_.Exception.Message.Split("`n")[0]))" }
+    if ($null -ne $r) { return @{ status = [int]$r.StatusCode; content = $null } }
+    return @{ error = "no answer ($($_.Exception.Message.Split("`n")[0]))" }
   }
-  if ($check.expectStatus -and $status -ne [int]$check.expectStatus) { return "answered $status" }
-  if ($check.expectJson) {
-    try { $json = $res.Content | ConvertFrom-Json } catch { return 'answer was not JSON' }
-    $why = Test-Json $json $check.expectJson
-    if ($why) { return $why }
+}
+
+# Each check returns $null when fine, or a short reason.
+function Invoke-UrlCheck($check) {
+  $page = Get-Page $check
+  if ($page.error) { return $page.error }
+  if ($check.expectStatus -and $page.status -ne [int]$check.expectStatus) { return "answered $($page.status)" }
+  if ($check.expectJson -or $check.expectKeys) {
+    try { $json = $page.content | ConvertFrom-Json } catch { return 'answer was not JSON' }
+    if ($check.expectJson) { $why = Test-Json $json $check.expectJson; if ($why) { return $why } }
+    if ($check.expectKeys) { foreach ($k in $check.expectKeys) { if ($null -eq $json -or $json.PSObject.Properties.Name -notcontains $k) { return "answer has no '$k'" } } }
   }
+  return $null
+}
+
+# Data freshness: every listed item's timestamp field must be newer than maxAgeHours.
+function Invoke-FreshnessCheck($check) {
+  $page = Get-Page $check
+  if ($page.error) { return $page.error }
+  if ($page.status -ne 200) { return "answered $($page.status)" }
+  try { $json = $page.content | ConvertFrom-Json } catch { return 'answer was not JSON' }
+  $items = $json
+  foreach ($part in $check.path.Split('.')) { $items = $items.$part }
+  $stale = @()
+  foreach ($name in $check.only) {
+    $stamp = $items.$name.($check.field)
+    if (-not $stamp) { $stale += "$name (never)"; continue }
+    $age = ((Get-Date).ToUniversalTime() - ([datetime]$stamp).ToUniversalTime()).TotalHours
+    if ($age -gt [double]$check.maxAgeHours) { $stale += ("{0} ({1:N0} days old)" -f $name, ($age / 24)) }
+  }
+  if ($stale.Count -gt 0) { return ('not refreshed within {0:N0} days: {1}' -f ([double]$check.maxAgeHours / 24), ($stale -join ', ')) }
+  return $null
+}
+
+# A counter that must not rise: fails when the summed value of the matching /metrics lines grew since the last run.
+function Invoke-CounterCheck($check, $st) {
+  $page = Get-Page $check
+  if ($page.error) { return $page.error }
+  if ($page.status -ne 200) { return "answered $($page.status)" }
+  $total = 0.0
+  foreach ($line in ($page.content -split "`n")) {
+    if (-not $line.StartsWith($check.metric + '{')) { continue }
+    $ok = $true
+    foreach ($m in $check.labels.PSObject.Properties) { if ($line -notmatch ('{0}="({1})"' -f $m.Name, $m.Value)) { $ok = $false } }
+    if ($ok) { $total += [double](($line -split ' ')[-1]) }
+  }
+  $prev = $st.value
+  $st.value = $total
+  if ($null -eq $prev) { return $null }                  # first run: just remember the level
+  if ($total -lt $prev) { return $null }                 # the service restarted: counters began again from zero
+  $rise = $total - $prev
+  if ($rise -gt [double]$check.maxIncrease) { return ('{0:N0} new {1}' -f $rise, $check.unit) }
   return $null
 }
 
@@ -134,24 +196,40 @@ $targets = Get-Content $TargetsFile -Raw | ConvertFrom-Json
 $need = if ($targets.failuresBeforeAlert) { [int]$targets.failuresBeforeAlert } else { 2 }
 $state = @{}
 if (Test-Path $StateFile) {
-  try { (Get-Content $StateFile -Raw | ConvertFrom-Json).PSObject.Properties | ForEach-Object { $state[$_.Name] = @{ failures = [int]$_.Value.failures; alerted = [bool]$_.Value.alerted } } } catch { $state = @{} }
+  try { (Get-Content $StateFile -Raw | ConvertFrom-Json).PSObject.Properties | ForEach-Object { $state[$_.Name] = @{ failures = [int]$_.Value.failures; alerted = [bool]$_.Value.alerted; lastRun = $_.Value.lastRun; value = $_.Value.value } } } catch { $state = @{} }
 }
 
 $all = @()
-foreach ($c in $targets.checks) { $all += [pscustomobject]@{ name = $c.name; what = $c.what; run = { Invoke-UrlCheck $c }.GetNewClosure() } }
-foreach ($pr in $targets.processes) { $all += [pscustomobject]@{ name = $pr.name; what = $pr.what; run = { Invoke-ProcessCheck $pr }.GetNewClosure() } }
-if ($targets.disk) { $all += [pscustomobject]@{ name = 'disk-space'; what = $targets.disk.what; run = { Invoke-DiskCheck $targets.disk }.GetNewClosure() } }
-if ($targets.backups) { $all += [pscustomobject]@{ name = 'backup-fresh'; what = $targets.backups.what; run = { Invoke-BackupCheck $targets.backups }.GetNewClosure() } }
+foreach ($c in $targets.checks) {
+  $kind = if ($c.kind) { $c.kind } else { 'url' }
+  $runner = switch ($kind) {
+    'freshness' { { param($st) Invoke-FreshnessCheck $c }.GetNewClosure() }
+    'counter'   { { param($st) Invoke-CounterCheck $c $st }.GetNewClosure() }
+    default     { { param($st) Invoke-UrlCheck $c }.GetNewClosure() }
+  }
+  $all += [pscustomobject]@{ name = $c.name; what = $c.what; run = $runner; every = $c.everyMinutes; need = $c.failuresBeforeAlert }
+}
+foreach ($pr in $targets.processes) { $all += [pscustomobject]@{ name = $pr.name; what = $pr.what; run = { param($st) Invoke-ProcessCheck $pr }.GetNewClosure() } }
+if ($targets.disk) { $all += [pscustomobject]@{ name = 'disk-space'; what = $targets.disk.what; run = { param($st) Invoke-DiskCheck $targets.disk }.GetNewClosure() } }
+if ($targets.backups) { $all += [pscustomobject]@{ name = 'backup-fresh'; what = $targets.backups.what; run = { param($st) Invoke-BackupCheck $targets.backups }.GetNewClosure() } }
 
 $summary = @()
 foreach ($check in $all) {
-  $reason = & $check.run
-  if (-not $state.ContainsKey($check.name)) { $state[$check.name] = @{ failures = 0; alerted = $false } }
+  if (-not $state.ContainsKey($check.name)) { $state[$check.name] = @{ failures = 0; alerted = $false; lastRun = $null; value = $null } }
   $st = $state[$check.name]
+  # A check that talks to an outside service (or costs something) can ask to run only every N minutes; while it is
+  # failing it is retried every time, so a recovery is noticed promptly.
+  if ($check.every -and $st.lastRun -and $st.failures -eq 0 -and (((Get-Date) - [datetime]$st.lastRun).TotalMinutes -lt [double]$check.every)) {
+    $summary += "$($check.name)=skipped"
+    continue
+  }
+  $reason = & $check.run $st
+  $st.lastRun = (Get-Date).ToString('o')
+  $threshold = if ($check.need) { [int]$check.need } else { $need }
   if ($reason) {
     $st.failures++
     $summary += "$($check.name)=DOWN($reason)"
-    if ($st.failures -ge $need -and -not $st.alerted) {
+    if ($st.failures -ge $threshold -and -not $st.alerted) {
       $st.alerted = $true
       Send-Alert "DOWN: $($check.name)" "$($check.what): $reason (failed $($st.failures) checks in a row)"
     }

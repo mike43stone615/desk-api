@@ -6,6 +6,7 @@
 // have no web frontend of their own — desk-api's Flutter app (moving to
 // Cloudflare Pages) DOES have a real frontend that serves /reset-password
 // and /confirm-email, so the link-based design stays.
+import { outcomeForStatus, recordProviderCall } from '../../modules/provider-metrics';
 import type { AppConfig } from '../../config';
 
 export async function sendPasswordResetEmail(
@@ -200,6 +201,7 @@ async function sendEmail(config: AppConfig, request: EmailRequest): Promise<void
     }),
   });
 
+  recordProviderCall('resend', outcomeForStatus(resp.status));
   if (!resp.ok) {
     const detail = await resp.text().catch(() => '');
     console.error(

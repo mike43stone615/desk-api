@@ -355,7 +355,7 @@ function parseTableKey(raw: string): { source: AdminSource; rawName: string } {
 
 function parseLocalTableName(raw: string): TableName {
   if (raw in TABLES) return raw as TableName;
-  throw new HttpError(404, 'Table not found.');
+  throw new HttpError(404, 'Table not found.', 'table_not_found');
 }
 
 async function proxyUpstreamJson<T = unknown>(
@@ -596,7 +596,7 @@ export async function adminTableUpdateRowHandler(request: FastifyRequest, reply:
     [id],
   );
   const row = rowResult.rows[0];
-  if (!row) throw new HttpError(404, 'Row not found.');
+  if (!row) throw new HttpError(404, 'Row not found.', 'row_not_found');
 
   logMutation({
     userId: request.currentUser?.id ?? null,
@@ -625,7 +625,7 @@ export async function adminTableDeleteRowHandler(request: FastifyRequest, reply:
 
   const tableName = parseLocalTableName(parsed.rawName);
   const table: AdminTableConfig = TABLES[tableName];
-  if (table.deletable !== true) throw new HttpError(403, 'Deletes are disabled for this table.');
+  if (table.deletable !== true) throw new HttpError(403, 'Deletes are disabled for this table.', 'delete_disabled');
 
   const columns = table.columns.map(quoteIdentifier).join(', ');
   const beforeResult = await pool.query<Record<string, unknown>>(

@@ -9,7 +9,7 @@ The API Library holds three kinds of secret. Each rotates differently.
 | Developers' `deskgw_…` keys | Only a SHA-256 hash is stored | Nothing to rotate here; a developer revokes and creates a new one |
 
 Production config is the `DOTENV_CONTENT` GitHub secret, written to the service's `.env` on every deploy. The deployed
-file is `C:\actions-runners\desk-api\_work\desk-api\desk-api\.env`. **Never paste a secret into a chat, a ticket or a
+file is `C:\actions-runners\desk-api\_work\live\.env`. **Never paste a secret into a chat, a ticket or a
 commit.** Every command below prints counts only.
 
 ## 1. `GATEWAY_KEY_ENCRYPTION_SECRET` (rotate without breaking anyone)
@@ -24,13 +24,13 @@ values are re-encrypted. Nothing is signed out and no developer has to do anythi
 3. Deploy (Actions → Deploy → Run workflow). From now on new keys use the new secret and old keys still work.
 4. Check what will change (from the repo folder, using the deployed settings):
    ```bash
-   npx tsx --env-file="C:/actions-runners/desk-api/_work/desk-api/desk-api/.env" scripts/rotate-gateway-secret.ts --dry-run
+   npx tsx --env-file="C:/actions-runners/desk-api/_work/live/.env" scripts/rotate-gateway-secret.ts --dry-run
    ```
    It prints `{"total":…,"alreadyUnderCurrentKey":…,"wouldRotate":…,"unreadable":0,…}`. `unreadable` must be `0`; if not,
    a previous secret is missing from step 2.
 5. Re-encrypt everything under the new secret (safe to re-run, safe while the service is live):
    ```bash
-   npx tsx --env-file="C:/actions-runners/desk-api/_work/desk-api/desk-api/.env" scripts/rotate-gateway-secret.ts
+   npx tsx --env-file="C:/actions-runners/desk-api/_work/live/.env" scripts/rotate-gateway-secret.ts
    ```
 6. Run the dry run again: `wouldRotate` must be `0` and `alreadyUnderCurrentKey` must equal `total`.
 7. Remove `GATEWAY_KEY_ENCRYPTION_SECRET_PREVIOUS` from `DOTENV_CONTENT` and deploy again. The old secret can now be

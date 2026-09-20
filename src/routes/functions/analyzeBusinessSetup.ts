@@ -3,6 +3,7 @@
 // Route path preserved (mounted at /functions/v1/analyze-business-setup in
 // app.ts) so the Flutter client's existing call site needs no changes. Same
 // OpenAI call shape, same fallback-without-API-key behavior.
+import { outcomeForStatus, recordProviderCall } from '../../modules/provider-metrics';
 import type { FastifyReply, FastifyRequest } from 'fastify';
 import { HttpError } from '../../middleware/http-error';
 import { requireAuth } from '../../middleware/auth';
@@ -76,13 +77,13 @@ export async function analyzeBusinessSetupHandler(request: FastifyRequest, reply
   const body = (request.body ?? {}) as Record<string, unknown>;
 
   if (body?.action !== 'classify_unregistered_business') {
-    throw new HttpError(400, 'Unsupported action.');
+    throw new HttpError(400, 'Unsupported action.', 'validation_error');
   }
 
   const businessIdea = String(body.businessIdea ?? '').trim();
   const industries = cleanList(body.industries);
-  if (!businessIdea) throw new HttpError(400, 'businessIdea is required.');
-  if (industries.length === 0) throw new HttpError(400, 'industries are required.');
+  if (!businessIdea) throw new HttpError(400, 'businessIdea is required.', 'validation_error');
+  if (industries.length === 0) throw new HttpError(400, 'industries are required.', 'validation_error');
 
   if (!config.openaiApiKey) {
     return reply.send(fallbackEnrichment(businessIdea, industries, body));
@@ -129,6 +130,7 @@ export async function analyzeBusinessSetupHandler(request: FastifyRequest, reply
       signal: AbortSignal.timeout(60000),
     });
 
+    recordProviderCall('openai', outcomeForStatus(resp.status));
     if (!resp.ok) {
       return reply.send(fallbackEnrichment(businessIdea, industries, body));
     }
@@ -175,7 +177,10 @@ export async function analyzeBusinessSetupHandler(request: FastifyRequest, reply
         ? { classificationFieldsSubstituted: substitutedFields }
         : {}),
     });
-  } catch {
+  } catch (err) {
+    // A network error or timeout reaching OpenAI (the status was never seen); a bad body after a good status is not the
+    // provider failing, so it is not counted here.
+    if (!(err instanceof SyntaxError)) recordProviderCall('openai', 'error');
     return reply.send(fallbackEnrichment(businessIdea, industries, body));
   }
 }
