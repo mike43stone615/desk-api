@@ -12,6 +12,7 @@ import { buildApp } from '../app';
 import { pool } from '../db';
 import { config } from '../config';
 import { verifySvixSignature, suppressionFrom } from '../routes/webhooks';
+import { resetWebhookSecretCache } from '../domain/email/webhook-secret';
 import { htmlToText, sendPasswordResetEmail } from '../infrastructure/email/resend';
 import type { AppConfig } from '../config';
 import type { createFakeDb } from './helpers/fake-db';
@@ -57,6 +58,8 @@ describe('what counts as stop mailing', () => {
 
 describe('POST /webhooks/resend', () => {
   it('is off (404) until a secret is configured', async () => {
+    resetWebhookSecretCache();
+    config.resendApiKey = undefined;
     config.resendWebhookSecret = undefined;
     const body = bounce('x@example.com');
     expect((await app.inject({ method: 'POST', url: '/webhooks/resend', headers: signed(body), payload: body })).statusCode).toBe(404);
@@ -108,6 +111,55 @@ describe('the plain-text copy of an email', () => {
     expect(sent.html).toContain('<html');
     expect(sent.text).toContain('https://app.example.com/reset-password#token=tok123');
     expect(sent.text).not.toContain('<');
+    vi.unstubAllGlobals();
+  });
+});
+
+describe('a secret held by the mail provider (none in the settings)', () => {
+  const providerFetch = (secret: string) => vi.fn(async (url: string | URL | Request) => {
+    const u = String(url);
+    if (u.endsWith('/webhooks')) return new Response(JSON.stringify({ data: [{ id: 'wh_1', endpoint: 'https://api.example.com/webhooks/resend', status: 'enabled' }] }), { status: 200 });
+    if (u.endsWith('/webhooks/wh_1')) return new Response(JSON.stringify({ signing_secret: secret }), { status: 200 });
+    return new Response('{}', { status: 404 });
+  });
+
+  it('is asked from the provider once, kept, and used to check the signature', async () => {
+    resetWebhookSecretCache();
+    config.resendWebhookSecret = undefined;
+    config.resendApiKey = 're_test';
+    const mock = providerFetch(SECRET);
+    vi.stubGlobal('fetch', mock);
+    const body = bounce('held@example.com');
+    expect((await app.inject({ method: 'POST', url: '/webhooks/resend', headers: signed(body), payload: body })).statusCode).toBe(200);
+    expect(fakeDb.suppressions.get('held@example.com')).toMatchObject({ reason: 'bounced' });
+    const callsAfterFirst = mock.mock.calls.length;
+    expect((await app.inject({ method: 'POST', url: '/webhooks/resend', headers: signed(body, 'msg_2'), payload: body })).statusCode).toBe(200);
+    expect(mock.mock.calls.length).toBe(callsAfterFirst); // kept in memory: no second lookup
+    vi.unstubAllGlobals();
+  });
+
+  it('a wrong signature is still refused, and a secret changed at the provider is picked up', async () => {
+    resetWebhookSecretCache();
+    config.resendWebhookSecret = undefined;
+    config.resendApiKey = 're_test';
+    const OLD = 'whsec_' + Buffer.from('the-old-signing-secret-of-some-length').toString('base64');
+    vi.stubGlobal('fetch', providerFetch(OLD));
+    const body = bounce('rot@example.com');
+    expect((await app.inject({ method: 'POST', url: '/webhooks/resend', headers: signed(body, 'm', undefined, OLD), payload: body })).statusCode).toBe(200);
+    vi.stubGlobal('fetch', providerFetch(SECRET)); // rotated at the provider
+    expect((await app.inject({ method: 'POST', url: '/webhooks/resend', headers: signed(body, 'm2'), payload: body })).statusCode).toBe(200);
+    const wrong = signed(body, 'm3', undefined, 'whsec_' + Buffer.from('nope').toString('base64'));
+    expect((await app.inject({ method: 'POST', url: '/webhooks/resend', headers: wrong, payload: body })).statusCode).toBe(401);
+    vi.unstubAllGlobals();
+  });
+
+  it('answers 404 when the provider knows no such webhook', async () => {
+    resetWebhookSecretCache();
+    config.resendWebhookSecret = undefined;
+    config.resendApiKey = 're_test';
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ data: [] }), { status: 200 })));
+    const body = bounce('none@example.com');
+    expect((await app.inject({ method: 'POST', url: '/webhooks/resend', headers: signed(body), payload: body })).statusCode).toBe(404);
     vi.unstubAllGlobals();
   });
 });
