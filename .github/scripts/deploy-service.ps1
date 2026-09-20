@@ -13,7 +13,12 @@ param(
   [Parameter(Mandatory = $true)][string]$RepoPath,
   [Parameter(Mandatory = $true)][int]$Port,
   [Parameter(Mandatory = $true)][string]$StartCommand,   # e.g. "start" or "dev"
-  [switch]$Build                                          # run `npm run build` after install
+  [switch]$Build,                                         # run `npm run build` after install
+  # When given, the service runs from THIS folder (a copy of what was built), not from the checkout. That keeps the
+  # old version serving while the new one is checked out, installed and built, so the only gap is the few seconds
+  # between stopping the old process and the new one answering.
+  [string]$LivePath = '',
+  [string]$BuildCommand = 'build'                         # npm script that compiles (used with -Build)
 )
 
 $ErrorActionPreference = 'Stop'
@@ -25,16 +30,52 @@ npm ci
 if ($LASTEXITCODE -ne 0) { throw "npm ci failed" }
 
 if ($Build) {
-  npm run build
-  if ($LASTEXITCODE -ne 0) { throw "npm run build failed" }
+  npm run $BuildCommand
+  if ($LASTEXITCODE -ne 0) { throw "npm run $BuildCommand failed" }
 }
 
-$owner = (Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction SilentlyContinue | Select-Object -First 1 -ExpandProperty OwningProcess)
-if ($owner) {
-  Write-Output "Stopping current process on port $Port (PID $owner)"
-  Stop-Process -Id $owner -Force
-  Start-Sleep -Seconds 2
+function Stop-CurrentService {
+  $owner = (Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction SilentlyContinue | Select-Object -First 1 -ExpandProperty OwningProcess)
+  if ($owner) {
+    Write-Output "Stopping current process on port $Port (PID $owner)"
+    Stop-Process -Id $owner -Force
+    Start-Sleep -Seconds 1
+  }
 }
+
+function Copy-Tree([string]$from, [string]$to) {
+  # robocopy: 0-7 are success codes (8+ is a failure). /MIR makes the copy identical; only changed files are written.
+  robocopy $from $to /MIR /NFL /NDL /NJH /NJS /NP /R:2 /W:2 | Out-Null
+  if ($LASTEXITCODE -ge 8) { throw "robocopy $from -> $to failed ($LASTEXITCODE)" }
+  $global:LASTEXITCODE = 0
+}
+
+if ($LivePath) {
+  New-Item -ItemType Directory -Force -Path $LivePath | Out-Null
+  # Everything the running service needs, and nothing else (no sources, tests, git history or dev tooling output).
+  # node_modules is only replaced when the lockfile changed: its native files are locked while the service runs, and
+  # copying it is the slow part, so an unchanged lockfile means a much shorter gap.
+  $lockNow = (Get-FileHash (Join-Path $RepoPath 'package-lock.json')).Hash
+  $liveLock = Join-Path $LivePath 'package-lock.json'
+  $lockThen = if (Test-Path $liveLock) { (Get-FileHash $liveLock).Hash } else { '' }
+  $depsChanged = ($lockNow -ne $lockThen) -or -not (Test-Path (Join-Path $LivePath 'node_modules'))
+  if ($depsChanged) {
+    Write-Output "Dependencies changed: stopping the service before replacing node_modules"
+    Stop-CurrentService
+    Copy-Tree (Join-Path $RepoPath 'node_modules') (Join-Path $LivePath 'node_modules')
+  }
+  foreach ($dir in @('dist', 'library-ui', 'migrations')) {
+    if (Test-Path (Join-Path $RepoPath $dir)) { Copy-Tree (Join-Path $RepoPath $dir) (Join-Path $LivePath $dir) }
+  }
+  foreach ($file in @('package.json', 'package-lock.json', '.env')) {
+    Copy-Item -Force (Join-Path $RepoPath $file) (Join-Path $LivePath $file)
+  }
+  $RepoPath = $LivePath
+  Set-Location $RepoPath
+  Write-Output "Prepared live copy at $LivePath"
+}
+
+Stop-CurrentService
 
 # Start-Process's child is attached to the GitHub Actions runner's own
 # Windows Job Object (JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE) unless explicitly

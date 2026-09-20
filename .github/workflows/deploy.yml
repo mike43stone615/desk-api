@@ -43,11 +43,19 @@ jobs:
       - name: Stop the previous run of the live service
         shell: powershell
         run: |
+          # Only needed when the running service still lives INSIDE the checkout (its files would be locked). Since the
+          # service runs from its own live copy (see deploy-service.ps1 -LivePath), it is left serving until the new
+          # version is built and ready: this is what keeps the outage to a few seconds instead of about a minute.
           $owner = (Get-NetTCPConnection -LocalPort 3458 -State Listen -ErrorAction SilentlyContinue | Select-Object -First 1 -ExpandProperty OwningProcess)
           if ($owner) {
-            Write-Output "Stopping process on port 3458 (PID $owner) before checkout"
-            Stop-Process -Id $owner -Force
-            Start-Sleep -Seconds 2
+            $cmd = (Get-CimInstance Win32_Process -Filter "ProcessId = $owner" -ErrorAction SilentlyContinue).CommandLine
+            if ($cmd -and $cmd.ToLower().Contains($env:GITHUB_WORKSPACE.ToLower())) {
+              Write-Output "Service runs from the checkout (PID $owner): stopping it before checkout"
+              Stop-Process -Id $owner -Force
+              Start-Sleep -Seconds 2
+            } else {
+              Write-Output "Service runs from its live copy (PID $owner): leaving it serving during checkout"
+            }
           }
 
       # actions/checkout authenticates with GitHub's own ephemeral
@@ -72,7 +80,10 @@ jobs:
       - name: Deploy to the live service
         shell: powershell
         run: |
+          $live = Join-Path (Split-Path (Split-Path $env:GITHUB_WORKSPACE -Parent) -Parent) 'live'
           & "$env:GITHUB_WORKSPACE\.github\scripts\deploy-service.ps1" `
             -RepoPath "$env:GITHUB_WORKSPACE" `
             -Port 3458 `
-            -StartCommand "start"
+            -Build -BuildCommand "build:prod" `
+            -LivePath $live `
+            -StartCommand "start:prod"
