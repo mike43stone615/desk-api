@@ -13,7 +13,7 @@
 // A worker that dies by itself is started again (backing off if it keeps dying).
 import cluster from 'node:cluster';
 import { createHash } from 'node:crypto';
-import { readFileSync } from 'node:fs';
+import { createWriteStream, mkdirSync, readdirSync, readFileSync, unlinkSync, type WriteStream } from 'node:fs';
 import http from 'node:http';
 import { EOL } from 'node:os';
 import path from 'node:path';
@@ -26,8 +26,54 @@ const DRAIN_GRACE_MS = Number(process.env.SUPERVISOR_DRAIN_GRACE_MS) || 2_500;
 /** A version that predates the "ready" message is trusted once it is listening and has stayed up this long. */
 const LEGACY_SETTLE_MS = 6_000;
 
+// Everything the workers print goes to one file per day (LOG_DIR, default ./logs, kept LOG_RETENTION_DAYS = 30 days).
+// Nothing grows without limit, and `node scripts/search-logs.mjs` can find a request id or a word across the days.
+const LOG_DIR = process.env.LOG_DIR || path.join(process.cwd(), 'logs');
+const LOG_RETENTION_DAYS = Number(process.env.LOG_RETENTION_DAYS) || 30;
+
+class DailyLogs {
+  private day = '';
+  private out: WriteStream | null = null;
+  private err: WriteStream | null = null;
+
+  private open(now = new Date()): void {
+    const day = now.toISOString().slice(0, 10);
+    if (day === this.day && this.out && this.err) return;
+    this.out?.end();
+    this.err?.end();
+    mkdirSync(LOG_DIR, { recursive: true });
+    this.day = day;
+    this.out = createWriteStream(path.join(LOG_DIR, `desk-api-${day}.log`), { flags: 'a' });
+    this.err = createWriteStream(path.join(LOG_DIR, `desk-api-${day}.err.log`), { flags: 'a' });
+    this.removeOld(now);
+  }
+
+  private removeOld(now: Date): void {
+    const cutoff = now.getTime() - LOG_RETENTION_DAYS * 86_400_000;
+    for (const name of readdirSync(LOG_DIR)) {
+      const m = /^desk-api-(\d{4}-\d{2}-\d{2})(\.err)?\.log$/.exec(name);
+      if (m && Date.parse(`${m[1]}T00:00:00Z`) < cutoff) {
+        try { unlinkSync(path.join(LOG_DIR, name)); } catch { /* in use or already gone */ }
+      }
+    }
+  }
+
+  write(chunk: Buffer | string, errorStream = false): void {
+    try {
+      this.open();
+      (errorStream ? this.err : this.out)?.write(chunk);
+    } catch {
+      // A full disk must never take the service down; the line is simply lost.
+    }
+  }
+}
+const logs = new DailyLogs();
 const fingerprint = createHash('sha256').update(readFileSync(__filename)).digest('hex');
-const log = (msg: string, extra: Record<string, unknown> = {}) => process.stdout.write(JSON.stringify({ level: 30, time: Date.now(), component: 'supervisor', msg, ...extra }) + EOL);
+const log = (msg: string, extra: Record<string, unknown> = {}) => {
+  const line = JSON.stringify({ level: 30, time: Date.now(), component: 'supervisor', msg, ...extra }) + EOL;
+  process.stdout.write(line);
+  logs.write(line);
+};
 
 type Worker = ReturnType<typeof cluster.fork>;
 const serving = new Set<Worker>();
@@ -36,12 +82,14 @@ let reloading = false;
 let stopping = false;
 let crashDelayMs = 0;
 
-cluster.setupPrimary({ exec: path.join(__dirname, 'server.js') });
+cluster.setupPrimary({ exec: path.join(__dirname, 'server.js'), silent: true });
 
 /** Starts a worker and resolves when it is serving; rejects if it dies or is not ready in time. */
 function startWorker(): Promise<Worker> {
   return new Promise((resolve, reject) => {
     const worker = cluster.fork();
+    worker.process.stdout?.on('data', (c: Buffer) => logs.write(c));
+    worker.process.stderr?.on('data', (c: Buffer) => logs.write(c, true));
     let listening = false;
     let done = false;
     const finish = (err?: Error) => {

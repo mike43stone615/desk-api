@@ -120,6 +120,8 @@ export class PgDatabaseAdapter implements DatabaseRepository {
   }
 
   async deleteUser(userId: string): Promise<void> {
+    // The person's stored security events hold network addresses and browser details: they go with the account.
+    await this.pool.query(`DELETE FROM security_events WHERE user_id = $1`, [userId]);
     await this.pool.query(`DELETE FROM users WHERE id = $1`, [userId]);
   }
 

@@ -3,7 +3,7 @@
 // behavior on failure/misconfiguration (src/domain/compliance/*).
 import type { FastifyReply, FastifyRequest } from 'fastify';
 import { config } from '../../config';
-import { callUpstream } from '../../domain/upstream/client';
+import { abortWhenClientLeaves, callUpstream } from '../../domain/upstream/client';
 import { COMPLIANCE_POLICY } from '../../domain/upstream/policies';
 import {
   listFallbackBusinessTypes,
@@ -86,7 +86,7 @@ async function fetchComplianceCheck(reply: FastifyReply, params: URLSearchParams
   try {
     const resp = await callUpstream(
       targetUrl,
-      { method: 'POST', headers, body: JSON.stringify({ businessTypeSlug, facts, maxPossibleItems: limit, pageSize: limit }) },
+      { method: 'POST', headers, body: JSON.stringify({ businessTypeSlug, facts, maxPossibleItems: limit, pageSize: limit }), signal: abortWhenClientLeaves(reply) },
       COMPLIANCE_POLICY,
     );
     if (resp.status < 200 || resp.status >= 300) {
@@ -118,7 +118,7 @@ async function proxyGet(reply: FastifyReply, path: string) {
   const targetUrl = `${config.complianceOsUrl!.replace(/\/$/, '')}${path}`;
   const headers: Record<string, string> = {};
   if (config.complianceOsApiKey) headers['x-api-key'] = config.complianceOsApiKey;
-  const resp = await callUpstream(targetUrl, { method: 'GET', headers }, COMPLIANCE_POLICY);
+  const resp = await callUpstream(targetUrl, { method: 'GET', headers, signal: abortWhenClientLeaves(reply) }, COMPLIANCE_POLICY);
   return reply.status(resp.status).send(JSON.parse(resp.text) as unknown);
 }
 

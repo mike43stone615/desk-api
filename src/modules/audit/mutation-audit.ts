@@ -48,6 +48,12 @@ export function logMutation(entry: MutationAuditEntry): void {
   ).catch(() => {});
 }
 
+/** Admin changes are kept two years (docs/DATA-RETENTION.md); the nightly cleanup is the only thing that removes rows. */
+export const AUDIT_RETENTION_DAYS = 730;
+export async function deleteExpiredAuditRows(): Promise<void> {
+  await pool.query(`DELETE FROM mutation_audit_log WHERE created_at < now() - ($1 || ' days')::interval`, [String(AUDIT_RETENTION_DAYS)]);
+}
+
 /** The real client address (behind the tunnel request.ip is always this machine). */
 export function requestIp(request: FastifyRequest): string | null {
   return getClientIp(request);

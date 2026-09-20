@@ -212,3 +212,35 @@ describe('in-flight limits', () => {
     for (let i = 0; i < 3; i++) await expect(callUpstream('http://x', GET, p, 'k')).rejects.toMatchObject({ status: 502 });
   });
 });
+
+describe('a caller who leaves', () => {
+  it('cancels the backend call, is not a backend failure, and is never retried', async () => {
+    const controller = new AbortController();
+    fetchMock.mockImplementation((_url: string, init: { signal: AbortSignal }) =>
+      new Promise((_resolve, reject) => init.signal.addEventListener('abort', () => reject(new DOMException('aborted', 'AbortError')))),
+    );
+    const call = callUpstream('http://x', { ...GET, signal: controller.signal }, policy({ retryable: true }));
+    controller.abort();
+    await expect(call).rejects.toMatchObject({ status: 499, code: 'client_closed' });
+    expect(fetchMock).toHaveBeenCalledTimes(1); // no retry for a caller who is gone
+    expect(breakerState('svc')).toBe('closed'); // and no strike against the backend
+  });
+
+  it('frees the trial slot of a half-open breaker so it is not stuck', async () => {
+    fetchMock.mockImplementation(async () => reply(500, 'x'));
+    for (let i = 0; i < 5; i++) await callUpstream("http://x", GET, policy());
+    expect(breakerState('svc')).toBe('open');
+    vi.useFakeTimers();
+    vi.setSystemTime(Date.now() + 60_000);
+    expect(breakerState('svc')).toBe('half-open');
+    const controller = new AbortController();
+    fetchMock.mockImplementation((_url: string, init: { signal: AbortSignal }) =>
+      new Promise((_r, reject) => init.signal.addEventListener('abort', () => reject(new DOMException('aborted', 'AbortError')))),
+    );
+    const trial = callUpstream('http://x', { ...GET, signal: controller.signal }, policy());
+    controller.abort();
+    await expect(trial).rejects.toMatchObject({ code: 'client_closed' });
+    fetchMock.mockImplementation(async () => reply());
+    expect((await callUpstream('http://x', GET, policy())).status).toBe(200); // the next caller may test the backend
+  });
+});

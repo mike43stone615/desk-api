@@ -372,7 +372,9 @@ export async function deleteAccountHandler(request: FastifyRequest, reply: Fasti
   await requireCurrentPassword(request, reply, user, parsed.data.password, 'account_delete');
   // The notice is sent first, while the address is still known; the account is gone once this returns.
   notifySecurityEvent(request, user.email, 'account_deleted');
-  audit(request, 'account_deleted', 'ok', { userId: user.id });
+  // Logged, but not stored as a security event: the person's stored events are deleted with the account (they hold
+  // network addresses and browser details), and a new row for a user that no longer exists would fail anyway.
+  request.log.info({ level: 'audit', event: 'account_deleted', requestId: request.id, ts: new Date().toISOString(), userId: user.id });
   await authService.deleteAccount(user.id);
   clearSessionCookie(reply);
   return reply.send({ ok: true });

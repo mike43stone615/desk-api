@@ -148,7 +148,16 @@ export async function buildApp(options: { logStream?: { write: (line: string) =>
     ignoreTrailingSlash: true,
     ignoreDuplicateSlashes: true,
     bodyLimit: BODY_LIMIT_DEFAULT,
+    // Slow or stalled clients (see docs/TIMEOUTS.md): the whole header block must arrive in 10 s and the whole request
+    // in 30 s, so a client that trickles bytes cannot hold a connection (Cloudflare shields the origin, but the origin
+    // must not depend on that). A kept-alive connection is closed after 65 s idle. Answers have their own budget in
+    // the upstream policies (src/domain/upstream/policies.ts).
+    connectionTimeout: 0,
+    keepAliveTimeout: 65_000,
+    requestTimeout: 30_000,
   });
+  // Node's header timeout is not a Fastify option; it must stay below the request timeout.
+  app.server.headersTimeout = 10_000;
 
   // Must come before any route is registered: it records them for 405 answers.
   registerNotFound(app);

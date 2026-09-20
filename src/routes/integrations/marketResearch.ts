@@ -16,7 +16,7 @@
 import type { FastifyReply, FastifyRequest } from 'fastify';
 import { HttpError } from '../../middleware/http-error';
 import { config } from '../../config';
-import { callUpstream, UpstreamError, type UpstreamResult } from '../../domain/upstream/client';
+import { abortWhenClientLeaves, callUpstream, UpstreamError, type UpstreamResult } from '../../domain/upstream/client';
 import { MARKET_POLICY } from '../../domain/upstream/policies';
 
 const UNAVAILABLE_MESSAGE =
@@ -37,12 +37,12 @@ export async function marketResearchAnalyzeHandler(request: FastifyRequest, repl
   try {
     resp = await callUpstream(
       targetUrl,
-      { method: 'POST', headers, body: JSON.stringify(request.body ?? {}) },
+      { method: 'POST', headers, body: JSON.stringify(request.body ?? {}), signal: abortWhenClientLeaves(reply) },
       { ...MARKET_POLICY, timeoutMs: 75000 },
       request.currentUser?.id,
     );
   } catch (err) {
-    if (err instanceof UpstreamError && err.status === 429) throw err; // the caller's own limit: say so
+    if (err instanceof UpstreamError && (err.status === 429 || err.status === 499)) throw err; // the caller's own limit, or they left: nothing to log as a failure
     request.log.error({ err }, 'market-validation-api proxy failed');
     throw new HttpError(503, UNAVAILABLE_MESSAGE, 'upstream_unavailable');
   }

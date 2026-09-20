@@ -202,11 +202,15 @@ export function normalizePath(url: string): string {
 // ── Registration ──────────────────────────────────────────────────────────────
 
 /** Same error shape as everywhere else, plus the standard Retry-After header. */
-function tooManyRequests(request: FastifyRequest, reply: FastifyReply, reason: string | undefined) {
+function tooManyRequests(request: FastifyRequest, reply: FastifyReply, reason: string | undefined, resetAt?: number) {
   return reply
     .status(429)
     .header('Content-Type', 'application/problem+json')
     .header('Retry-After', '60')
+    // The same limit headers a successful answer carries, so a client can read them from the refusal too.
+    .header('X-RateLimit-Limit', String(config.rateLimitPerMinute))
+    .header('X-RateLimit-Remaining', '0')
+    .header('X-RateLimit-Reset', String(resetAt ?? Math.ceil(Date.now() / 1000) + 60))
     .send(problemBody(request.url, 429, reason ?? 'Rate limit exceeded.', { retryAfterSeconds: 60 }));
 }
 
@@ -218,7 +222,7 @@ export function registerApiProtection(app: FastifyInstance) {
     const bucketKey = `ip:${getClientIp(request)}`;
     const result = await redisCheck(bucketKey);
     if (!result.allowed) {
-      return tooManyRequests(request, reply, result.reason);
+      return tooManyRequests(request, reply, result.reason, result.resetAt);
     }
 
     // An API Library key gets its OWN bucket on top of the IP one (both must
@@ -230,7 +234,7 @@ export function registerApiProtection(app: FastifyInstance) {
     if (typeof presentedKey === 'string' && presentedKey.startsWith(GATEWAY_KEY_PREFIX)) {
       const keyResult = await redisCheck(`key:${createHash('sha256').update(presentedKey).digest('hex')}`);
       if (!keyResult.allowed) {
-        return tooManyRequests(request, reply, keyResult.reason);
+        return tooManyRequests(request, reply, keyResult.reason, keyResult.resetAt);
       }
     }
 

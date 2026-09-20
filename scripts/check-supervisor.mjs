@@ -36,7 +36,7 @@ const status = async () => JSON.parse((await get('/status', CTL)).b);
 rmSync(COPY, { recursive: true, force: true });
 cpSync(`${REPO}/dist`, `${COPY}/dist`, { recursive: true });
 cpSync(`${REPO}/library-ui`, `${COPY}/library-ui`, { recursive: true });
-const child = spawn(process.execPath, [`${COPY}/dist/supervisor.js`], { cwd: REPO, env: { ...process.env, PORT: String(PORT), SUPERVISOR_PORT: String(CTL), SUPERVISOR_DRAIN_MS: '15000' }, stdio: ['ignore', 'pipe', 'pipe'] });
+const child = spawn(process.execPath, [`${COPY}/dist/supervisor.js`], { cwd: REPO, env: { ...process.env, PORT: String(PORT), SUPERVISOR_PORT: String(CTL), SUPERVISOR_DRAIN_MS: '15000', LOG_DIR: `${COPY}/logs`, LOG_RETENTION_DAYS: '30' }, stdio: ['ignore', 'pipe', 'pipe'] });
 let out = ''; child.stdout.on('data', (d) => (out += d)); child.stderr.on('data', (d) => (out += d));
 try {
   for (let i = 0; i < 60; i++) { if ((await get('/status', CTL)).s === 200) break; await sleep(500); }
@@ -90,6 +90,19 @@ try {
   await stopped;
   let gone = false; for (let i = 0; i < 40; i++) { await sleep(500); if ((await get('/health')).s === 0) { gone = true; break; } }
   check('stop drains and the service exits', gone);
+
+  // the daily log files: worker output is captured, and files older than the retention window are removed
+  const today = new Date().toISOString().slice(0, 10);
+  const logFile = `${COPY}/logs/desk-api-${today}.log`;
+  check("the worker output went to today's log file (server lines with request ids)", existsSync(logFile) && /"msg":"Server listening/.test(readFileSync(logFile, 'utf8')) && /"reqId"/.test(readFileSync(logFile, 'utf8')), logFile);
+  check("the supervisor's own messages are in the same file", /"component":"supervisor"/.test(readFileSync(logFile, 'utf8')));
+  writeFileSync(`${COPY}/logs/desk-api-2020-01-01.log`, 'old');
+  writeFileSync(`${COPY}/logs/desk-api-2020-01-01.err.log`, 'old');
+  const second = spawn(process.execPath, [`${COPY}/dist/supervisor.js`], { cwd: REPO, env: { ...process.env, PORT: String(PORT), SUPERVISOR_PORT: String(CTL), LOG_DIR: `${COPY}/logs` }, stdio: 'ignore' });
+  for (let i = 0; i < 60; i++) { if ((await get('/status', CTL)).s === 200) break; await sleep(500); }
+  check('a file older than the retention window is deleted when the supervisor starts logging', !existsSync(`${COPY}/logs/desk-api-2020-01-01.log`) && !existsSync(`${COPY}/logs/desk-api-2020-01-01.err.log`) && existsSync(logFile));
+  await post('/stop');
+  second.kill();
 } finally {
   try { child.kill(); } catch { /* gone */ }
   rmSync(COPY, { recursive: true, force: true });

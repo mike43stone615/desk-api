@@ -15,7 +15,7 @@ import { HttpError, problemBody } from '../middleware/http-error';
 import { config } from '../config';
 import { gatewayApiKeys, looksLikeGatewayKey } from '../domain/gateway/keys';
 import type { BrokeredService } from '../domain/gateway/services';
-import { callUpstream } from '../domain/upstream/client';
+import { abortWhenClientLeaves, callUpstream } from '../domain/upstream/client';
 import { MARKET_POLICY, REGISTRY_POLICY } from '../domain/upstream/policies';
 
 interface UpstreamRoute {
@@ -128,6 +128,7 @@ async function forward(service: BrokeredService, request: FastifyRequest, reply:
         ...(route.method === 'POST' ? { 'content-type': 'application/json' } : {}),
       },
       body: route.method === 'POST' ? JSON.stringify(request.body ?? {}) : undefined,
+      signal: abortWhenClientLeaves(reply),
     },
     { ...spec.policy, retryable: route.idempotent === true },
     verified.id,

@@ -375,6 +375,10 @@ export function createFakeDb() {
       const rows = securityEvents.filter((e) => e.user_id === p[0] || e.subject === p[1]).reverse().slice(0, Number(p[2]));
       return { rows, rowCount: rows.length };
     }
+    if (s === 'DELETE FROM security_events WHERE user_id = $1') {
+      for (let i = securityEvents.length - 1; i >= 0; i--) if (securityEvents[i].user_id === p[0]) securityEvents.splice(i, 1);
+      return { rows: [], rowCount: 1 };
+    }
     if (s.startsWith('DELETE FROM security_events WHERE created_at')) {
       const cutoff = Date.now() - Number(p[0]) * 86_400_000;
       for (let i = securityEvents.length - 1; i >= 0; i--) if (Date.parse(String(securityEvents[i].created_at)) < cutoff) securityEvents.splice(i, 1);
@@ -545,6 +549,7 @@ export function createFakeDb() {
     }
 
     // ── mutation audit log ────────────────────────────────────────────────
+    if (s.startsWith('DELETE FROM mutation_audit_log WHERE created_at')) return { rows: [], rowCount: 0 };
     if (s.startsWith('INSERT INTO mutation_audit_log')) {
       const [
         id,

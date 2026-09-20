@@ -127,9 +127,21 @@ function acquire(policy: UpstreamPolicy, holder: string | undefined): () => void
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
+/**
+ * A signal that fires when the person who made this request goes away (closes the tab, times out) before we have
+ * answered, so the call to the backend is dropped instead of running to completion for nobody.
+ */
+export function abortWhenClientLeaves(reply: { raw: { once: (e: 'close', f: () => void) => unknown; writableFinished: boolean } }): AbortSignal {
+  const controller = new AbortController();
+  reply.raw.once('close', () => {
+    if (!reply.raw.writableFinished) controller.abort();
+  });
+  return controller.signal;
+}
+
 export async function callUpstream(
   url: string,
-  init: { method: string; headers?: Record<string, string>; body?: string },
+  init: { method: string; headers?: Record<string, string>; body?: string; signal?: AbortSignal },
   policy: UpstreamPolicy,
   holder?: string,
 ): Promise<UpstreamResult> {
@@ -155,7 +167,8 @@ export async function callUpstream(
     let lastError: UpstreamError | null = null;
     for (let attempt = 1; attempt <= attempts; attempt++) {
       try {
-        const res = await fetch(url, { ...init, signal: AbortSignal.timeout(policy.timeoutMs) });
+        const timeout = AbortSignal.timeout(policy.timeoutMs);
+        const res = await fetch(url, { ...init, signal: init.signal ? AbortSignal.any([timeout, init.signal]) : timeout });
         if (isFailureStatus(res.status)) {
           const text = await readCapped(res, policy.maxResponseBytes).catch(() => '');
           if (attempt < attempts && res.status !== 500) {
@@ -172,6 +185,13 @@ export async function callUpstream(
         upstreamCallsTotal.inc({ service: policy.service, outcome: 'ok' });
         return { status: res.status, headers: res.headers, text };
       } catch (err) {
+        if (init.signal?.aborted) {
+          // The caller left. That says nothing about the backend's health: no retry, no failure recorded.
+          upstreamCallsTotal.inc({ service: policy.service, outcome: 'client_cancelled' });
+          const b = breakers.get(policy.service);
+          if (b) b.trialInFlight = false;
+          throw new UpstreamError(499, 'The caller closed the connection.', undefined, 'client_closed');
+        }
         if (err instanceof UpstreamError) {
           // A too-large answer is the backend misbehaving, but repeating the call will not help.
           upstreamCallsTotal.inc({ service: policy.service, outcome: 'too_large' });

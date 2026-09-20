@@ -97,6 +97,7 @@ describe('POST /auth/account/delete', () => {
     expect((await app.inject({ method: 'GET', url: '/auth/session', headers: other })).statusCode).toBe(401);
     expect((await app.inject({ method: 'POST', url: '/auth/signin', payload: { email: u.email, password: PASSWORD } })).statusCode).toBe(401);
     await new Promise((r) => setTimeout(r, 20));
+    expect(fakeDb.securityEvents.filter((e: { user_id: string }) => e.user_id === u.id)).toEqual([]); // their stored events went with them
     expect(emailed.security.get(u.email)).toContain('Your Desk account was deleted');
   });
 });
