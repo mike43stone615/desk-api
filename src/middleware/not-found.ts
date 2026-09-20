@@ -24,11 +24,21 @@ function patternFor(url: string): RegExp {
   return new RegExp(`^${source}/?$`);
 }
 
+const registered = new WeakMap<FastifyInstance, Array<{ method: string; url: string }>>();
+
+/** Every real route the app registered ("METHOD", "/url/:param"), for tests that must cover them all. */
+export function registeredRoutes(app: FastifyInstance): Array<{ method: string; url: string }> {
+  return registered.get(app) ?? [];
+}
+
 export function registerNotFound(app: FastifyInstance): void {
   const routes: RecordedRoute[] = [];
+  const list: Array<{ method: string; url: string }> = [];
+  registered.set(app, list);
 
   app.addHook('onRoute', (route) => {
     const methods = Array.isArray(route.method) ? route.method : [route.method];
+    for (const method of methods) if (method !== 'OPTIONS' && method !== 'HEAD') list.push({ method, url: route.url });
     const pattern = patternFor(route.url);
     // OPTIONS is the CORS plugin's catch-all, not a real endpoint; HEAD is implied by GET.
     for (const method of methods) if (method !== 'OPTIONS') routes.push({ method, pattern });
