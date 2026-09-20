@@ -59,6 +59,37 @@ export async function provisionBrokerKey(service: BrokeredService, label: string
   return { backendKeyId: id, plaintext: key };
 }
 
+export interface UpstreamKey {
+  id: string;
+  label: string;
+  /** When the backend created it (ms since the epoch). */
+  createdAtMs: number;
+}
+
+/** Every ACTIVE key the backend has (revoked ones are not listed), so callers can compare against what we hold. */
+export async function listBrokerKeys(service: BrokeredService): Promise<UpstreamKey[]> {
+  const { baseUrl, adminKey } = upstream(service);
+  let res: Response;
+  try {
+    res = await fetch(`${baseUrl}/admin/api-keys`, {
+      headers: { 'x-api-key': adminKey },
+      signal: AbortSignal.timeout(TIMEOUT_MS),
+    });
+  } catch {
+    throw new BrokerError(`Could not reach ${service}.`);
+  }
+  if (res.status !== 200) throw new BrokerError(`${service} refused to list keys.`, res.status);
+  const body = (await res.json().catch(() => null)) as { apiKeys?: unknown } | null;
+  if (!body || !Array.isArray(body.apiKeys)) throw new BrokerError(`${service} returned an unexpected response.`);
+  const keys: UpstreamKey[] = [];
+  for (const k of body.apiKeys as Array<Record<string, unknown>>) {
+    if (typeof k.id !== 'string' || typeof k.label !== 'string') continue;
+    const created = typeof k.createdAt === 'string' ? Date.parse(k.createdAt) : NaN;
+    keys.push({ id: k.id, label: k.label, createdAtMs: Number.isFinite(created) ? created : Date.now() });
+  }
+  return keys;
+}
+
 /** 404 (already gone) and 409 (already revoked) both count as success. */
 export async function revokeBrokerKey(service: BrokeredService, backendKeyId: string): Promise<void> {
   const { baseUrl, adminKey } = upstream(service);

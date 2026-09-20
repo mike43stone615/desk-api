@@ -560,6 +560,16 @@ export function createFakeDb() {
       const rows = [...gatewayKeys.values()].filter((k) => k.owner_user_id === p[0] && !k.revoked_at).map((k) => ({ id: k.id }));
       return { rows, rowCount: rows.length };
     }
+    if (s.startsWith('SELECT g.backend_key_id FROM gateway_api_key_grants g JOIN gateway_api_keys k ON k.id = g.api_key_id WHERE g.service = $1')) {
+      const rows = gatewayGrants
+        .filter((g) => g.service === p[0] && g.backend_key_id && !gatewayKeys.get(g.api_key_id as string)?.revoked_at)
+        .map((g) => ({ backend_key_id: g.backend_key_id }));
+      return { rows, rowCount: rows.length };
+    }
+    if (s.startsWith('SELECT id, revoked_at FROM gateway_api_keys WHERE id = ANY($1)')) {
+      const rows = (p[0] as unknown as string[]).map((id) => gatewayKeys.get(id)).filter(Boolean).map((k) => ({ id: k!.id, revoked_at: k!.revoked_at }));
+      return { rows, rowCount: rows.length };
+    }
     if (s.startsWith('SELECT id, service, backend_key_id FROM gateway_backend_key_revocations')) {
       return { rows: [...backendRevocations.values()], rowCount: backendRevocations.size };
     }

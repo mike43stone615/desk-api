@@ -1,4 +1,4 @@
-import { Registry, Counter, Histogram, collectDefaultMetrics } from 'prom-client';
+import { Registry, Counter, Gauge, Histogram, collectDefaultMetrics } from 'prom-client';
 
 export const metricsRegistry = new Registry();
 
@@ -30,6 +30,13 @@ export const cronTicksTotal = new Counter({
   name: 'desk_cron_ticks_total',
   help: 'Background cron ticks (session/token cleanup), by outcome',
   labelNames: ['job', 'outcome'] as const,
+  registers: [metricsRegistry],
+});
+
+export const gatewayKeyDrift = new Gauge({
+  name: 'desk_gateway_key_drift',
+  help: 'Backend keys out of step with what desk-api holds (as of the last hourly check), by kind',
+  labelNames: ['kind'] as const,
   registers: [metricsRegistry],
 });
 

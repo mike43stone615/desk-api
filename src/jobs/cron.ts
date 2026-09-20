@@ -15,12 +15,14 @@ import cron from 'node-cron';
 import { randomUUID } from 'crypto';
 import type { FastifyBaseLogger } from 'fastify';
 import { authDb } from '../infrastructure/auth';
-import { backendKeySweepTotal, cronTicksTotal } from '../modules/metrics';
+import { backendKeySweepTotal, cronTicksTotal, gatewayKeyDrift } from '../modules/metrics';
+import { reconcileBackendKeys } from '../domain/gateway/reconcile';
 import { sweepBackendKeys } from '../domain/gateway/orphans';
 import { getRedis } from '../middleware/redis-client';
 
 let task: cron.ScheduledTask | null = null;
 let sweepTask: cron.ScheduledTask | null = null;
+let reconcileTask: cron.ScheduledTask | null = null;
 
 export function startCleanupCron(log: FastifyBaseLogger): void {
   task = cron.schedule('0 2 * * *', () => {
@@ -32,6 +34,34 @@ export function startCleanupCron(log: FastifyBaseLogger): void {
     void runBackendKeySweep(log);
   });
   void runBackendKeySweep(log);
+  reconcileTask = cron.schedule('17 * * * *', () => {
+    void runKeyReconcile(log);
+  });
+}
+
+const RECONCILE_LOCK_KEY = 'desk-api:cron:key-reconcile:lock';
+
+/** Hourly: compare our brokered keys with the backends' and revoke orphans; drift counts go to /metrics. */
+export async function runKeyReconcile(log: FastifyBaseLogger): Promise<void> {
+  const redis = getRedis();
+  if (redis) {
+    try {
+      if ((await redis.set(RECONCILE_LOCK_KEY, instanceId, 'PX', 30 * 60 * 1000, 'NX')) !== 'OK') return;
+    } catch {
+      // fail open, as for cleanup
+    }
+  }
+  try {
+    const report = await reconcileBackendKeys();
+    gatewayKeyDrift.set({ kind: 'missing_backend_key' }, report.missing);
+    gatewayKeyDrift.set({ kind: 'orphan_backend_key' }, report.orphansFailed);
+    if (report.orphansRevoked) backendKeySweepTotal.inc({ outcome: 'orphan_revoked' }, report.orphansRevoked);
+    if (report.orphansRevoked || report.orphansFailed || report.missing || report.unreachable.length) {
+      log.warn({ event: 'gateway_key_drift', ...report }, 'backend keys were out of step with the gateway grants');
+    }
+  } catch (err) {
+    log.error({ err }, 'gateway key reconcile failed');
+  }
 }
 
 const SWEEP_LOCK_KEY = 'desk-api:cron:backend-key-sweep:lock';
@@ -104,4 +134,6 @@ export function stopCleanupCron(): void {
   task = null;
   sweepTask?.stop();
   sweepTask = null;
+  reconcileTask?.stop();
+  reconcileTask = null;
 }
