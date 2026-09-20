@@ -34,7 +34,7 @@ async function tx(fn) {
   catch (e) {
     await c.query('ROLLBACK').catch(() => {});
     if (e.code === '40P01') tally.deadlock++;
-    else if (e.refused) tally.refused++;
+    else if (e.refused || e.code === '23503') tally.refused++; // 23503: the person was deleted first, so the insert has no one to belong to
     else { tally.other++; if (tally.other < 4) console.log('  other error:', e.code, String(e.message).slice(0, 100)); }
   } finally { c.release(); }
 }
