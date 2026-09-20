@@ -664,3 +664,94 @@ describe('the public API description', () => {
     }
   });
 });
+
+describe('deleting a user does not leave their backend keys alive', () => {
+  const adminHeaders = { 'x-api-key': 'test-admin-key' };
+  let savedAdminKey: string | undefined;
+  beforeAll(() => {
+    savedAdminKey = config.adminApiKey;
+    config.adminApiKey = 'test-admin-key';
+  });
+  afterAll(() => {
+    config.adminApiKey = savedAdminKey;
+  });
+
+  const deleteUser = (id: string) => app.inject({ method: 'DELETE', url: `/admin/tables/desk.users/rows/${id}`, headers: adminHeaders });
+
+  it('revokes the gateway key and both backend keys, then deletes the user', async () => {
+    const user = seedUser('gone@example.com');
+    const { apiKey } = JSON.parse((await createKey(user, ['desk_api', 'registry_api', 'market_validation_api'])).body);
+    fetchCalls = [];
+
+    const res = await deleteUser(user.id);
+    expect(res.statusCode).toBe(200);
+    const revoked = fetchCalls.filter((c) => c.method === 'DELETE').map((c) => c.url);
+    expect(revoked).toHaveLength(2);
+    expect(revoked.some((u) => u.startsWith('http://registry.test/admin/api-keys/reg-backend-'))).toBe(true);
+    expect(revoked.some((u) => u.startsWith('http://market.test/admin/api-keys/mkt-backend-'))).toBe(true);
+    expect(fakeDb.users.has(user.id)).toBe(false);
+    expect(fakeDb.gatewayKeys.has(apiKey.id)).toBe(false);
+    expect(fakeDb.backendRevocations.size).toBe(0);
+    expect((await app.inject({ method: 'GET', url: '/setup/businesses', headers: { 'x-api-key': apiKey.key } })).statusCode).toBe(401);
+  });
+
+  it('when a backend is down at that moment, the backend key is queued and revoked by the sweeper later', async () => {
+    const user = seedUser('gone-down@example.com');
+    await createKey(user, ['registry_api']);
+    fetchMock.mockImplementationOnce(async () => {
+      throw new Error('ECONNREFUSED');
+    });
+
+    expect((await deleteUser(user.id)).statusCode).toBe(200);
+    expect(fakeDb.users.has(user.id)).toBe(false);
+    expect(fakeDb.backendRevocations.size).toBe(1);
+
+    fetchCalls = [];
+    const { sweepBackendKeys } = await import('../../domain/gateway/orphans');
+    expect(await sweepBackendKeys()).toEqual({ revoked: 1, failed: 0 });
+    expect(fetchCalls.filter((c) => c.method === 'DELETE')).toHaveLength(1);
+    expect(fakeDb.backendRevocations.size).toBe(0);
+  });
+
+  it('a sweep that cannot reach the backend keeps the entry and counts the attempt', async () => {
+    const user = seedUser('gone-down2@example.com');
+    await createKey(user, ['market_validation_api']);
+    fetchMock.mockImplementationOnce(async () => {
+      throw new Error('ECONNREFUSED');
+    });
+    await deleteUser(user.id);
+    expect(fakeDb.backendRevocations.size).toBe(1);
+
+    const { sweepBackendKeys } = await import('../../domain/gateway/orphans');
+    fetchMock.mockImplementationOnce(async () => {
+      throw new Error('ECONNREFUSED');
+    });
+    expect(await sweepBackendKeys()).toEqual({ revoked: 0, failed: 1 });
+    expect([...fakeDb.backendRevocations.values()][0].attempts).toBe(1);
+    expect(await sweepBackendKeys()).toEqual({ revoked: 1, failed: 0 });
+    expect(fakeDb.backendRevocations.size).toBe(0);
+  });
+
+  it('the sweeper also finishes a manual revoke whose backend was down', async () => {
+    const user = seedUser('revoke-retry@example.com');
+    const { apiKey } = JSON.parse((await createKey(user, ['registry_api'])).body);
+    fetchMock.mockImplementationOnce(async () => {
+      throw new Error('ECONNREFUSED');
+    });
+    expect((await app.inject({ method: 'DELETE', url: `/gateway/api-keys/${apiKey.id}`, headers: user.headers })).statusCode).toBe(204);
+    expect(fakeDb.gatewayGrants.find((g) => g.api_key_id === apiKey.id)!.backend_key_id).toBeTruthy();
+
+    const { sweepBackendKeys } = await import('../../domain/gateway/orphans');
+    expect(await sweepBackendKeys()).toEqual({ revoked: 1, failed: 0 });
+    expect(fakeDb.gatewayGrants.find((g) => g.api_key_id === apiKey.id)!.backend_key_id).toBeNull();
+    expect(await sweepBackendKeys()).toEqual({ revoked: 0, failed: 0 });
+  });
+
+  it('a normal revoke leaves nothing for the sweeper', async () => {
+    const user = seedUser('revoke-clean@example.com');
+    const { apiKey } = JSON.parse((await createKey(user, ['registry_api', 'market_validation_api'])).body);
+    await app.inject({ method: 'DELETE', url: `/gateway/api-keys/${apiKey.id}`, headers: user.headers });
+    const { sweepBackendKeys } = await import('../../domain/gateway/orphans');
+    expect(await sweepBackendKeys()).toEqual({ revoked: 0, failed: 0 });
+  });
+});

@@ -28,6 +28,7 @@ export function createFakeDb() {
   const idempotencyKeys = new Map<string, FakeRow>(); // keyed by key
   const gatewayKeys = new Map<string, FakeRow>(); // keyed by id
   const gatewayGrants: FakeRow[] = [];
+  const backendRevocations = new Map<string, FakeRow>(); // the queue filled by the grant-delete trigger (migration 0010)
 
   function findUserByEmail(email: string): FakeRow | undefined {
     return [...users.values()].find((u) => u.email === email);
@@ -46,6 +47,21 @@ export function createFakeDb() {
     if (s.includes('FROM users WHERE email = $1')) {
       const row = findUserByEmail(p[0]);
       return { rows: row ? [row] : [], rowCount: row ? 1 : 0 };
+    }
+    if (s.startsWith('DELETE FROM "users" WHERE "id" = $1')) {
+      // Mirrors the database: the user's keys and grants cascade away, and the trigger queues each backend key id.
+      const gone = users.delete(p[0]);
+      for (const [keyId, key] of [...gatewayKeys]) {
+        if (key.owner_user_id !== p[0]) continue;
+        gatewayKeys.delete(keyId);
+        for (let i = gatewayGrants.length - 1; i >= 0; i--) {
+          const g = gatewayGrants[i];
+          if (g.api_key_id !== keyId) continue;
+          if (g.backend_key_id) backendRevocations.set(String(g.id), { id: g.id, service: g.service, backend_key_id: g.backend_key_id, attempts: 0 });
+          gatewayGrants.splice(i, 1);
+        }
+      }
+      return { rows: [], rowCount: gone ? 1 : 0 };
     }
     if (s.includes('FROM users WHERE id = $1') || s.includes('FROM "users" WHERE "id" = $1')) {
       const row = users.get(p[0]);
@@ -532,6 +548,36 @@ export function createFakeDb() {
         .map((g) => ({ service: g.service, backend_key_id: g.backend_key_id }));
       return { rows, rowCount: rows.length };
     }
+    if (s.startsWith('UPDATE gateway_api_key_grants SET backend_key_id = NULL WHERE api_key_id = $1 AND service = $2')) {
+      for (const g of gatewayGrants) if (g.api_key_id === p[0] && g.service === p[1]) g.backend_key_id = null;
+      return { rows: [], rowCount: 1 };
+    }
+    if (s.startsWith('UPDATE gateway_api_key_grants SET backend_key_id = NULL WHERE id = $1')) {
+      for (const g of gatewayGrants) if (g.id === p[0]) g.backend_key_id = null;
+      return { rows: [], rowCount: 1 };
+    }
+    if (s.startsWith('SELECT id FROM gateway_api_keys WHERE owner_user_id = $1 AND revoked_at IS NULL')) {
+      const rows = [...gatewayKeys.values()].filter((k) => k.owner_user_id === p[0] && !k.revoked_at).map((k) => ({ id: k.id }));
+      return { rows, rowCount: rows.length };
+    }
+    if (s.startsWith('SELECT id, service, backend_key_id FROM gateway_backend_key_revocations')) {
+      return { rows: [...backendRevocations.values()], rowCount: backendRevocations.size };
+    }
+    if (s.startsWith('DELETE FROM gateway_backend_key_revocations WHERE id = $1')) {
+      backendRevocations.delete(p[0]);
+      return { rows: [], rowCount: 1 };
+    }
+    if (s.startsWith('UPDATE gateway_backend_key_revocations SET attempts')) {
+      const r = backendRevocations.get(p[0]);
+      if (r) { r.attempts = Number(r.attempts ?? 0) + 1; r.last_error = p[1]; }
+      return { rows: [], rowCount: 1 };
+    }
+    if (s.startsWith('SELECT g.id, g.service, g.backend_key_id FROM gateway_api_key_grants g JOIN gateway_api_keys k')) {
+      const rows = gatewayGrants
+        .filter((g) => g.backend_key_id && gatewayKeys.get(g.api_key_id as string)?.revoked_at)
+        .map((g) => ({ id: g.id, service: g.service, backend_key_id: g.backend_key_id }));
+      return { rows, rowCount: rows.length };
+    }
     if (s.startsWith('UPDATE gateway_api_key_grants SET encrypted_backend_key = NULL')) {
       for (const g of gatewayGrants) if (g.api_key_id === p[0]) g.encrypted_backend_key = null;
       return { rows: [], rowCount: 1 };
@@ -589,5 +635,6 @@ export function createFakeDb() {
     idempotencyKeys,
     gatewayKeys,
     gatewayGrants,
+    backendRevocations,
   };
 }

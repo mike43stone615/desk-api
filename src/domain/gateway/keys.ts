@@ -232,11 +232,37 @@ export const gatewayApiKeys = {
       if (!isBrokeredService(grant.service) || !grant.backend_key_id) continue;
       try {
         await revokeBrokerKey(grant.service, grant.backend_key_id);
+        // Done upstream: forget the id so nothing tries again. A failed one keeps its id for the sweeper to retry.
+        await pool.query(`UPDATE gateway_api_key_grants SET backend_key_id = NULL WHERE api_key_id = $1 AND service = $2`, [
+          id,
+          grant.service,
+        ]);
       } catch {
         upstreamFailures.push(grant.service);
       }
     }
     return { upstreamFailures };
+  },
+
+  /**
+   * Revokes every active key an account owns. Used just before the account is deleted so access stops at once;
+   * anything an unreachable backend could not revoke now is queued by the database (see migration 0010) and retried.
+   */
+  async revokeAllForOwner(ownerUserId: string): Promise<number> {
+    const { rows } = await pool.query<{ id: string }>(
+      `SELECT id FROM gateway_api_keys WHERE owner_user_id = $1 AND revoked_at IS NULL`,
+      [ownerUserId],
+    );
+    let revoked = 0;
+    for (const row of rows) {
+      try {
+        await this.revoke(ownerUserId, row.id);
+        revoked++;
+      } catch {
+        // Already gone or a backend is down: the deletion still proceeds and the queue covers the backend key.
+      }
+    }
+    return revoked;
   },
 
   /**

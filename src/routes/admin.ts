@@ -25,6 +25,7 @@ import type { FastifyReply, FastifyRequest } from 'fastify';
 import { HttpError } from '../middleware/http-error';
 import { requireAuth, requireAdmin } from '../middleware/auth';
 import { pool } from '../db';
+import { gatewayApiKeys } from '../domain/gateway/keys';
 import { config } from '../config';
 import { logMutation, requestIp, requestUserAgent } from '../modules/audit/mutation-audit';
 import { timingSafeEqualString } from '../utils/timing-safe-compare';
@@ -632,6 +633,9 @@ export async function adminTableDeleteRowHandler(request: FastifyRequest, reply:
     [id],
   );
   const before = beforeResult.rows[0] ?? null;
+
+  // Deleting a person deletes their API keys with them; end those keys (and their backend keys) first.
+  if (tableName === 'users' && before) await gatewayApiKeys.revokeAllForOwner(id);
 
   await pool.query(
     `DELETE FROM ${quoteIdentifier(tableName)} WHERE ${quoteIdentifier(table.primaryKey)} = $1`,

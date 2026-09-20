@@ -33,6 +33,13 @@ export const cronTicksTotal = new Counter({
   registers: [metricsRegistry],
 });
 
+export const backendKeySweepTotal = new Counter({
+  name: 'desk_backend_key_sweep_total',
+  help: 'Backend keys revoked (or failed to revoke) by the background sweeper',
+  labelNames: ['outcome'] as const,
+  registers: [metricsRegistry],
+});
+
 // Normalize URL patterns to avoid high-cardinality label explosion.
 export function normalizeRoute(url: string): string {
   return url.split('?')[0];

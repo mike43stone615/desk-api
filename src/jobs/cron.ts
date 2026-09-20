@@ -15,15 +15,47 @@ import cron from 'node-cron';
 import { randomUUID } from 'crypto';
 import type { FastifyBaseLogger } from 'fastify';
 import { authDb } from '../infrastructure/auth';
-import { cronTicksTotal } from '../modules/metrics';
+import { backendKeySweepTotal, cronTicksTotal } from '../modules/metrics';
+import { sweepBackendKeys } from '../domain/gateway/orphans';
 import { getRedis } from '../middleware/redis-client';
 
 let task: cron.ScheduledTask | null = null;
+let sweepTask: cron.ScheduledTask | null = null;
 
 export function startCleanupCron(log: FastifyBaseLogger): void {
   task = cron.schedule('0 2 * * *', () => {
     void runCleanup(log);
   });
+  // Backend keys left behind by deleted users/keys are revoked within minutes, and once at startup for anything
+  // queued while the service was down.
+  sweepTask = cron.schedule('*/5 * * * *', () => {
+    void runBackendKeySweep(log);
+  });
+  void runBackendKeySweep(log);
+}
+
+const SWEEP_LOCK_KEY = 'desk-api:cron:backend-key-sweep:lock';
+
+export async function runBackendKeySweep(log: FastifyBaseLogger): Promise<void> {
+  const redis = getRedis();
+  if (redis) {
+    try {
+      if ((await redis.set(SWEEP_LOCK_KEY, instanceId, 'PX', 4 * 60 * 1000, 'NX')) !== 'OK') return;
+    } catch {
+      // fail open, as for cleanup
+    }
+  }
+  try {
+    const { revoked, failed } = await sweepBackendKeys();
+    if (revoked) backendKeySweepTotal.inc({ outcome: 'revoked' }, revoked);
+    if (failed) {
+      backendKeySweepTotal.inc({ outcome: 'failed' }, failed);
+      log.warn({ event: 'backend_key_sweep_failed', failed }, 'some backend keys could not be revoked yet; will retry');
+    }
+    if (revoked) log.info({ event: 'backend_key_sweep', revoked }, 'revoked leftover backend keys');
+  } catch (err) {
+    log.error({ err }, 'backend key sweep failed');
+  }
 }
 
 // Real coordination gap this closes: node-cron runs in-process, so every
@@ -70,4 +102,6 @@ export async function runCleanup(log: FastifyBaseLogger): Promise<void> {
 export function stopCleanupCron(): void {
   task?.stop();
   task = null;
+  sweepTask?.stop();
+  sweepTask = null;
 }
