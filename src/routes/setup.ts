@@ -15,7 +15,7 @@ import { HttpError } from '../middleware/http-error';
 import { requireAuth, requireConfirmedEmail } from '../middleware/auth';
 import { generateId, nowUtc } from '../domain/auth/tokens';
 import { pool } from '../db';
-import { DraftPatchSchema, MemberInviteSchema } from '../validators/setup';
+import { DraftPatchSchema, MemberInviteSchema, MAX_BUSINESS_NAME_LENGTH, MAX_INDUSTRY_LENGTH } from '../validators/setup';
 import { parsePage, slicePage } from '../validators/pagination';
 import { config } from '../config';
 import { sendBusinessInviteEmail } from '../infrastructure/email/resend';
@@ -163,7 +163,9 @@ export async function patchDraftHandler(request: FastifyRequest, reply: FastifyR
   const { id } = request.params as { id: string };
 
   const parsed = DraftPatchSchema.safeParse(request.body ?? {});
-  if (!parsed.success) throw new HttpError(400, 'Draft must be a JSON object.');
+  if (!parsed.success) {
+    throw new HttpError(400, parsed.error.issues.find((i) => i.code === 'custom')?.message ?? 'Draft must be a JSON object.');
+  }
 
   const draftJson = JSON.stringify(parsed.data.draft);
   if (draftJson.length > MAX_DRAFT_BYTES) throw new HttpError(413, 'Setup draft is too large.');
@@ -204,7 +206,13 @@ export async function completeDraftHandler(request: FastifyRequest, reply: Fasti
   const draft = parseDraftJson(row.draft_json);
   const name = typeof draft.businessName === 'string' ? draft.businessName.trim() : '';
   if (!name) throw new HttpError(400, 'Enter a business name before finishing setup.');
+  if (name.length > MAX_BUSINESS_NAME_LENGTH) {
+    throw new HttpError(400, `Business name must be at most ${MAX_BUSINESS_NAME_LENGTH} characters.`);
+  }
   const industry = typeof draft.industry === 'string' && draft.industry.trim() ? draft.industry.trim() : null;
+  if (industry && industry.length > MAX_INDUSTRY_LENGTH) {
+    throw new HttpError(400, `Industry must be at most ${MAX_INDUSTRY_LENGTH} characters.`);
+  }
 
   const businessId = generateId();
   const now = nowUtc();
@@ -297,7 +305,10 @@ export async function inviteBusinessMemberHandler(request: FastifyRequest, reply
   }
 
   const parsed = MemberInviteSchema.safeParse(request.body ?? {});
-  if (!parsed.success) throw new HttpError(400, 'Member email is required.');
+  if (!parsed.success) {
+    const tooLong = parsed.error.issues.find((i) => i.code === 'too_big');
+    throw new HttpError(400, tooLong ? tooLong.message : 'Member email is required.');
+  }
   const email = parsed.data.email.trim().toLowerCase();
   const role = parseMemberRole(parsed.data.role);
   if (role === 'owner' && requester.role !== 'owner') {

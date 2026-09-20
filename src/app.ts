@@ -105,6 +105,12 @@ import { registerLibraryUi } from './routes/libraryUi';
 // did I last edit this service" would catch that immediately.
 const PROCESS_STARTED_AT = new Date().toISOString();
 
+// Request body sizes. The default is spelled out (instead of relying on Fastify's) and the small routes, whose real
+// bodies are a few hundred bytes, get a far lower ceiling so they cannot be used to make the server buffer megabytes.
+const BODY_LIMIT_DEFAULT = 1_048_576; // 1 MiB: drafts (up to 256 KB) and forwarded research requests
+const BODY_LIMIT_SMALL = 16_384; // 16 KiB: sign-in, sign-up, resets, invites, key creation
+const small = { bodyLimit: BODY_LIMIT_SMALL };
+
 export async function buildApp(): Promise<FastifyInstance> {
   const app = Fastify({
     logger: { level: config.logLevel },
@@ -115,6 +121,7 @@ export async function buildApp(): Promise<FastifyInstance> {
     // with an empty value.
     ignoreTrailingSlash: true,
     ignoreDuplicateSlashes: true,
+    bodyLimit: BODY_LIMIT_DEFAULT,
   });
 
   // Must come before any route is registered: it records them for 405 answers.
@@ -282,15 +289,15 @@ export async function buildApp(): Promise<FastifyInstance> {
 
 async function registerLegacyAndVersionedRoutes(instance: FastifyInstance) {
   // ── Auth ──────────────────────────────────────────────────────────────────
-  instance.post('/auth/signup', signUpHandler);
-  instance.post('/auth/signin', signInHandler);
+  instance.post('/auth/signup', small, signUpHandler);
+  instance.post('/auth/signin', small, signInHandler);
   instance.post('/auth/signout', signOutHandler);
   instance.get('/auth/session', sessionHandler);
-  instance.post('/auth/email-confirmation/request', requestEmailConfirmationHandler);
-  instance.post('/auth/email-confirmation/confirm', confirmEmailHandler);
-  instance.post('/auth/password-reset/request', requestPasswordResetHandler);
-  instance.post('/auth/password-reset/confirm', confirmPasswordResetHandler);
-  instance.post('/auth/password', updatePasswordHandler);
+  instance.post('/auth/email-confirmation/request', small, requestEmailConfirmationHandler);
+  instance.post('/auth/email-confirmation/confirm', small, confirmEmailHandler);
+  instance.post('/auth/password-reset/request', small, requestPasswordResetHandler);
+  instance.post('/auth/password-reset/confirm', small, confirmPasswordResetHandler);
+  instance.post('/auth/password', small, updatePasswordHandler);
 
   // ── Business setup ───────────────────────────────────────────────────────
   instance.get('/setup/drafts', listDraftsHandler);
@@ -301,7 +308,7 @@ async function registerLegacyAndVersionedRoutes(instance: FastifyInstance) {
   instance.post('/setup/drafts/:id/complete', completeDraftHandler);
   instance.get('/setup/businesses', listBusinessesHandler);
   instance.get('/setup/businesses/:id/members', listBusinessMembersHandler);
-  instance.post('/setup/businesses/:id/members', inviteBusinessMemberHandler);
+  instance.post('/setup/businesses/:id/members', small, inviteBusinessMemberHandler);
   instance.delete('/setup/businesses/:id/members/:membershipId', removeBusinessMemberHandler);
   instance.get('/setup/invites', listPendingInvitesHandler);
   instance.post('/setup/invites/:membershipId/accept', acceptBusinessInviteHandler);
@@ -338,7 +345,7 @@ async function registerLegacyAndVersionedRoutes(instance: FastifyInstance) {
   instance.get('/gateway/openapi.json', libraryOpenApiHandler);
   instance.get('/gateway/services', listGatewayServicesHandler);
   instance.get('/gateway/api-keys', listGatewayKeysHandler);
-  instance.post('/gateway/api-keys', createGatewayKeyHandler);
+  instance.post('/gateway/api-keys', small, createGatewayKeyHandler);
   instance.delete('/gateway/api-keys/:id', revokeGatewayKeyHandler);
 
   // ── API Library: key-authenticated proxies to registry-api / market-validation-api ──

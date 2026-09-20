@@ -70,14 +70,18 @@ describe('POST /auth/signup', () => {
     const res = await app.inject({
       method: 'POST',
       url: '/auth/signup',
-      payload: {
-        email: 'huge-pw@example.com',
-        password: 'A1!' + 'a'.repeat(1_000_000),
-        firstName: 'H',
-        lastName: 'P',
-      },
+      payload: { email: 'huge-pw@example.com', password: 'A1!' + 'a'.repeat(200), firstName: 'H', lastName: 'P' },
     });
     expect(res.statusCode).toBe(400);
+  });
+
+  it('a megabyte-sized body never reaches the hasher at all (413)', async () => {
+    const res = await app.inject({
+      method: 'POST',
+      url: '/auth/signup',
+      payload: { email: 'huge-pw2@example.com', password: 'A1!' + 'a'.repeat(1_000_000), firstName: 'H', lastName: 'P' },
+    });
+    expect(res.statusCode).toBe(413);
   });
 });
 
