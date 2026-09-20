@@ -56,8 +56,8 @@ version with no gap; a deploy is `Actions -> Deploy`. Documents (all in `docs/`)
 | --- | --- |
 | A developer using the API | [GETTING-STARTED](docs/GETTING-STARTED.md), [API-LIMITS](docs/API-LIMITS.md), [GLOSSARY](docs/GLOSSARY.md), [API-VERSIONING](docs/API-VERSIONING.md), [../CHANGELOG.md](CHANGELOG.md) |
 | People signing in | [AUTHENTICATION](docs/AUTHENTICATION.md), [PERSONAL-DATA](docs/PERSONAL-DATA.md), [DATA-RETENTION](docs/DATA-RETENTION.md) |
-| The operator | [HOSTING-AND-RECOVERY](docs/HOSTING-AND-RECOVERY.md), [ROLLBACK](docs/ROLLBACK.md), [TIMEOUTS](docs/TIMEOUTS.md), [DATABASE](docs/DATABASE.md), [BACKUP-RESTORE](docs/BACKUP-RESTORE.md), [SECRET-ROTATION](docs/SECRET-ROTATION.md), [ROTATING-GATEWAY-SECRETS](docs/ROTATING-GATEWAY-SECRETS.md), [COMPROMISED-KEY-PLAYBOOK](docs/COMPROMISED-KEY-PLAYBOOK.md) |
-| Decisions | [ADR-002 (API Library)](docs/ADR-002-api-library.md); ADR-001 and the D1/Workers notes are history |
+| The operator | [HOSTING-AND-RECOVERY](docs/HOSTING-AND-RECOVERY.md), [ROLLBACK](docs/ROLLBACK.md), [TIMEOUTS](docs/TIMEOUTS.md), [DATABASE](docs/DATABASE.md), [BACKUP-RESTORE](docs/BACKUP-RESTORE.md), [SECRET-ROTATION](docs/SECRET-ROTATION.md), [ROTATING-GATEWAY-SECRETS](docs/ROTATING-GATEWAY-SECRETS.md), [COMPROMISED-KEY-PLAYBOOK](docs/COMPROMISED-KEY-PLAYBOOK.md), [CAPACITY](docs/CAPACITY.md), [SECRETS-IN-GITHUB](docs/SECRETS-IN-GITHUB.md), [SUPPLY-CHAIN](docs/SUPPLY-CHAIN.md) |
+| Decisions | [DECISIONS](docs/DECISIONS.md) (judgement calls and why), [ADR-002 (API Library)](docs/ADR-002-api-library.md); ADR-001 and the D1/Workers notes are history |
 | Drafts awaiting the owner | [legal/](docs/legal/README.md) |
 
 ## Market research

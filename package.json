@@ -58,6 +58,7 @@
     "@vitest/coverage-v8": "^4.1.11",
     "eslint": "^10.7.0",
     "eslint-config-prettier": "^10.1.8",
+    "fast-check": "^4.10.2",
     "openapi-typescript": "^7.13.0",
     "prettier": "^3.9.6",
     "tsx": "^4.19.0",

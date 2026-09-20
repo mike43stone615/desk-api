@@ -143,7 +143,7 @@ async function forward(service: BrokeredService, request: FastifyRequest, reply:
   // the developer's mistake — so it must not look like their key failing.
   if (upstream.status === 401 || upstream.status === 403) {
     request.log.error({ service, keyId: verified.id, status: upstream.status }, 'gateway upstream rejected brokered key');
-    throw new HttpError(502, 'The upstream API rejected this request. Please contact support.', 'upstream_rejected');
+    throw new HttpError(502, `The upstream API rejected this request. Please report it: ${config.supportUrl}`, 'upstream_rejected');
   }
   for (const name of PASSTHROUGH_HEADERS) {
     const value = upstream.headers.get(name);

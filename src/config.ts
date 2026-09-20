@@ -116,6 +116,9 @@ export const envSchema = z.object({
 
   // Optional — the signing secret of the mail provider's webhook ("whsec_..."). Without it POST /webhooks/resend is off (404).
   RESEND_WEBHOOK_SECRET: z.string().optional(),
+
+  // Where people are pointed to report a problem (status page, error text). Defaults to the public issue tracker.
+  SUPPORT_URL: z.string().url().default('https://github.com/mike43stone615/desk-api/issues'),
 });
 
 const parsed = envSchema.safeParse(process.env);
@@ -184,6 +187,7 @@ export interface AppConfig {
   metricsDocsApiKey: string | undefined;
   securityContact: string | undefined;
   resendWebhookSecret: string | undefined;
+  supportUrl: string;
 }
 
 /** A development copy of the service must never run jobs that act on the SHARED backends on behalf of its own (empty) database. */
@@ -238,4 +242,5 @@ export const config: AppConfig = {
   metricsDocsApiKey: env.METRICS_DOCS_API_KEY,
   securityContact: env.SECURITY_CONTACT,
   resendWebhookSecret: env.RESEND_WEBHOOK_SECRET,
+  supportUrl: env.SUPPORT_URL,
 };

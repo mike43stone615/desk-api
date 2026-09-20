@@ -35,6 +35,7 @@ const PUBLIC: Record<string, string> = {
   'POST /auth/password-reset/request': 'pre-sign-in flow; answers identically for every address',
   'POST /auth/password-reset/confirm': 'pre-sign-in flow; authorised by the emailed token',
   'POST /webhooks/resend': 'the mail provider calls this; authorised by its signature only (404 until configured, 401 for a bad signature)',
+  'GET /status': 'the public status page (operational / degraded / down per part; no detail)',
   'GET /errors': 'catalogue of error codes (documentation only)',
   'GET /errors/:code': 'one error code explained (documentation only)',
   'GET /.well-known/security.txt': 'RFC 9116 contact file for security researchers (404 until a contact is chosen)',

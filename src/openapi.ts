@@ -184,6 +184,9 @@ const BASE_SPEC = {
     '/webhooks/resend': {
       post: { tags: ['System'], summary: 'The mail provider reports bounces and spam complaints (signature-authorised; off until configured)', responses: { '200': { description: 'Accepted' }, '401': { description: 'Missing or invalid signature' }, '404': { description: 'Not configured' } } },
     },
+    '/status': {
+      get: { tags: ['System'], summary: 'Is Desk working right now? (an HTML page for browsers, JSON for programs; 503 when something essential is down)', responses: { '200': { description: 'operational or degraded, with each part' }, '503': { description: 'down' } } },
+    },
     '/errors': {
       get: { tags: ['System'], summary: 'Every error code and what it means (the `type` of each error answer links here)', responses: { '200': { description: 'The catalogue' } } },
     },

@@ -1,0 +1,16 @@
+# Judgement calls, and why (September 2026)
+
+Things that could have gone either way, decided so nobody has to re-argue them. Change one by changing this page too.
+
+| Question | Decision | Why |
+| --- | --- | --- |
+| **HSTS preload** (putting `deskbusiness.co` on browsers' built-in HTTPS-only list) | **Not done.** The `Strict-Transport-Security` header stays at one year with `includeSubDomains`, and Cloudflare redirects http to https. | Preload is close to permanent and requires *every* subdomain, now and in future (including ones that are down like `www.`), to serve valid HTTPS. Getting off the list takes months. The header already protects every browser that has visited once. Revisit when the set of subdomains is settled. |
+| **Timestamp columns stored as text** in the older tables | **Leave as they are** (documented in DATABASE.md). | ISO-8601 text sorts and compares correctly; converting is a large migration with no user-visible benefit and some risk. New tables use real timestamps. |
+| **A support contact** | The public issue tracker of the desk-api repository (`SUPPORT_URL`, default `https://github.com/mike43stone615/desk-api/issues`), shown on the status page and in the one error message that mentions support. | It needs no mailbox to be set up. Change `SUPPORT_URL` when a support email exists. Anything posted there is public, so people are not asked to post secrets or personal data. |
+| **The security contact** (`/.well-known/security.txt`) | Off (404) until an address or page is chosen (`SECURITY_CONTACT`). The good candidate is GitHub's private vulnerability reporting for the repository. | Publishing a contact the operator has not agreed to answer is worse than none. |
+| **Branch protection** on `main` | Blocks force-push and deletion only; direct pushes still work. Applied to desk-api (public). The other five repositories are private, and GitHub does not offer this on private repositories without a paid plan. | It stops the two unrecoverable mistakes without slowing a one-person team down with pull-request rules. |
+| **Encrypting the off-machine backups** | **Not done** (they sit in a private OneDrive folder). | An encryption key kept on this machine would be lost together with it, which defeats the purpose of an off-machine copy; a key kept anywhere else needs the owner to keep it safe. Needs the owner's choice of where the key lives. |
+| **DMARC policy** for the sending domain | Recommended change from `p=none` to `p=quarantine` (the mail provider's DKIM is verified and aligned, so legitimate mail passes). **Not applied** until the owner approves the DNS change. | A DNS change to the live domain. |
+| **Bounce and complaint handling** | Built and off until `RESEND_WEBHOOK_SECRET` is set and the provider's webhook points at `/webhooks/resend`. | Needs a setting in the deployed secret and one in the mail provider's dashboard. |
+| **Terms and privacy pages, acceptance at sign-up** | Drafts only (docs/legal/); nothing published, nothing enforced. | The facts and choices in them are the owner's, and a lawyer should read them first. |
+| **Account deletion, password change** | Backend done (`POST /auth/account/delete`, `currentPassword` on `POST /auth/password`); no screen yet. | Screens are a separate piece of work. |

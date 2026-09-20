@@ -108,6 +108,7 @@ import { registerLibraryUi } from './routes/libraryUi';
 import { adminReconcileReportHandler, adminReconcileRunHandler, adminListKeysHandler, adminResumeKeyHandler, adminSuspendKeyHandler, adminSuspendUserHandler, adminUnsuspendUserHandler } from './routes/adminAccounts';
 import { registerSecurityTxt } from './routes/securityTxt';
 import { registerWebhooks } from './routes/webhooks';
+import { buildStatus, statusHtml } from './domain/health/status';
 import { ERROR_CODES } from './middleware/error-codes';
 import { registerPathParamCheck } from './middleware/path-params';
 import { recordKeyUsage } from './domain/gateway/usage';
@@ -330,6 +331,22 @@ export async function buildApp(options: { logStream?: { write: (line: string) =>
     app.get(`${base}/health`, async (req, reply) => {
       const now = new Date().toISOString();
       return reply.send({ ok: true, service: 'desk-api', responseId: req.id, servedAt: now, ts: now, processStartedAt: PROCESS_STARTED_AT });
+    });
+    // The public status page: operational, degraded or down for each part, for anyone (a person, a developer, a monitor).
+    const statusView = async () => {
+      const [{ checks }, dependencies] = await Promise.all([getReadiness(), checkDependencies()]);
+      return buildStatus(checks.database === 'ok' ? 'ok' : 'error', dependencies, config.supportUrl);
+    };
+    app.get(`${base}/status`, async (req, reply) => {
+      const view = await statusView();
+      // The HTML page and the JSON share an address: a browser gets the page, a program (Accept: application/json) the data.
+      if (base === '' && typeof req.headers.accept === 'string' && req.headers.accept.includes('text/html')) {
+        reply.header('Content-Type', 'text/html; charset=utf-8').header('Cache-Control', 'no-store');
+        applyHtmlCsp(reply, "default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'");
+        return reply.status(view.status === 'down' ? 503 : 200).send(statusHtml(view));
+      }
+      reply.header('Cache-Control', 'no-store');
+      return reply.status(view.status === 'down' ? 503 : 200).send(view);
     });
     // What each error code means. Public documentation: no data, and the `type` of every error answer links here.
     app.get(`${base}/errors`, async (_req, reply) => sendWithEtag(_req, reply, { errors: Object.entries(ERROR_CODES).map(([code, meaning]) => ({ code, meaning, type: errorTypeUrl(code) })) }));
