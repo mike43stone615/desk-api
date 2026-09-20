@@ -8,7 +8,7 @@
     "start": "tsx src/server.ts",
     "build": "tsc",
     "build:prod": "tsc -p tsconfig.build.json",
-    "start:prod": "node dist/server.js",
+    "start:prod": "node dist/supervisor.js",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",

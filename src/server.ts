@@ -14,6 +14,7 @@
 // confirmed: with the old order, both env vars read as undefined at the
 // exact moment Sentry.init()/tracing.ts evaluated them.
 import 'dotenv/config';
+import cluster from 'node:cluster';
 // Sentry MUST be first after dotenv — captures errors during the imports/setup below too.
 import { Sentry } from './sentry';
 // tracing MUST come right after Sentry — patches modules before they are loaded
@@ -51,6 +52,18 @@ async function main() {
 
   process.once('SIGINT', () => void shutdown());
   process.once('SIGTERM', () => void shutdown());
+
+  // Started by the supervisor (src/supervisor.ts): tell it this copy is serving, and when it asks this copy to step
+  // down (a newer one is already answering) finish the requests in flight, then leave. Run directly, neither applies.
+  if (cluster.isWorker) {
+    // First the supervisor says "drain": from then on every answer carries `Connection: close`, so clients (the
+    // tunnel keeps connections open) move to new connections instead of reusing one that is about to be closed.
+    process.on('message', (m) => {
+      if ((m as { type?: string } | null)?.type === 'drain') app.server.on('request', (_req, res) => res.setHeader('Connection', 'close'));
+    });
+    process.send?.({ type: 'ready' });
+    process.once('disconnect', () => void shutdown().finally(() => process.exit(0)));
+  }
 }
 
 main().catch((err) => {

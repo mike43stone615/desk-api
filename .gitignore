@@ -25,3 +25,4 @@ d1-export/
 # Uptime watch: where alerts go (may hold a webhook URL / API key) and its runtime state
 scripts/alerts.json
 logs/
+.tmp-sup/

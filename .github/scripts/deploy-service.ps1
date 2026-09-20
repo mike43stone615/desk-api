@@ -23,7 +23,11 @@ param(
   # never run migrations; see scripts/check-migrations.ts). The old version keeps serving.
   [switch]$CheckMigrations,
   # Validate the settings file (.env written from the DOTENV_CONTENT secret) before anything is swapped.
-  [switch]$ValidateEnv
+  [switch]$ValidateEnv,
+  # The supervisor's control port (src/supervisor.ts). When a supervisor is already running and only the compiled code
+  # changed, the new version is swapped in with no gap at all ("hot reload"): a new worker starts, and only when it is
+  # serving does the old one finish its requests and leave.
+  [int]$ControlPort = 3468
 )
 
 $ErrorActionPreference = 'Stop'
@@ -51,7 +55,22 @@ if ($CheckMigrations) {
   if ($LASTEXITCODE -ne 0) { throw "Deploy refused: there are unapplied migrations (listed above). Apply them first: npm run migrate -- --production --env-file <the deployed .env>  (--dry-run first). The running version was not touched." }
 }
 
+function Get-SupervisorStatus {
+  try {
+    $r = Invoke-WebRequest -Uri "http://127.0.0.1:$ControlPort/status" -UseBasicParsing -TimeoutSec 3
+    return ($r.Content | ConvertFrom-Json)
+  } catch { return $null }
+}
+
 function Stop-CurrentService {
+  # A running supervisor is asked to drain and exit (it would otherwise start its worker again).
+  $sup = Get-SupervisorStatus
+  if ($sup) {
+    Write-Output "Asking the supervisor (PID $($sup.pid)) to stop"
+    try { Invoke-WebRequest -Uri "http://127.0.0.1:$ControlPort/stop" -Method Post -UseBasicParsing -TimeoutSec 10 | Out-Null } catch {}
+    for ($i = 0; $i -lt 40 -and (Get-Process -Id $sup.pid -ErrorAction SilentlyContinue); $i++) { Start-Sleep -Milliseconds 500 }
+    if (Get-Process -Id $sup.pid -ErrorAction SilentlyContinue) { Stop-Process -Id $sup.pid -Force }
+  }
   $owner = (Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction SilentlyContinue | Select-Object -First 1 -ExpandProperty OwningProcess)
   if ($owner) {
     Write-Output "Stopping current process on port $Port (PID $owner)"
@@ -67,6 +86,17 @@ function Copy-Tree([string]$from, [string]$to) {
   $global:LASTEXITCODE = 0
 }
 
+# Can this release be swapped in without stopping anything? Yes when a supervisor is running, is the same supervisor
+# code this release ships, and no dependencies changed (those are replaced with the service stopped).
+$hot = $false
+if ($LivePath) {
+  $sup = Get-SupervisorStatus
+  $newSup = Join-Path $RepoPath 'dist\supervisor.js'
+  if ($sup -and (Test-Path $newSup) -and ((Get-FileHash $newSup -Algorithm SHA256).Hash.ToLower() -eq $sup.fingerprint)) { $hot = $true }
+  elseif ($sup) { Write-Output "The supervisor itself changed: this release needs a full restart" }
+  else { Write-Output "No supervisor is running (first deploy of this layout, or it was stopped): full start" }
+}
+
 if ($LivePath) {
   New-Item -ItemType Directory -Force -Path $LivePath | Out-Null
   # Everything the running service needs, and nothing else (no sources, tests, git history or dev tooling output).
@@ -76,6 +106,7 @@ if ($LivePath) {
   $liveLock = Join-Path $LivePath 'package-lock.json'
   $lockThen = if (Test-Path $liveLock) { (Get-FileHash $liveLock).Hash } else { '' }
   $depsChanged = ($lockNow -ne $lockThen) -or -not (Test-Path (Join-Path $LivePath 'node_modules'))
+  if ($depsChanged) { $hot = $false }
   if ($depsChanged) {
     Write-Output "Dependencies changed: stopping the service before replacing node_modules"
     Stop-CurrentService
@@ -102,7 +133,7 @@ if ($LivePath) {
   Write-Output "Prepared live copy at $LivePath"
 }
 
-Stop-CurrentService
+# (Stop-CurrentService is called just before the new version is started, further down.)
 
 # Start-Process's child is attached to the GitHub Actions runner's own
 # Windows Job Object (JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE) unless explicitly
@@ -148,6 +179,37 @@ function Wait-Healthy([int]$seconds) {
   return $false
 }
 
+function Restore-PreviousFiles {
+  foreach ($dir in @('dist', 'library-ui')) {
+    if (Test-Path (Join-Path $LivePath "$dir.prev")) { Copy-Tree (Join-Path $LivePath "$dir.prev") (Join-Path $LivePath $dir) }
+  }
+  foreach ($file in @('package.json', 'package-lock.json', '.env')) {
+    $saved = Join-Path $LivePath "$file.prev"
+    if (Test-Path $saved) { Copy-Item -Force $saved (Join-Path $LivePath $file) }
+  }
+}
+
+if ($hot) {
+  Write-Output "Hot reload: the running service keeps answering while the new version starts beside it"
+  try {
+    $r = Invoke-WebRequest -Uri "http://127.0.0.1:$ControlPort/reload" -Method Post -UseBasicParsing -TimeoutSec 120
+    Write-Output "Reload: $($r.Content)"
+  } catch {
+    Write-Output "The new version did not become ready: $($_.Exception.Message)"
+    # The old worker was never touched and is still serving. Put the old files back so a later restart starts the
+    # same version that is running now.
+    Restore-PreviousFiles
+    throw "Deploy FAILED: the new version did not become ready. The previous version never stopped serving."
+  }
+  if (Wait-Healthy 30) { exit 0 }
+  Write-Output "The new worker answered the reload but the service is not healthy. Restoring the previous version."
+  Restore-PreviousFiles
+  try { Invoke-WebRequest -Uri "http://127.0.0.1:$ControlPort/reload" -Method Post -UseBasicParsing -TimeoutSec 120 | Out-Null } catch {}
+  if (Wait-Healthy 60) { throw "Deploy FAILED: the new version was not healthy. The previous version was restored and is serving." }
+  throw "Deploy FAILED and the automatic rollback did not recover the service either. Check deploy.err.log in $LivePath."
+}
+
+Stop-CurrentService
 Start-Service
 
 # 30s, then 90s, both proved too tight for the old layout (started from a fresh `npm ci` under this account, likely

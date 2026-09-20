@@ -36,8 +36,9 @@ this machine and through desk-api's API Library.
 | Cloudflare has an outage | Same as the tunnel being down | When Cloudflare recovers |
 | A deploy fails | The old version keeps running (desk-api deploys build first and only then swap) | n/a |
 
-**Deploys** of desk-api take the API out for about 5 seconds (measured: 4.7 to 5.7 seconds locally, up to about 9
-through Cloudflare), because the old version keeps serving until the new one is built and ready.
+**Deploys** of desk-api normally have **no gap**: the new version starts beside the old one and takes over when it is
+ready (see ROLLBACK.md, "How a deploy swaps versions without a gap"). A few seconds of downtime remain only for a full
+restart: changed dependencies, a changed supervisor, or the first start after a reboot.
 
 ## Watching it
 
