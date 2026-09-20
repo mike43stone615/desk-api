@@ -56,8 +56,17 @@ async function authenticateWithGatewayKey(request: FastifyRequest, apiKey: strin
   if (!owner) throw new HttpError(401, 'Invalid or revoked API key.', 'invalid_api_key');
   request.currentUser = owner;
   request.gatewayKey = verified;
-  // Every line this request logs from now on says it was a key, and which one (never the key itself).
-  request.log = request.log.child({ auth: 'key', keyId: verified.id, userId: owner.id });
+}
+
+/**
+ * From now on every line this request logs, including the "request completed" line, says how the caller
+ * authenticated and who they are: `auth: "key"` with the key's id (never the key itself) or `auth: "session"`.
+ */
+export function bindAuthToLog(request: FastifyRequest, reply: FastifyReply, bindings: Record<string, unknown>): void {
+  const child = request.log.child(bindings);
+  request.log = child;
+  // Fastify writes the completion line through the reply's logger, which is a separate reference.
+  (reply as unknown as { log: typeof child }).log = child;
 }
 
 /** 401 for a key that is past its expiry date or has been idle for months. */
@@ -94,8 +103,8 @@ export async function requireAuth(request: FastifyRequest, reply: FastifyReply):
     // Suspending an account ends its sessions; this catches one created in the same instant.
     if (await isUserSuspended(user.id)) throw new HttpError(403, 'This account is suspended.', 'account_suspended');
     request.currentUser = user;
-    request.log = request.log.child({ auth: 'session', userId: user.id });
   }
+  bindAuthToLog(request, reply, request.gatewayKey ? { auth: 'key', keyId: request.gatewayKey.id, userId: request.currentUser!.id } : { auth: 'session', userId: request.currentUser!.id });
   // The general limit per PERSON, on top of the one per address: a leaked session or key used from many addresses is
   // still one account with one allowance.
   const person = await checkRateBucket(`user:${request.currentUser!.id}`, USER_BUCKET_FACTOR);

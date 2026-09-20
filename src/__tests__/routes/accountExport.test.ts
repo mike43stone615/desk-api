@@ -89,6 +89,25 @@ describe('refused requests are recorded as structured "request denied" lines', (
   });
 });
 
+describe('the log says how each call authenticated', () => {
+  it('the completion line of a keyed call carries auth "key" and the key id (never the key); a session call says "session"', async () => {
+    const u = seedUser();
+    const me = await session(u.email);
+    const created = JSON.parse((await app.inject({ method: 'POST', url: '/gateway/api-keys', headers: me.headers, payload: { label: 'log', services: ['desk_api'] } })).body).apiKey;
+    lines.length = 0;
+    app.log.level = 'info';
+    await app.inject({ method: 'GET', url: '/auth/session', headers: { 'x-api-key': created.key, 'x-request-id': 'req-keyed-000001' } });
+    await app.inject({ method: 'GET', url: '/auth/session', headers: { ...me.headers, 'x-request-id': 'req-session-00001' } });
+    await new Promise((r) => setTimeout(r, 20));
+    const parsed = lines.map((l) => { try { return JSON.parse(l); } catch { return null; } }).filter(Boolean);
+    const done = (id: string) => parsed.find((j) => j.reqId === id && j.msg === 'request completed');
+    expect(done('req-keyed-000001')).toMatchObject({ auth: 'key', keyId: created.id, userId: u.id });
+    expect(done('req-session-00001')).toMatchObject({ auth: 'session', userId: u.id });
+    expect(lines.join('|')).not.toContain(created.key);
+    app.log.level = 'warn';
+  });
+});
+
 describe('the admin reconcile report', () => {
   it('is empty before any run, then holds the result of a run and who asked for it', async () => {
     config.adminApiKey = 'admin-key-for-report-test';
