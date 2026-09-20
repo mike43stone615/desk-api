@@ -27,6 +27,7 @@ import { registerOriginCheck } from './middleware/origin-check';
 import { registerApiProtection } from './middleware/api-protection';
 import { requireAuth } from './middleware/auth';
 import { registerRouteLimits } from './middleware/route-limits';
+import { checkDependencies, isDegraded } from './domain/health/dependencies';
 import { applyHtmlCsp, docsCsp, docsInlineScript, SWAGGER_UI_CSS_SRI, SWAGGER_UI_JS_SRI, SWAGGER_UI_VERSION } from './middleware/csp';
 import { registerIdempotency } from './middleware/idempotency';
 import { requireMetricsDocsKey } from './middleware/auth';
@@ -251,7 +252,9 @@ export async function buildApp(): Promise<FastifyInstance> {
     app.get(`${base}/health/live`, async (_req, reply) => reply.status(200).send({ ok: true, service: 'desk-api', processStartedAt: PROCESS_STARTED_AT }));
     app.get(`${base}/health/ready`, async (_req, reply) => {
       const { ok, checks } = await getReadiness();
-      return reply.status(ok ? 200 : 503).send({ ok, checks, processStartedAt: PROCESS_STARTED_AT });
+      // Backends are reported but never make the service "not ready" (see domain/health/dependencies.ts).
+      const dependencies = await checkDependencies();
+      return reply.status(ok ? 200 : 503).send({ ok, degraded: isDegraded(dependencies), checks, dependencies, processStartedAt: PROCESS_STARTED_AT });
     });
     // Back-compat alias for the original Hono version's GET /health (basic liveness,
     // no dependency checks) — kept cheap/dependency-free since nothing in the Flutter

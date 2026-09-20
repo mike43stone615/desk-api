@@ -33,6 +33,13 @@ export const cronTicksTotal = new Counter({
   registers: [metricsRegistry],
 });
 
+export const dependencyUp = new Gauge({
+  name: 'desk_dependency_up',
+  help: '1 when a backend service desk-api relies on answered its health check the last time it was checked, else 0',
+  labelNames: ['dependency'] as const,
+  registers: [metricsRegistry],
+});
+
 export const gatewayKeyDrift = new Gauge({
   name: 'desk_gateway_key_drift',
   help: 'Backend keys out of step with what desk-api holds (as of the last hourly check), by kind',
