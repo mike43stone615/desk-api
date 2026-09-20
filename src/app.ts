@@ -28,6 +28,7 @@ import { registerApiProtection } from './middleware/api-protection';
 import { requireAuth } from './middleware/auth';
 import { registerRouteLimits } from './middleware/route-limits';
 import { checkDependencies, isDegraded } from './domain/health/dependencies';
+import { loggerOptions } from './middleware/log-redaction';
 import { applyHtmlCsp, docsCsp, docsInlineScript, SWAGGER_UI_CSS_SRI, SWAGGER_UI_JS_SRI, SWAGGER_UI_VERSION } from './middleware/csp';
 import { registerIdempotency } from './middleware/idempotency';
 import { requireMetricsDocsKey } from './middleware/auth';
@@ -121,9 +122,9 @@ const small = { bodyLimit: BODY_LIMIT_SMALL };
 // accepted here: they use /v1/gateway/* instead.
 const signedIn = { preHandler: requireAuth };
 
-export async function buildApp(): Promise<FastifyInstance> {
+export async function buildApp(options: { logStream?: { write: (line: string) => void } } = {}): Promise<FastifyInstance> {
   const app = Fastify({
-    logger: { level: config.logLevel },
+    logger: options.logStream ? { ...loggerOptions(config.logLevel), stream: options.logStream } : loggerOptions(config.logLevel),
     requestIdHeader: 'x-request-id',
     genReqId: () => randomUUID(),
     // /setup/drafts/ and //health reach the same handler as /setup/drafts and

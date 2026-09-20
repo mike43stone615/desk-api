@@ -10,11 +10,15 @@
 // isolation, which pointed straight at this. This service's own tracing.ts
 // is the intended tracing pipeline; Sentry here is for error events only.
 import * as Sentry from '@sentry/node';
+import { scrubSentryEvent } from './middleware/log-redaction';
 
 Sentry.init({
   dsn: process.env.SENTRY_DSN,
   environment: process.env.NODE_ENV ?? 'development',
   skipOpenTelemetrySetup: true,
+  // Never attach people's details to error reports, and strip credentials/bodies/cookies from what is sent anyway.
+  sendDefaultPii: false,
+  beforeSend: (event) => scrubSentryEvent(event),
 });
 
 export { Sentry };

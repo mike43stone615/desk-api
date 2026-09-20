@@ -14,6 +14,7 @@ import { AuthError } from '../infrastructure/auth/auth-service';
 import { requireAuth, extractSessionToken } from '../middleware/auth';
 import { setSessionCookie, clearSessionCookie } from '../infrastructure/auth/session-cookie';
 import { getClientIp } from '../middleware/api-protection';
+import { emailFingerprint } from '../middleware/log-redaction';
 import { checkSignupRateLimit } from '../middleware/signup-limiter';
 import { signinLockedSeconds, recordSigninFailure, clearSigninFailures } from '../middleware/signin-throttle';
 import {
@@ -106,7 +107,7 @@ export async function signInHandler(request: FastifyRequest, reply: FastifyReply
   }
 
   if (!result) {
-    audit(request, 'signin_failed', 'error', { email: email.trim() });
+    audit(request, 'signin_failed', 'error', { account: emailFingerprint(email) });
     await recordSigninFailure(ip, email);
     throw new HttpError(401, 'Invalid email or password.');
   }
@@ -168,7 +169,7 @@ export async function requestEmailConfirmationHandler(request: FastifyRequest, r
   const token = await authService.requestEmailConfirmation(email);
   if (token) {
     await sendEmailConfirmationEmail(config, email, token, request.id);
-    audit(request, 'email_confirmation_requested', 'ok', { email });
+    audit(request, 'email_confirmation_requested', 'ok', { account: emailFingerprint(email) });
   }
 
   // Response is identical whether or not the email is registered/unconfirmed/on
@@ -272,7 +273,7 @@ export async function requestPasswordResetHandler(request: FastifyRequest, reply
 
   const token = await authService.requestPasswordReset(email);
   if (token) {
-    audit(request, 'password_reset_requested', 'ok', { email });
+    audit(request, 'password_reset_requested', 'ok', { account: emailFingerprint(email) });
     await sendPasswordResetEmail(config, email, token, request.id);
   }
 
