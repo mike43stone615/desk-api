@@ -40,6 +40,7 @@ import { existsSync, mkdirSync, readdirSync, statSync, unlinkSync, createWriteSt
 import { join } from "path";
 import { createGzip } from "zlib";
 import { pipeline } from "stream/promises";
+import { encryptBackupFile, loadPublicKey, pruneOffHost, DEFAULT_PUBLIC_KEY_FILE } from "./backup-crypto";
 
 // Real OneDrive folder on this machine (confirmed signed in and actively
 // syncing) -- can be overridden or disabled (empty string) via env var.
@@ -78,18 +79,22 @@ function pruneOldBackups(dir: string, keep: number): void {
 // Best-effort: a missing/unsynced OneDrive folder degrades to the original
 // single-disk behavior (still a real local backup) rather than failing the
 // scheduled task outright over a copy step.
-function copyToOffHost(gzPath: string, fileName: string, offHostDir: string, keep: number): void {
+async function copyToOffHost(gzPath: string, fileName: string, offHostDir: string, keep: number): Promise<void> {
   if (!offHostDir) {
     console.log("Off-host backup copy disabled (OFFHOST_BACKUP_DIR set to empty).");
     return;
   }
   try {
     mkdirSync(offHostDir, { recursive: true });
-    copyFileSync(gzPath, join(offHostDir, fileName));
-    pruneOldBackups(offHostDir, keep);
-    console.log(`Copied backup off-host -> ${join(offHostDir, fileName)}`);
+    // The off-machine copy is encrypted with the PUBLIC key kept on this machine; only the private key (stored elsewhere,
+    // see docs/BACKUP-RESTORE.md) can read it. Without the public key nothing is copied: never a readable copy.
+    const encryptedName = `${fileName}.enc`;
+    await encryptBackupFile(gzPath, join(offHostDir, encryptedName), loadPublicKey(process.env.BACKUP_PUBLIC_KEY_FILE ?? DEFAULT_PUBLIC_KEY_FILE));
+    pruneOffHost(offHostDir, keep);
+    console.log(`Copied backup off-host (encrypted) -> ${join(offHostDir, encryptedName)}`);
   } catch (err) {
     console.error(`Off-host backup copy failed (local backup is still intact): ${String(err)}`);
+    process.exitCode = 1;
   }
 }
 
@@ -164,7 +169,7 @@ async function main(): Promise<void> {
   }
 
   pruneOldBackups(outDir, keep);
-  copyToOffHost(gzPath, fileName, offHostDir, keep);
+  await copyToOffHost(gzPath, fileName, offHostDir, keep);
 }
 
 main();

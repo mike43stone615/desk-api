@@ -264,6 +264,12 @@
     "failuresBeforeAlert": 3,
     "what": "free memory on this machine (it runs all the services and databases; measured at about 12% free in September 2026)"
   },
+  "offhostBackups": {
+    "root": "C:\\Users\\User\\OneDrive\\DeskPlatformBackups",
+    "services": ["desk-api", "registry-api", "market-validation-api", "compliance-os", "desk-oracle"],
+    "maxAgeHours": 40,
+    "what": "the encrypted off-machine (OneDrive) database backups: recent, and no readable copy left behind"
+  },
   "backups": {
     "dir": "C:\\Users\\User\\desk-api\\backups",
     "maxAgeHours": 36,
@@ -272,8 +278,12 @@
   "failuresBeforeAlert": 2,
   "recovery": {
     "checks": [
-      "desk-api"
+      "desk-api",
+      "desk-oracle"
     ],
+    "repos": {
+      "desk-oracle": "mike43stone615/desk-oracle"
+    },
     "afterFailures": 3,
     "cooldownMinutes": 30,
     "repo": "mike43stone615/desk-api",

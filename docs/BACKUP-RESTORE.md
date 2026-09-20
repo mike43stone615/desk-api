@@ -139,3 +139,13 @@ temp file were both deleted immediately after.
   storage gap.
 - `migrations/*.sql` — schema, applied via `npm run migrate`
   (`scripts/apply-migrations.ts`), tracked in `schema_migrations`.
+
+## Encrypted off-machine copies (from 20 September 2026)
+
+The copies in the OneDrive folder (`DeskPlatformBackups\<service>\backup-*.sql.gz.enc`) are encrypted with a **public** key kept on this machine (`C:\Users\User\.desk\backup-public.pem`). Each file gets its own random AES-256-GCM key, wrapped with that public key, so this machine (and anyone who reaches the OneDrive account) can create backups but **cannot read them**. The local copies in each repo's `backups\` folder stay plain, because they are protected by the machine itself.
+
+- **The private key** is `DESK-BACKUP-PRIVATE-KEY.pem`. It is needed *only* to restore from an off-machine copy. It must be kept somewhere that survives losing this machine (a password manager or an encrypted USB stick), and **not** in OneDrive. If it is lost, the off-machine copies cannot be read by anyone, ever.
+- **Restore:** `node scripts/decrypt-backup.mjs <backup.sql.gz.enc> <private-key.pem> <output.sql.gz>`, then load the output as in the manual procedure above. A damaged or altered file is refused, not partly decrypted.
+- **Fail closed:** if the public key is missing, nothing is copied off the machine (a readable copy is never written), the backup task ends with an error, and the local backup is unaffected.
+- **Watched:** the uptime watch (`offhost-backups-encrypted`) alerts when an off-machine copy is older than 40 hours, missing, or a readable `.sql.gz` is found there.
+- OneDrive keeps deleted files in its recycle bin for a while. The old readable copies removed when encryption was switched on are in that bin until it is emptied (OneDrive web, Recycle bin, Empty).

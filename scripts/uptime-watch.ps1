@@ -82,17 +82,30 @@ function Send-Alert([string]$title, [string]$message) {
 # workflow (the same thing the boot-recovery task does after a reboot). A deploy starts it under the right account.
 # At most once per "cooldownMinutes", so a service that will not start is not redeployed in a loop.
 function Start-Recovery($recovery, [string]$checkName, $state) {
-  if (-not $state.ContainsKey('_recovery')) { $state['_recovery'] = @{ lastAt = $null } }
-  $rs = $state['_recovery']
+  # Each service has its own cooldown, so one service's recovery never delays another's.
+  $key = "_recovery_$checkName"
+  if (-not $state.ContainsKey($key)) { $state[$key] = @{ lastAt = $null } }
+  $rs = $state[$key]
+  # A service in another repository is named in "repos" (check name -> owner/repo); the rest use "repo".
+  $repo = if ($recovery.repos -and $recovery.repos.$checkName) { $recovery.repos.$checkName } else { $recovery.repo }
   if ($rs.lastAt -and (((Get-Date) - [datetime]$rs.lastAt).TotalMinutes -lt [double]$recovery.cooldownMinutes)) { return }
   try {
     $tokenFile = if ($recovery.tokenFile) { $recovery.tokenFile } else { 'C:\Users\User\Downloads\api.txt' }
     $line = Get-Content $tokenFile | Where-Object { $_ -match '^GITHUB_RUNNER_REGISTRATION_PAT_2=' } | Select-Object -First 1
     $token = ($line -split '=', 2)[1].Split('#')[0].Trim()
     $base = if ($recovery.apiBase) { $recovery.apiBase } else { 'https://api.github.com' }
-    Invoke-RestMethod -Method Post -Uri "$base/repos/$($recovery.repo)/actions/workflows/$($recovery.workflow)/dispatches" `
-      -Headers @{ Authorization = "Bearer $token"; Accept = 'application/vnd.github+json' } -ContentType 'application/json' `
-      -Body (@{ ref = 'main' } | ConvertTo-Json) -TimeoutSec 20 | Out-Null
+    try {
+      Invoke-RestMethod -Method Post -Uri "$base/repos/$repo/actions/workflows/$($recovery.workflow)/dispatches" `
+        -Headers @{ Authorization = "Bearer $token"; Accept = 'application/vnd.github+json' } -ContentType 'application/json' `
+        -Body (@{ ref = 'main' } | ConvertTo-Json) -TimeoutSec 20 | Out-Null
+    } catch {
+      # The stored token may not cover this repository (found in the 20 Sep 2026 recovery test: a 404 for desk-oracle).
+      # The GitHub CLI's own sign-in on this machine is the second way in.
+      Write-Log "recovery for ${checkName}: the stored token was refused ($($_.Exception.Message)); trying the GitHub CLI"
+      $gh = 'C:\Program Files\GitHub CLI\gh.exe'
+      & $gh workflow run $recovery.workflow --repo $repo --ref main 2>&1 | Out-Null
+      if ($LASTEXITCODE -ne 0) { throw "the GitHub CLI could not start the workflow either (exit $LASTEXITCODE)" }
+    }
     $rs.lastAt = (Get-Date).ToString('o')
     Send-Alert "RECOVERY STARTED: $checkName" "$checkName has been down for $($recovery.afterFailures) checks in a row, so its deploy workflow was started to bring it back."
   } catch { Write-Log "recovery for $checkName failed to start: $($_.Exception.Message)" }
@@ -220,6 +233,23 @@ function Invoke-MemoryCheck($m) {
   return $null
 }
 
+# The off-machine (OneDrive) copies must be recent AND encrypted: a readable .sql.gz there means encryption was skipped.
+function Invoke-OffhostBackupCheck($o) {
+  $problems = @()
+  foreach ($name in $o.services) {
+    $dir = Join-Path $o.root $name
+    if (-not (Test-Path $dir)) { $problems += "$name (folder missing)"; continue }
+    $plain = Get-ChildItem $dir -Filter '*.sql.gz' -ErrorAction SilentlyContinue
+    if ($plain) { $problems += "$name (unencrypted copy present)" }
+    $latest = Get-ChildItem $dir -Filter '*.sql.gz.enc' -ErrorAction SilentlyContinue | Sort-Object LastWriteTime -Descending | Select-Object -First 1
+    if (-not $latest) { $problems += "$name (no encrypted copy)"; continue }
+    $age = ((Get-Date) - $latest.LastWriteTime).TotalHours
+    if ($age -gt [double]$o.maxAgeHours) { $problems += ("{0} (newest is {1:N0} hours old)" -f $name, $age) }
+  }
+  if ($problems.Count -gt 0) { return 'off-machine backups: ' + ($problems -join ', ') }
+  return $null
+}
+
 function Invoke-BackupCheck($b) {
   if (-not (Test-Path $b.dir)) { return "backup folder missing" }
   $latest = Get-ChildItem $b.dir -Filter *.gz -ErrorAction SilentlyContinue | Sort-Object LastWriteTime -Descending | Select-Object -First 1
@@ -249,6 +279,7 @@ foreach ($c in $targets.checks) {
 foreach ($pr in $targets.processes) { $all += [pscustomobject]@{ name = $pr.name; what = $pr.what; run = { param($st) Invoke-ProcessCheck $pr }.GetNewClosure() } }
 if ($targets.disk) { $all += [pscustomobject]@{ name = 'disk-space'; what = $targets.disk.what; run = { param($st) Invoke-DiskCheck $targets.disk }.GetNewClosure() } }
 if ($targets.memory) { $all += [pscustomobject]@{ name = 'memory'; what = $targets.memory.what; run = { param($st) Invoke-MemoryCheck $targets.memory }.GetNewClosure(); need = $targets.memory.failuresBeforeAlert } }
+if ($targets.offhostBackups) { $all += [pscustomobject]@{ name = 'offhost-backups-encrypted'; what = $targets.offhostBackups.what; run = { param($st) Invoke-OffhostBackupCheck $targets.offhostBackups }.GetNewClosure() } }
 if ($targets.backups) { $all += [pscustomobject]@{ name = 'backup-fresh'; what = $targets.backups.what; run = { param($st) Invoke-BackupCheck $targets.backups }.GetNewClosure() } }
 
 $summary = @()
