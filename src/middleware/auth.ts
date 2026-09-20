@@ -7,7 +7,7 @@ import type { FastifyReply, FastifyRequest } from 'fastify';
 import { HttpError } from './http-error';
 import { authDb, authService } from '../infrastructure/auth';
 import { gatewayApiKeys, looksLikeGatewayKey, type VerifiedGatewayKey } from '../domain/gateway/keys';
-import { SESSION_COOKIE_NAME } from '../infrastructure/auth/session-cookie';
+import { LEGACY_SESSION_COOKIE_NAME, sessionCookieName } from '../infrastructure/auth/session-cookie';
 import { config } from '../config';
 import { enforceUserRouteLimit, routeKey } from './route-limits';
 import { checkRateBucket, USER_BUCKET_FACTOR } from './api-protection';
@@ -68,7 +68,7 @@ export function extractBearerToken(request: FastifyRequest): string | null {
  * override a stale cookie in the same request), falling back to the
  * httpOnly session cookie web_app relies on when there's no header. */
 export function extractSessionToken(request: FastifyRequest): string | null {
-  return extractBearerToken(request) ?? request.cookies[SESSION_COOKIE_NAME] ?? null;
+  return extractBearerToken(request) ?? request.cookies[sessionCookieName()] ?? request.cookies[LEGACY_SESSION_COOKIE_NAME] ?? null;
 }
 
 /** Fastify preHandler — resolves the calling user onto request.currentUser, or throws 401. */

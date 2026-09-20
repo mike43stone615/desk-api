@@ -211,7 +211,10 @@ export async function buildApp(options: { logStream?: { write: (line: string) =>
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
     // No x-api-key on purpose: API Library keys are for servers. A key placed in
     // browser JavaScript is visible to every visitor of that page.
-    allowedHeaders: ['Content-Type', 'Authorization', 'Idempotency-Key', 'X-Session-Transport'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'Idempotency-Key', 'X-Session-Transport', 'If-Match', 'If-None-Match'],
+    // What a browser page may READ from an answer (otherwise these are hidden from it): the request id an error report
+    // should quote, when to retry, the version tag of a draft, and the rate-limit counters.
+    exposedHeaders: ['X-Request-Id', 'Retry-After', 'ETag', 'X-RateLimit-Limit', 'X-RateLimit-Remaining', 'X-RateLimit-Reset'],
     credentials: true,
     // Browsers may reuse a preflight answer instead of asking before every call.
     maxAge: 600,
@@ -238,6 +241,11 @@ export async function buildApp(options: { logStream?: { write: (line: string) =>
     // (library-ui pages, /docs) replace it with their own, see middleware/csp.ts.
     contentSecurityPolicy: { useDefaults: false, directives: { defaultSrc: ["'none'"], frameAncestors: ["'none'"], baseUri: ["'none'"], formAction: ["'none'"] } },
     frameguard: { action: 'deny' },
+  });
+
+  // Browser features no answer of this API needs are switched off.
+  app.addHook('onSend', async (_request, reply) => {
+    reply.header('Permissions-Policy', 'camera=(), microphone=(), geolocation=(), payment=(), usb=(), interest-cohort=()');
   });
 
   // The API Library's own web pages (sign-in + key management), served from

@@ -6,7 +6,7 @@ Two kinds of credential exist. Which one a route accepts is shown in the OpenAPI
 
 - **Get one**: `POST /auth/signin` with `{ email, password }`. The account's email must be confirmed.
 - **Browser apps** (the web app, the API Library site) send `X-Session-Transport: cookie`: the response carries only the
-  user, and the session lives in an **`HttpOnly`, `Secure`, `SameSite=Lax` cookie named `desk_session`**. JavaScript never
+  user, and the session lives in an **`HttpOnly`, `Secure`, `SameSite=Lax` cookie named `__Host-desk_session`** (the `__Host-` prefix makes the browser refuse it unless it is Secure, has Path=/ and no Domain, so a sibling site cannot plant one; the older name `desk_session` is still accepted). JavaScript never
   sees the token, so a script injected into a page cannot steal it.
 - **Native apps** (Flutter) omit that header and receive `token` in the body; they send `Authorization: Bearer <token>`
   and keep it in the platform's secure storage. A bearer header wins over a cookie when both are present.
@@ -30,6 +30,7 @@ Two kinds of credential exist. Which one a route accepts is shown in the OpenAPI
 - Password-reset and confirmation emails, sign-up, token checks, key creation, invitations and other sensitive routes have
   their own hourly limits (429 `rate_limited`, with `Retry-After`).
 - The reset and confirmation links are single-use, expire (60 minutes / 24 hours), and only a hash is stored.
+- A session is over after **14 days without use** (`SESSION_IDLE_DAYS`) even if its 30 days have not run out; the 30-day limit from sign-in is absolute.
 - **Changing the password** (`POST /auth/password`) needs `currentPassword` as well as the new `password`. A wrong one is
   a 403 `current_password_incorrect` (not 401, which would sign the person out) and counts towards the sign-in
   lock-out. The change ends every other session.

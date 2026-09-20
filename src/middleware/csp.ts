@@ -22,9 +22,9 @@ export const LIBRARY_UI_CSP = [
   "default-src 'none'",
   // static.cloudflareinsights.com: Cloudflare adds its own analytics beacon to HTML it proxies.
   "script-src 'self' https://browser.sentry-cdn.com https://static.cloudflareinsights.com",
-  "style-src 'self' https://fonts.googleapis.com",
+  "style-src 'self'",
   "style-src-attr 'unsafe-inline'",
-  "font-src https://fonts.gstatic.com",
+  "font-src 'self'",
   "img-src 'self' data:",
   "connect-src 'self' https://*.ingest.us.sentry.io https://cloudflareinsights.com",
   "base-uri 'none'",

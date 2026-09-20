@@ -47,6 +47,9 @@ const PUBLIC: Record<string, string> = {
   'GET /desk_logo.png': 'API Library web asset',
   'GET /pages/auth.js': 'API Library web asset',
   'GET /pages/developer.js': 'API Library web asset',
+  'GET /fonts/inter-latin-wght-normal.woff2': 'API Library web asset (font)',
+  'GET /fonts/inter-latin-ext-wght-normal.woff2': 'API Library web asset (font)',
+  'GET /fonts/OFL-Inter-LICENSE.txt': 'API Library web asset (font licence)',
 };
 
 describe('route guards', () => {

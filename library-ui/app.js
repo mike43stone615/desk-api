@@ -24,9 +24,60 @@ export const API_BASE = '';
 // window.Sentry comes from the CDN bundle index.html loads before this
 // module -- guarded in case that request ever fails (an ad blocker, a CDN
 // outage), so a missing monitoring script never breaks the app itself.
+//
+// Nothing personal or secret may leave the browser in a report: addresses lose their query string and fragment (reset and
+// confirmation links carry a one-time token there), emails and long secret-looking strings inside messages are blanked,
+// and cookies, authorization headers and the signed-in user are never attached. See scrubSentryEvent.
+const EMAIL_RE = /[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g;
+const SECRET_RE = /\b(?:deskgw_[A-Za-z0-9]{8,}|[A-Fa-f0-9]{32,}|[A-Za-z0-9_-]{40,})\b/g;
+const TOKEN_PARAM_RE = /([?&#](?:token|code|key|password|secret)=)[^&#\s"']+/gi;
+
+/** Removes the query string and fragment from an address (the path alone says where the error happened). */
+export function stripUrl(url) {
+  if (typeof url !== 'string') return url;
+  return url.replace(/[?#].*$/, '');
+}
+
+/** Blanks emails, one-time tokens and long secret-looking strings inside free text. */
+export function scrubText(text) {
+  if (typeof text !== 'string') return text;
+  return text.replace(TOKEN_PARAM_RE, '$1[removed]').replace(EMAIL_RE, '[email]').replace(SECRET_RE, '[secret]');
+}
+
+/** The Sentry beforeSend / beforeBreadcrumb hook: returns the event with everything personal or secret taken out. */
+export function scrubSentryEvent(event) {
+  if (!event || typeof event !== 'object') return event;
+  if (event.request) {
+    event.request.url = stripUrl(event.request.url);
+    delete event.request.cookies;
+    delete event.request.query_string;
+    delete event.request.data;
+    if (event.request.headers) {
+      for (const name of Object.keys(event.request.headers)) {
+        if (/^(cookie|authorization|x-api-key|referer)$/i.test(name)) delete event.request.headers[name];
+      }
+    }
+  }
+  delete event.user;
+  if (typeof event.message === 'string') event.message = scrubText(event.message);
+  for (const ex of event.exception?.values ?? []) ex.value = scrubText(ex.value);
+  for (const b of event.breadcrumbs ?? []) {
+    if (typeof b.message === 'string') b.message = scrubText(b.message);
+    if (b.data) {
+      for (const k of ['url', 'from', 'to']) if (typeof b.data[k] === 'string') b.data[k] = stripUrl(b.data[k]);
+      delete b.data.body;
+    }
+  }
+  if (event.transaction) event.transaction = stripUrl(event.transaction);
+  return event;
+}
+
 window.Sentry?.init({
   dsn: 'https://a72a6770bf6b88426769c4a79f429c7c@o4512008263368704.ingest.us.sentry.io/4512108606783488',
   environment: IS_LOCAL_DEV ? 'development' : 'production',
+  sendDefaultPii: false,
+  beforeSend: scrubSentryEvent,
+  beforeBreadcrumb: (breadcrumb) => scrubSentryEvent({ breadcrumbs: [breadcrumb] }).breadcrumbs[0],
 });
 
 // Mirrors DeskDiagnostics.logHandledException in the Flutter app: reports a
@@ -37,7 +88,14 @@ window.Sentry?.init({
 // where it happened.
 export function reportHandledException(error, context) {
   console.error(`Desk handled exception in ${context}:`, error);
-  window.Sentry?.captureException(error, { tags: { context } });
+  // An error that came from the server carries the server's request id: quote it in the report, so the browser error
+  // and the server's own log lines for that request can be matched (node scripts/search-logs.mjs --request <id>).
+  const tags = { context };
+  if (error && typeof error === 'object') {
+    if (error.requestId) tags.request_id = String(error.requestId).slice(0, 80);
+    if (error.errorCode) tags.error_code = String(error.errorCode).slice(0, 60);
+  }
+  window.Sentry?.captureException(error, { tags });
 }
 
 const ADMIN_EMAILS = ['mike43stone615@gmail.com'];
@@ -87,9 +145,13 @@ export function isAdminEmail(email) {
 }
 
 export class ApiError extends Error {
-  constructor(message, statusCode) {
+  constructor(message, statusCode, { requestId, errorCode } = {}) {
     super(message);
     this.statusCode = statusCode;
+    /** The server's id for the request that failed (x-request-id), when the answer carried one. */
+    this.requestId = requestId;
+    /** The server's stable error code (for example "invalid_credentials"), when the answer carried one. */
+    this.errorCode = errorCode;
   }
 }
 
@@ -166,7 +228,7 @@ export async function api(path, { method = 'GET', body, headers: extraHeaders = 
     if (res.status === 401 && wasSignedIn) {
       forceSignOutLocally();
     }
-    throw new ApiError(data.error || 'Request failed.', res.status);
+    throw new ApiError(data.error || 'Request failed.', res.status, { requestId: res.headers?.get?.('x-request-id') ?? undefined, errorCode: typeof data.code === 'string' ? data.code : undefined });
   }
   return data;
 }
@@ -304,9 +366,17 @@ window.addEventListener('popstate', () => route());
 async function route() {
   const url = new URL(location.href);
   const path = url.pathname === '/' ? '/developer' : url.pathname;
-  const params = url.searchParams;
-
   const isTokenRoute = path === '/reset-password' || path === '/confirm-email';
+  // The one-time token of an emailed link travels in the address's #fragment (#token=...): browsers never send a
+  // fragment to any server, so it is not in Cloudflare's logs, the API's logs or a Referer header. Links sent before
+  // this change carry it as ?token= and keep working. Either way it is removed from the address bar as soon as it is
+  // read, so it does not linger in the history or get copied along with the page address.
+  const params = new URLSearchParams(url.search);
+  if (isTokenRoute) {
+    for (const [k, v] of new URLSearchParams(url.hash.replace(/^#/, ''))) params.set(k, v);
+    if ((url.search || url.hash) && params.has('token')) history.replaceState(null, '', path);
+  }
+
   if (!isTokenRoute) {
     if (!state.hasRestoredSession) {
       if (path !== '/loading') {

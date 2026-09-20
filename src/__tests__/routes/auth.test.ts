@@ -130,8 +130,10 @@ describe('httpOnly session cookie (what web_app relies on instead of storing the
     const signin = await signUpConfirmAndSignIn('cookie-set@example.com');
     expect(signin.statusCode).toBe(200);
 
-    const setCookie = signin.cookies.find((c) => c.name === 'desk_session');
+    // In production the name carries the __Host- prefix: Secure, Path=/ and no Domain, or the browser refuses it.
+    const setCookie = signin.cookies.find((c) => c.name === '__Host-desk_session');
     expect(setCookie).toBeTruthy();
+    expect((setCookie as { domain?: string }).domain).toBeUndefined();
     expect(setCookie!.httpOnly).toBe(true);
     expect(setCookie!.secure).toBe(true);
     expect(setCookie!.sameSite).toBe('Lax');

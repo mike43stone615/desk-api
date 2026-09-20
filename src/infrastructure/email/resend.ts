@@ -15,7 +15,8 @@ export async function sendPasswordResetEmail(
   token: string,
   requestId: string,
 ): Promise<void> {
-  const resetUrl = `${config.appBaseUrl}/reset-password?token=${encodeURIComponent(token)}`;
+  // The token is in the #fragment: browsers never send it to a server, so it stays out of every log and Referer.
+  const resetUrl = `${config.appBaseUrl}/reset-password#token=${encodeURIComponent(token)}`;
   await sendEmail(config, {
     to,
     subject: 'Reset your Desk password',
@@ -39,7 +40,7 @@ export async function sendEmailConfirmationEmail(
   token: string,
   requestId: string,
 ): Promise<void> {
-  const confirmationUrl = `${config.appBaseUrl}/confirm-email?token=${encodeURIComponent(token)}`;
+  const confirmationUrl = `${config.appBaseUrl}/confirm-email#token=${encodeURIComponent(token)}`;
   await sendEmail(config, {
     to,
     subject: 'Confirm your Desk email',

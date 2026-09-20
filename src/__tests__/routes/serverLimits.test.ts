@@ -68,3 +68,48 @@ describe('fairness: a busy key or person cannot use up someone else\'s allowance
     expect((await checkRateBucket('user:someone-else', USER_BUCKET_FACTOR)).allowed).toBe(true);
   });
 });
+
+describe('what a browser page may read', () => {
+  it('lists the request id, retry time, version tag and rate-limit headers as readable, and allows If-Match', async () => {
+    const res = await app.inject({ method: 'OPTIONS', url: '/setup/drafts', headers: { origin: 'https://app.deskbusiness.co', 'access-control-request-method': 'PATCH', 'access-control-request-headers': 'if-match,content-type' } });
+    expect(res.headers['access-control-allow-headers']).toMatch(/If-Match/i);
+    const actual = await app.inject({ method: 'GET', url: '/health', headers: { origin: 'https://app.deskbusiness.co' } });
+    expect(String(actual.headers['access-control-expose-headers'])).toMatch(/X-Request-Id/i);
+    expect(String(actual.headers['access-control-expose-headers'])).toMatch(/Retry-After/i);
+  });
+});
+
+describe('the session cookie', () => {
+  it('in production carries the __Host- prefix (Secure, Path=/, no Domain), and the old name is still read and cleared', async () => {
+    const { config: cfg } = await import('../../config');
+    const before = cfg.environment;
+    (cfg as { environment: string }).environment = 'production';
+    try {
+      const { setSessionCookie, clearSessionCookie, sessionCookieName } = await import('../../infrastructure/auth/session-cookie');
+      expect(sessionCookieName()).toBe('__Host-desk_session');
+      const headers: string[] = [];
+      const reply = { setCookie: (n: string, v: string, o: Record<string, unknown>) => headers.push(`${n}=${v}; ${JSON.stringify(o)}`), clearCookie: (n: string) => headers.push(`clear ${n}`) };
+      setSessionCookie(reply as never, 'tok');
+      expect(headers[0]).toMatch(/^__Host-desk_session=tok;/);
+      expect(headers[0]).toMatch(/"secure":true/);
+      expect(headers[0]).toMatch(/"path":"\/"/);
+      expect(headers[0]).not.toMatch(/domain/i);
+      headers.length = 0;
+      clearSessionCookie(reply as never);
+      expect(headers).toEqual(['clear __Host-desk_session', 'clear desk_session']);
+      // a browser that still holds the old cookie is not signed out
+      const { extractSessionToken } = await import('../../middleware/auth');
+      expect(extractSessionToken({ headers: {}, cookies: { desk_session: 'legacy' } } as never)).toBe('legacy');
+      expect(extractSessionToken({ headers: {}, cookies: { '__Host-desk_session': 'new', desk_session: 'legacy' } } as never)).toBe('new');
+    } finally {
+      (cfg as { environment: string }).environment = before;
+    }
+  });
+});
+
+describe('every answer says which browser features are off', () => {
+  it('carries a Permissions-Policy header', async () => {
+    const res = await app.inject({ method: 'GET', url: '/health' });
+    expect(res.headers['permissions-policy']).toMatch(/camera=\(\)/);
+  });
+});

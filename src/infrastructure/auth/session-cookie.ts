@@ -9,7 +9,18 @@
 import type { FastifyReply } from 'fastify';
 import { config } from '../../config';
 
-export const SESSION_COOKIE_NAME = 'desk_session';
+/** The name every cookie used until September 2026; still accepted (and cleared) so nobody is signed out by the change. */
+export const LEGACY_SESSION_COOKIE_NAME = 'desk_session';
+/**
+ * In production the cookie carries the `__Host-` prefix: the browser then refuses to store it unless it is Secure, has
+ * Path=/ and NO Domain attribute, so a sibling site (app., oracle., compliance-api.) can never plant or overwrite a
+ * session cookie for the API. (Locally there is no HTTPS, and the prefix cannot be used.)
+ */
+export function sessionCookieName(): string {
+  return config.environment === 'production' ? `__Host-${LEGACY_SESSION_COOKIE_NAME}` : LEGACY_SESSION_COOKIE_NAME;
+}
+/** Kept for callers that only need "the" name; same as sessionCookieName(). */
+export const SESSION_COOKIE_NAME = LEGACY_SESSION_COOKIE_NAME;
 
 /** No Domain attribute: defaults to api.deskbusiness.co exactly, which is
  * all that's needed -- every request that must carry this cookie already
@@ -20,7 +31,7 @@ export const SESSION_COOKIE_NAME = 'desk_session';
  * them, while blocking it on requests that originate from a genuinely
  * different site. */
 export function setSessionCookie(reply: FastifyReply, token: string): void {
-  reply.setCookie(SESSION_COOKIE_NAME, token, {
+  reply.setCookie(sessionCookieName(), token, {
     httpOnly: true,
     secure: config.environment === 'production',
     sameSite: 'lax',
@@ -30,5 +41,7 @@ export function setSessionCookie(reply: FastifyReply, token: string): void {
 }
 
 export function clearSessionCookie(reply: FastifyReply): void {
-  reply.clearCookie(SESSION_COOKIE_NAME, { path: '/' });
+  // A __Host- cookie can only be replaced or deleted by a Set-Cookie that itself follows the prefix rules (Secure, Path=/).
+  reply.clearCookie(sessionCookieName(), { path: '/', secure: config.environment === 'production', httpOnly: true, sameSite: 'lax' });
+  reply.clearCookie(LEGACY_SESSION_COOKIE_NAME, { path: '/' }); // and the pre-prefix name, if the browser still has one
 }
