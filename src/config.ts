@@ -17,7 +17,7 @@
 import 'dotenv/config';
 import { z } from 'zod';
 
-const schema = z.object({
+export const envSchema = z.object({
   DATABASE_URL: z.string().min(1, 'DATABASE_URL is required'),
   PORT: z.coerce.number().int().positive().default(3458),
   REDIS_URL: z.string().optional(),
@@ -109,7 +109,7 @@ const schema = z.object({
   METRICS_DOCS_API_KEY: z.string().optional(),
 });
 
-const parsed = schema.safeParse(process.env);
+const parsed = envSchema.safeParse(process.env);
 if (!parsed.success) {
   console.error('Invalid environment variables:');
   for (const issue of parsed.error.issues) {

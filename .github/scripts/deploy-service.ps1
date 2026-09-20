@@ -21,7 +21,9 @@ param(
   [string]$BuildCommand = 'build',                        # npm script that compiles (used with -Build)
   # Refuse to deploy while the code being deployed has database migrations that have not been applied yet (deploys
   # never run migrations; see scripts/check-migrations.ts). The old version keeps serving.
-  [switch]$CheckMigrations
+  [switch]$CheckMigrations,
+  # Validate the settings file (.env written from the DOTENV_CONTENT secret) before anything is swapped.
+  [switch]$ValidateEnv
 )
 
 $ErrorActionPreference = 'Stop'
@@ -35,6 +37,12 @@ if ($LASTEXITCODE -ne 0) { throw "npm ci failed" }
 if ($Build) {
   npm run $BuildCommand
   if ($LASTEXITCODE -ne 0) { throw "npm run $BuildCommand failed" }
+}
+
+if ($ValidateEnv) {
+  Write-Output "Validating the settings (.env) for a production deploy ..."
+  npx tsx scripts/validate-env.ts .env
+  if ($LASTEXITCODE -ne 0) { throw "Deploy refused: the settings (DOTENV_CONTENT secret) are not valid for production (listed above). Fix the secret and run the deploy again. The running version was not touched." }
 }
 
 if ($CheckMigrations) {
@@ -82,8 +90,12 @@ if ($LivePath) {
   foreach ($dir in @('dist', 'library-ui', 'migrations')) {
     if (Test-Path (Join-Path $RepoPath $dir)) { Copy-Tree (Join-Path $RepoPath $dir) (Join-Path $LivePath $dir) }
   }
+  # The small files that decide HOW the code starts travel with it: the start command (package.json) and the settings
+  # (.env) must roll back together with dist, or a restored dist would be started by the new release's command.
   foreach ($file in @('package.json', 'package-lock.json', '.env')) {
-    Copy-Item -Force (Join-Path $RepoPath $file) (Join-Path $LivePath $file)
+    $current = Join-Path $LivePath $file
+    if (Test-Path $current) { Copy-Item -Force $current "$current.prev" }
+    Copy-Item -Force (Join-Path $RepoPath $file) $current
   }
   $RepoPath = $LivePath
   Set-Location $RepoPath
@@ -150,6 +162,10 @@ if ($LivePath -and (Test-Path (Join-Path $LivePath 'dist.prev'))) {
   Stop-CurrentService
   foreach ($dir in @('dist', 'library-ui')) {
     if (Test-Path (Join-Path $LivePath "$dir.prev")) { Copy-Tree (Join-Path $LivePath "$dir.prev") (Join-Path $LivePath $dir) }
+  }
+  foreach ($file in @('package.json', 'package-lock.json', '.env')) {
+    $saved = Join-Path $LivePath "$file.prev"
+    if (Test-Path $saved) { Copy-Item -Force $saved (Join-Path $LivePath $file) }
   }
   Start-Service
   if (Wait-Healthy 60) { throw "Deploy FAILED: the new version did not start. The previous version was restored and is serving." }

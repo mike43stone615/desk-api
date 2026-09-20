@@ -1,0 +1,37 @@
+{
+ "_comment": "mva-16: the Cloudflare Tunnel's real routing config previously lived only in Cloudflare's own dashboard, with no version-controlled source of truth anywhere on this machine or in any repo. This is a real, live export fetched directly from the Cloudflare API (GET /accounts/{account_id}/cfd_tunnel/{tunnel_id}/configurations) -- not hand-transcribed. Cloudflare's dashboard is still the actual control plane (editing this file does nothing on its own), so this needs to be re-exported after any real change there to stay accurate; it exists so a lost/corrupted machine, or anyone auditing this platform, has a real record of what the live routing currently is instead of nothing.",
+ "_exported_at": "2026-09-20T01:19:21.678585+00:00",
+ "_account_id": "<redacted: see the Cloudflare dashboard>",
+ "_tunnel_id": "<redacted: see the Cloudflare dashboard>",
+ "_tunnel_name": "desk-local-services",
+ "_change_note": "2026-09-19: registry-api.deskbusiness.co and market-api.deskbusiness.co removed on purpose so the backends are reachable only through the API Library (api.deskbusiness.co). They still run on localhost:3456 and 3457.",
+ "tunnel_id": "<redacted: see the Cloudflare dashboard>",
+ "version": 5,
+ "config": {
+  "ingress": [
+   {
+    "service": "http://localhost:3000",
+    "hostname": "compliance-api.deskbusiness.co",
+    "originRequest": {}
+   },
+   {
+    "service": "http://localhost:3458",
+    "hostname": "api.deskbusiness.co",
+    "originRequest": {}
+   },
+   {
+    "service": "http://localhost:3459",
+    "hostname": "oracle.deskbusiness.co",
+    "originRequest": {}
+   },
+   {
+    "service": "http_status:404"
+   }
+  ],
+  "warp-routing": {
+   "enabled": false
+  }
+ },
+ "source": "cloudflare",
+ "created_at": "2026-09-20T01:18:53.444928Z"
+}

@@ -20,6 +20,13 @@ function Swap([string]$name) {
 $owner = (Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction SilentlyContinue | Select-Object -First 1 -ExpandProperty OwningProcess)
 if ($owner) { Write-Output "Stopping PID $owner"; Stop-Process -Id $owner -Force; Start-Sleep -Seconds 1 }
 Swap 'dist'; Swap 'library-ui'
+# The start command and settings go back with the code (see deploy-service.ps1).
+foreach ($file in @('package.json', 'package-lock.json', '.env')) {
+  $cur = Join-Path $LivePath $file; $prev = "$cur.prev"
+  if (Test-Path $prev) {
+    $tmp = "$cur.swap"; Copy-Item -Force $cur $tmp; Copy-Item -Force $prev $cur; Move-Item -Force $tmp $prev
+  }
+}
 $out = Join-Path $LivePath 'deploy.out.log'; $err = Join-Path $LivePath 'deploy.err.log'
 $cmd = "cmd.exe /c `"npm run start:prod > `"$out`" 2> `"$err`"`""
 $c = Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{ CommandLine = $cmd; CurrentDirectory = $LivePath }

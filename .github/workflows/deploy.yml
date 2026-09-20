@@ -86,5 +86,6 @@ jobs:
             -Port 3458 `
             -Build -BuildCommand "build:prod" `
             -CheckMigrations `
+            -ValidateEnv `
             -LivePath $live `
             -StartCommand "start:prod"
