@@ -1,9 +1,17 @@
 // The database pool's limits, and that a dropped connection cannot crash the service.
-import { describe, it, expect, afterEach, vi } from 'vitest';
+import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest';
+import { EventEmitter } from 'node:events';
 import { pool, poolOptions } from '../db';
 
 const KEYS = ['DB_POOL_MAX', 'DB_CONNECT_TIMEOUT_MS', 'DB_IDLE_TIMEOUT_MS', 'DB_STATEMENT_TIMEOUT_MS', 'DB_IDLE_IN_TRANSACTION_TIMEOUT_MS'];
+let clock = Date.parse('2026-01-01T00:00:00Z');
+beforeEach(() => {
+  // each test starts well after the previous report, so the once-per-10-seconds rule does not couple them
+  clock += 60_000;
+  vi.spyOn(Date, 'now').mockImplementation(() => clock);
+});
 afterEach(() => {
+  vi.restoreAllMocks();
   for (const k of KEYS) delete process.env[k];
 });
 
@@ -42,6 +50,19 @@ describe('poolOptions', () => {
 });
 
 describe('the pool', () => {
+  it('also survives a checked-out connection being ended by the database', () => {
+    const write = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
+    try {
+      const client = new EventEmitter();
+      // what the pool does whenever it opens a new connection
+      pool.emit('connect', client as never);
+      expect(client.listenerCount('error')).toBeGreaterThan(0);
+      expect(() => client.emit('error', new Error('terminating connection due to idle-in-transaction timeout'))).not.toThrow();
+    } finally {
+      write.mockRestore();
+    }
+  });
+
   it('survives the database dropping a connection: an error event is logged, not thrown', () => {
     expect(pool.listenerCount('error')).toBeGreaterThan(0);
     const write = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);

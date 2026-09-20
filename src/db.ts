@@ -37,9 +37,13 @@ export const pool = new Pool(poolOptions(process.env.DATABASE_URL));
 // no listener Node treats that as an uncaught exception and the whole service exits. Log it and carry on: the pool
 // discards the dead connection and the next query opens a fresh one.
 let lastReported = 0;
-pool.on('error', (err) => {
+function reportPoolError(err: Error): void {
   const now = Date.now();
   if (now - lastReported < 10_000) return; // a restart drops many connections at once: say it once
   lastReported = now;
   process.stderr.write(`${JSON.stringify({ level: 'error', event: 'db_pool_error', message: err.message, ts: new Date(now).toISOString() })}\n`);
-});
+}
+pool.on('error', reportPoolError);
+// The same for a connection that is checked out (a transaction in progress) when the database ends it, for example
+// after idle_in_transaction_session_timeout: the client emits 'error', which would otherwise also stop the service.
+pool.on('connect', (client) => client.on('error', reportPoolError));
