@@ -80,7 +80,7 @@ function seedUser(email: string, opts: { confirmed?: boolean } = {}) {
     updated_at: now,
   });
   const token = `session-token-${id}`;
-  fakeDb.sessions.set(token, {
+  fakeDb.seedSession(token, {
     id: `session-${id}`,
     user_id: id,
     token,

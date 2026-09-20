@@ -9,9 +9,11 @@ vi.mock('../../db', async () => {
   return { pool: createFakeDb() };
 });
 vi.mock('../../middleware/redis-client', () => ({ getRedis: () => null, connectRedis: vi.fn() }));
+vi.mock('../../infrastructure/email/resend', async () => (await import('../helpers/email-capture')).emailModuleMock());
 
 import { pool } from '../../db';
 import { buildApp } from '../../app';
+import { emailed } from '../helpers/email-capture';
 import { config } from '../../config';
 import { parsePage, slicePage } from '../../validators/pagination';
 import type { FastifyInstance } from 'fastify';
@@ -31,7 +33,7 @@ function seedSession(email: string) {
     email_confirmed_at: now, created_at: now, updated_at: now,
   });
   const token = `tok-${id}`;
-  fakeDb.sessions.set(token, {
+  fakeDb.seedSession(token, {
     id: `s-${id}`, user_id: id, token, expires_at: new Date(Date.now() + 3_600_000).toISOString(), created_at: now,
   });
   return { authorization: `Bearer ${token}` };
@@ -168,8 +170,7 @@ describe('sign-in answers', () => {
 
   async function signUpConfirmed() {
     await app.inject({ method: 'POST', url: '/auth/signup', payload: { email, password, firstName: 'T', lastName: 'P' } });
-    const user = [...fakeDb.users.values()].find((u) => u.email === email)!;
-    const token = [...fakeDb.emailConfirmationTokens.values()].find((t) => t.user_id === user.id)?.token as string;
+    const token = emailed.confirm.get(email) as string;
     await app.inject({ method: 'POST', url: '/auth/email-confirmation/confirm', payload: { token } });
   }
 

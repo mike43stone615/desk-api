@@ -31,7 +31,7 @@ beforeAll(async () => {
     created_at: now,
     updated_at: now,
   });
-  fakeDb.sessions.set('admin-token', {
+  fakeDb.seedSession('admin-token', {
     id: 'admin-session',
     user_id: 'admin-1',
     token: 'admin-token',
@@ -50,7 +50,7 @@ beforeAll(async () => {
     created_at: now,
     updated_at: now,
   });
-  fakeDb.sessions.set('member-token', {
+  fakeDb.seedSession('member-token', {
     id: 'member-session',
     user_id: 'member-1',
     token: 'member-token',

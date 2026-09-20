@@ -6,6 +6,7 @@
 // end to end without a real Postgres connection. Modeled on
 // market-validation-api's src/__tests__/helpers/fake-auth-db.ts.
 import { vi } from 'vitest';
+import { hashToken } from '../../infrastructure/auth/token-hash';
 
 export interface FakeRow {
   [key: string]: unknown;
@@ -124,7 +125,7 @@ export function createFakeDb() {
       return { rows: [row], rowCount: 1 };
     }
     if (s.startsWith('DELETE FROM sessions WHERE user_id = $1 AND token <> $2')) {
-      for (const [token, row] of sessions) if (row.user_id === p[0] && token !== p[1] && token !== p[2]) sessions.delete(token);
+      for (const [token, row] of sessions) if (row.user_id === p[0] && token !== p[1]) sessions.delete(token);
       return { rows: [], rowCount: 1 };
     }
     if (s.startsWith('DELETE FROM sessions WHERE token = $1')) {
@@ -574,6 +575,11 @@ export function createFakeDb() {
     end: vi.fn(),
     users,
     sessions,
+    /** Seeds a session the way the real adapter stores it: under a hash of the token, never the token itself. */
+    seedSession(plainToken: string, row: Record<string, unknown>) {
+      const hashed = hashToken(plainToken);
+      sessions.set(hashed, { ...row, token: hashed });
+    },
     passwordResetTokens,
     emailConfirmationTokens,
     drafts,

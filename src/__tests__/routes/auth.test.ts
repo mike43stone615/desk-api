@@ -6,9 +6,11 @@ vi.mock('../../db', async () => {
   return { pool: createFakeDb() };
 });
 vi.mock('../../middleware/redis-client', () => ({ getRedis: () => null, connectRedis: vi.fn() }));
+vi.mock('../../infrastructure/email/resend', async () => (await import('../helpers/email-capture')).emailModuleMock());
 
 import { pool } from '../../db';
 import { buildApp } from '../../app';
+import { emailed } from '../helpers/email-capture';
 import type { FastifyInstance } from 'fastify';
 
 const fakeDb = pool as unknown as ReturnType<typeof createFakeDb>;
@@ -81,9 +83,7 @@ describe('POST /auth/signup', () => {
 
 describe('email confirmation -> signin -> session -> signout', () => {
   it('confirms the email, then signs in, then reads /auth/session, then signs out', async () => {
-    const token = [...fakeDb.emailConfirmationTokens.values()].find(
-      (t) => t.user_id === [...fakeDb.users.values()].find((u) => u.email === SIGNUP_BODY.email)?.id,
-    )?.token as string;
+    const token = emailed.confirm.get(SIGNUP_BODY.email) as string;
     expect(token).toBeTruthy();
 
     const confirm = await app.inject({ method: 'POST', url: '/auth/email-confirmation/confirm', payload: { token } });
@@ -117,9 +117,7 @@ describe('httpOnly session cookie (what web_app relies on instead of storing the
       url: '/auth/signup',
       payload: { email, password: 'Str0ng!Pass', firstName: 'Cookie', lastName: 'Tester' },
     });
-    const token = [...fakeDb.emailConfirmationTokens.values()].find(
-      (t) => t.user_id === [...fakeDb.users.values()].find((u) => u.email === email)?.id,
-    )?.token as string;
+    const token = emailed.confirm.get(email) as string;
     await app.inject({ method: 'POST', url: '/auth/email-confirmation/confirm', payload: { token } });
     return app.inject({ method: 'POST', url: '/auth/signin', payload: { email, password: 'Str0ng!Pass' } });
   }
@@ -275,8 +273,7 @@ describe('/health and /metrics', () => {
 describe('POST /auth/password ends the user\'s other sessions', () => {
   async function confirmedUser(email: string) {
     await app.inject({ method: 'POST', url: '/auth/signup', payload: { email, password: 'Str0ng!Pass', firstName: 'P', lastName: 'W' } });
-    const user = [...fakeDb.users.values()].find((u) => u.email === email)!;
-    const token = [...fakeDb.emailConfirmationTokens.values()].find((t) => t.user_id === user.id)?.token as string;
+    const token = emailed.confirm.get(email) as string;
     await app.inject({ method: 'POST', url: '/auth/email-confirmation/confirm', payload: { token } });
     const signIn = async () =>
       JSON.parse((await app.inject({ method: 'POST', url: '/auth/signin', payload: { email, password: 'Str0ng!Pass' } })).body).token as string;

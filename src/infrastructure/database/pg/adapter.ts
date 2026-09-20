@@ -20,10 +20,6 @@ import type {
 import { nowUtc } from '../../../domain/auth/tokens';
 import { hashToken } from '../../auth/token-hash';
 
-// TRANSITIONAL: rows written before hashing existed hold the token itself. While this is true a lookup that finds
-// nothing under the hash tries the plain value once. Migration 0009 converts those rows; the next release removes this.
-const ACCEPT_PLAINTEXT_TOKENS = true;
-
 export class PgDatabaseAdapter implements DatabaseRepository {
   constructor(private readonly pool: Pool) {}
 
@@ -92,15 +88,15 @@ export class PgDatabaseAdapter implements DatabaseRepository {
   }
 
   async findSessionByToken(token: string): Promise<Session | null> {
-    const query = `SELECT id, user_id, token, expires_at, created_at FROM sessions WHERE token = $1`;
-    let { rows } = await this.pool.query<SessionRow>(query, [hashToken(token)]);
-    if (!rows[0] && ACCEPT_PLAINTEXT_TOKENS) ({ rows } = await this.pool.query<SessionRow>(query, [token]));
+    const { rows } = await this.pool.query<SessionRow>(
+      `SELECT id, user_id, token, expires_at, created_at FROM sessions WHERE token = $1`,
+      [hashToken(token)],
+    );
     return rows[0] ? mapSession(rows[0]) : null;
   }
 
   async deleteSession(token: string): Promise<void> {
     await this.pool.query(`DELETE FROM sessions WHERE token = $1`, [hashToken(token)]);
-    if (ACCEPT_PLAINTEXT_TOKENS) await this.pool.query(`DELETE FROM sessions WHERE token = $1`, [token]);
   }
 
   async deleteAllSessionsForUser(userId: string): Promise<void> {
@@ -108,11 +104,7 @@ export class PgDatabaseAdapter implements DatabaseRepository {
   }
 
   async deleteOtherSessionsForUser(userId: string, keepToken: string): Promise<void> {
-    await this.pool.query(`DELETE FROM sessions WHERE user_id = $1 AND token <> $2 AND token <> $3`, [
-      userId,
-      hashToken(keepToken),
-      keepToken,
-    ]);
+    await this.pool.query(`DELETE FROM sessions WHERE user_id = $1 AND token <> $2`, [userId, hashToken(keepToken)]);
   }
 
   async deleteExpiredSessions(): Promise<void> {
@@ -132,9 +124,10 @@ export class PgDatabaseAdapter implements DatabaseRepository {
   }
 
   async findResetToken(token: string): Promise<PasswordResetToken | null> {
-    const query = `SELECT id, user_id, token, expires_at, used_at, created_at FROM password_reset_tokens WHERE token = $1`;
-    let { rows } = await this.pool.query<ResetTokenRow>(query, [hashToken(token)]);
-    if (!rows[0] && ACCEPT_PLAINTEXT_TOKENS) ({ rows } = await this.pool.query<ResetTokenRow>(query, [token]));
+    const { rows } = await this.pool.query<ResetTokenRow>(
+      `SELECT id, user_id, token, expires_at, used_at, created_at FROM password_reset_tokens WHERE token = $1`,
+      [hashToken(token)],
+    );
     return rows[0] ? mapResetToken(rows[0]) : null;
   }
 
@@ -152,9 +145,6 @@ export class PgDatabaseAdapter implements DatabaseRepository {
       usedAt,
       hashToken(token),
     ]);
-    if (ACCEPT_PLAINTEXT_TOKENS) {
-      await this.pool.query(`UPDATE password_reset_tokens SET used_at = $1 WHERE token = $2`, [usedAt, token]);
-    }
   }
 
   async markUnusedResetTokensUsedForUser(userId: string, usedAt: string): Promise<void> {
@@ -185,9 +175,10 @@ export class PgDatabaseAdapter implements DatabaseRepository {
   }
 
   async findEmailConfirmationToken(token: string): Promise<EmailConfirmationToken | null> {
-    const query = `SELECT id, user_id, token, expires_at, used_at, created_at FROM email_confirmation_tokens WHERE token = $1`;
-    let { rows } = await this.pool.query<EmailConfirmationTokenRow>(query, [hashToken(token)]);
-    if (!rows[0] && ACCEPT_PLAINTEXT_TOKENS) ({ rows } = await this.pool.query<EmailConfirmationTokenRow>(query, [token]));
+    const { rows } = await this.pool.query<EmailConfirmationTokenRow>(
+      `SELECT id, user_id, token, expires_at, used_at, created_at FROM email_confirmation_tokens WHERE token = $1`,
+      [hashToken(token)],
+    );
     return rows[0] ? mapEmailConfirmationToken(rows[0]) : null;
   }
 
@@ -207,9 +198,6 @@ export class PgDatabaseAdapter implements DatabaseRepository {
       usedAt,
       hashToken(token),
     ]);
-    if (ACCEPT_PLAINTEXT_TOKENS) {
-      await this.pool.query(`UPDATE email_confirmation_tokens SET used_at = $1 WHERE token = $2`, [usedAt, token]);
-    }
   }
 
   async deleteExpiredEmailConfirmationTokens(): Promise<void> {

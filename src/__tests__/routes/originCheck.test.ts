@@ -24,7 +24,7 @@ beforeAll(async () => {
     id: 'origin-user', email: 'origin@example.com', password_hash: 'x', first_name: 'O', last_name: 'C',
     email_confirmed_at: now, created_at: now, updated_at: now,
   });
-  fakeDb.sessions.set('origin-token', {
+  fakeDb.seedSession('origin-token', {
     id: 's1', user_id: 'origin-user', token: 'origin-token', expires_at: new Date(Date.now() + 3_600_000).toISOString(), created_at: now,
   });
   cookie = 'desk_session=origin-token';

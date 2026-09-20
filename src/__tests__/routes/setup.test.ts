@@ -38,7 +38,7 @@ beforeAll(async () => {
     updated_at: new Date().toISOString(),
   });
   const token = 'test-session-token';
-  fakeDb.sessions.set(token, {
+  fakeDb.seedSession(token, {
     id: 'session-1',
     user_id: userId,
     token,
@@ -691,7 +691,7 @@ describe('business membership invites', () => {
       updated_at: new Date().toISOString(),
     });
     const token = 'invited-session-token';
-    fakeDb.sessions.set(token, {
+    fakeDb.seedSession(token, {
       id: 'session-invited',
       user_id: invitedUserId,
       token,
