@@ -40,6 +40,20 @@ this machine and through desk-api's API Library.
 ready (see ROLLBACK.md, "How a deploy swaps versions without a gap"). A few seconds of downtime remain only for a full
 restart: changed dependencies, a changed supervisor, or the first start after a reboot.
 
+## What restarts what (checked September 2026)
+
+| If this stops | What brings it back | How long | Tested |
+| --- | --- | --- | --- |
+| The API's worker process (a crash, a kill) | the supervisor starts another at once (backing off if it keeps dying) | seconds | yes, repeatedly (`node scripts/check-supervisor.mjs`) |
+| The supervisor itself | the uptime watch: after 3 failed checks in a row (about 6 minutes) it starts the service's own deploy workflow through GitHub, at most once every 30 minutes | about 8 to 10 minutes | the watch's logic yes, 3 rounds against a fake service and fake GitHub (21 checks); not by really killing production |
+| The Cloudflare tunnel | the tunnel watchdog task (checks every 5 minutes) | up to 5 minutes | yes, earlier |
+| Redis or a database (Docker) | Docker's own restart policy; the services keep answering without Redis (in-memory limits) and reconnect by themselves | seconds after it returns | yes, `npm run check:chaos` (database connections killed) |
+| The whole machine (reboot) | the boot task waits 90 seconds, then starts the deploy workflow of any service whose port is not listening | about 5 minutes | not rehearsed (it needs a reboot); it worked on the reboots of 19 and 20 September |
+
+Order after a reboot that matters: Docker Desktop and the database must be up before the services can serve data. The
+services start regardless and report `degraded` on `/health/ready` until they are; nothing needs to be started in a
+particular order by hand.
+
 ## Watching it
 
 `scripts/uptime-watch.ps1`, run every 2 minutes by the `Desk Uptime Watch` task (install with

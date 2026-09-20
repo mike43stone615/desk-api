@@ -260,5 +260,14 @@
     "maxAgeHours": 36,
     "what": "the newest desk-api database backup"
   },
-  "failuresBeforeAlert": 2
+  "failuresBeforeAlert": 2,
+  "recovery": {
+    "checks": [
+      "desk-api"
+    ],
+    "afterFailures": 3,
+    "cooldownMinutes": 30,
+    "repo": "mike43stone615/desk-api",
+    "workflow": "deploy.yml"
+  }
 }

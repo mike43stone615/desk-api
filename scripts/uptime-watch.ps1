@@ -78,6 +78,26 @@ function Send-Alert([string]$title, [string]$message) {
   }
 }
 
+# Self-recovery: if a service stays down for "afterFailures" checks in a row, ask GitHub to run that service's own deploy
+# workflow (the same thing the boot-recovery task does after a reboot). A deploy starts it under the right account.
+# At most once per "cooldownMinutes", so a service that will not start is not redeployed in a loop.
+function Start-Recovery($recovery, [string]$checkName, $state) {
+  if (-not $state.ContainsKey('_recovery')) { $state['_recovery'] = @{ lastAt = $null } }
+  $rs = $state['_recovery']
+  if ($rs.lastAt -and (((Get-Date) - [datetime]$rs.lastAt).TotalMinutes -lt [double]$recovery.cooldownMinutes)) { return }
+  try {
+    $tokenFile = if ($recovery.tokenFile) { $recovery.tokenFile } else { 'C:\Users\User\Downloads\api.txt' }
+    $line = Get-Content $tokenFile | Where-Object { $_ -match '^GITHUB_RUNNER_REGISTRATION_PAT_2=' } | Select-Object -First 1
+    $token = ($line -split '=', 2)[1].Split('#')[0].Trim()
+    $base = if ($recovery.apiBase) { $recovery.apiBase } else { 'https://api.github.com' }
+    Invoke-RestMethod -Method Post -Uri "$base/repos/$($recovery.repo)/actions/workflows/$($recovery.workflow)/dispatches" `
+      -Headers @{ Authorization = "Bearer $token"; Accept = 'application/vnd.github+json' } -ContentType 'application/json' `
+      -Body (@{ ref = 'main' } | ConvertTo-Json) -TimeoutSec 20 | Out-Null
+    $rs.lastAt = (Get-Date).ToString('o')
+    Send-Alert "RECOVERY STARTED: $checkName" "$checkName has been down for $($recovery.afterFailures) checks in a row, so its deploy workflow was started to bring it back."
+  } catch { Write-Log "recovery for $checkName failed to start: $($_.Exception.Message)" }
+}
+
 function Test-Json($actual, $expected) {
   foreach ($p in $expected.PSObject.Properties) {
     if ($null -eq $actual -or $actual.PSObject.Properties.Name -notcontains $p.Name) { return "missing '$($p.Name)'" }
@@ -198,7 +218,7 @@ $targets = Get-Content $TargetsFile -Raw | ConvertFrom-Json
 $need = if ($targets.failuresBeforeAlert) { [int]$targets.failuresBeforeAlert } else { 2 }
 $state = @{}
 if (Test-Path $StateFile) {
-  try { (Get-Content $StateFile -Raw | ConvertFrom-Json).PSObject.Properties | ForEach-Object { $state[$_.Name] = @{ failures = [int]$_.Value.failures; alerted = [bool]$_.Value.alerted; lastRun = $_.Value.lastRun; value = $_.Value.value } } } catch { $state = @{} }
+  try { (Get-Content $StateFile -Raw | ConvertFrom-Json).PSObject.Properties | ForEach-Object { $state[$_.Name] = @{ failures = [int]$_.Value.failures; alerted = [bool]$_.Value.alerted; lastRun = $_.Value.lastRun; value = $_.Value.value; lastAt = $_.Value.lastAt } } } catch { $state = @{} }
 }
 
 $all = @()
@@ -234,6 +254,9 @@ foreach ($check in $all) {
     if ($st.failures -ge $threshold -and -not $st.alerted) {
       $st.alerted = $true
       Send-Alert "DOWN: $($check.name)" "$($check.what): $reason (failed $($st.failures) checks in a row)"
+    }
+    if ($targets.recovery -and (@($targets.recovery.checks) -contains $check.name) -and $st.failures -ge [int]$targets.recovery.afterFailures) {
+      Start-Recovery $targets.recovery $check.name $state
     }
   } else {
     if ($st.alerted) { Send-Alert "RECOVERED: $($check.name)" "$($check.what) is answering again." }
