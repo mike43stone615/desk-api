@@ -14,6 +14,7 @@ import { requireAuth, extractSessionToken } from '../middleware/auth';
 import { setSessionCookie, clearSessionCookie } from '../infrastructure/auth/session-cookie';
 import { getClientIp } from '../middleware/api-protection';
 import { checkSignupRateLimit } from '../middleware/signup-limiter';
+import { signinLockedSeconds, recordSigninFailure, clearSigninFailures } from '../middleware/signin-throttle';
 import {
   sendEmailConfirmationEmail,
   sendPasswordResetEmail,
@@ -86,6 +87,15 @@ export async function signInHandler(request: FastifyRequest, reply: FastifyReply
   if (!parsed.success) throw new HttpError(400, parsed.error.issues.map((i) => i.message).join('; '));
   const { email, password } = parsed.data;
 
+  // Refuse before checking the password, so a locked-out caller cannot learn whether a guess was right.
+  const ip = getClientIp(request);
+  const lockedFor = await signinLockedSeconds(ip, email);
+  if (lockedFor > 0) {
+    audit(request, 'signin_locked', 'error');
+    reply.header('Retry-After', String(lockedFor));
+    throw new HttpError(429, `Too many failed sign-in attempts. Try again in ${Math.ceil(lockedFor / 60)} minute(s).`);
+  }
+
   let result;
   try {
     result = await authService.signIn(email.trim(), password);
@@ -96,8 +106,10 @@ export async function signInHandler(request: FastifyRequest, reply: FastifyReply
 
   if (!result) {
     audit(request, 'signin_failed', 'error', { email: email.trim() });
+    await recordSigninFailure(ip, email);
     throw new HttpError(401, 'Invalid email or password.');
   }
+  await clearSigninFailures(ip, email);
 
   audit(request, 'signin_success', 'ok', { userId: result.user.id });
   setSessionCookie(reply, result.token);

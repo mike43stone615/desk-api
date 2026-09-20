@@ -43,6 +43,11 @@ const schema = z.object({
   RESET_TOKEN_DURATION_MINUTES: z.coerce.number().int().positive().default(60),
   CONFIRMATION_TOKEN_DURATION_MINUTES: z.coerce.number().int().positive().default(1440),
   RESEND_COOLDOWN_SECONDS: z.coerce.number().int().positive().default(60),
+  // Sign-in lockout (see middleware/signin-throttle.ts)
+  SIGNIN_LOCKOUT_MINUTES: z.coerce.number().int().positive().default(15),
+  SIGNIN_MAX_FAILURES_ACCOUNT_IP: z.coerce.number().int().positive().default(5),
+  SIGNIN_MAX_FAILURES_ACCOUNT: z.coerce.number().int().positive().default(30),
+  SIGNIN_MAX_FAILURES_IP: z.coerce.number().int().positive().default(30),
 
   // Comma-separated allowlist gating requireAdmin() (src/middleware/auth.ts) —
   // ported unchanged from the Hono version's config.adminEmails.
@@ -134,6 +139,10 @@ export interface AppConfig {
   resetTokenDurationMinutes: number;
   confirmationTokenDurationMinutes: number;
   resendCooldownSeconds: number;
+  signinLockoutMinutes: number;
+  signinMaxFailuresAccountIp: number;
+  signinMaxFailuresAccount: number;
+  signinMaxFailuresIp: number;
   adminEmails: string[];
   adminApiKey: string | undefined;
   complianceOsUrl: string | undefined;
@@ -170,6 +179,10 @@ export const config: AppConfig = {
   resetTokenDurationMinutes: env.RESET_TOKEN_DURATION_MINUTES,
   confirmationTokenDurationMinutes: env.CONFIRMATION_TOKEN_DURATION_MINUTES,
   resendCooldownSeconds: env.RESEND_COOLDOWN_SECONDS,
+  signinLockoutMinutes: env.SIGNIN_LOCKOUT_MINUTES,
+  signinMaxFailuresAccountIp: env.SIGNIN_MAX_FAILURES_ACCOUNT_IP,
+  signinMaxFailuresAccount: env.SIGNIN_MAX_FAILURES_ACCOUNT,
+  signinMaxFailuresIp: env.SIGNIN_MAX_FAILURES_IP,
   adminEmails: splitCsv(env.ADMIN_EMAILS).map((e) => e.toLowerCase()),
   adminApiKey: env.ADMIN_API_KEY,
   complianceOsUrl: env.COMPLIANCE_OS_URL,
