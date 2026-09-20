@@ -59,6 +59,8 @@ export const envSchema = z.object({
   // admin routes. Session + ADMIN_EMAILS keeps working unchanged either way —
   // this is an additional path in, not a replacement.
   ADMIN_API_KEY: z.string().optional(),
+  // Optional: comma-separated addresses the static admin key is accepted from. Left empty, it works from anywhere.
+  ADMIN_API_KEY_ALLOWED_IPS: z.string().optional(),
 
   COMPLIANCE_OS_URL: z.string().optional(),
   COMPLIANCE_OS_API_KEY: z.string().optional(),
@@ -159,6 +161,7 @@ export interface AppConfig {
   signinMaxFailuresIp: number;
   adminEmails: string[];
   adminApiKey: string | undefined;
+  adminApiKeyAllowedIps: string[];
   complianceOsUrl: string | undefined;
   complianceOsApiKey: string | undefined;
   registryApiUrl: string | undefined;
@@ -211,6 +214,7 @@ export const config: AppConfig = {
   signinMaxFailuresIp: env.SIGNIN_MAX_FAILURES_IP,
   adminEmails: splitCsv(env.ADMIN_EMAILS).map((e) => e.toLowerCase()),
   adminApiKey: env.ADMIN_API_KEY,
+  adminApiKeyAllowedIps: splitCsv(env.ADMIN_API_KEY_ALLOWED_IPS),
   complianceOsUrl: env.COMPLIANCE_OS_URL,
   complianceOsApiKey: env.COMPLIANCE_OS_API_KEY,
   registryApiUrl: env.REGISTRY_API_URL,

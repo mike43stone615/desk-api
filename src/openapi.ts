@@ -361,6 +361,27 @@ const BASE_SPEC = {
         responses: { '200': { description: 'OK' }, '403': { description: 'The current password is not correct (code current_password_incorrect)' } },
       },
     },
+    '/gateway/api-keys/{id}/suspend': {
+      post: { tags: ['API Library'], summary: 'Switch one of your own keys off without revoking it', security: [{ SessionToken: [] }], parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }], responses: { '200': { description: 'Suspended' }, '404': { description: 'Not your key, or already revoked' } } },
+    },
+    '/gateway/api-keys/{id}/resume': {
+      post: { tags: ['API Library'], summary: 'Switch a suspended key back on', security: [{ SessionToken: [] }], parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }], responses: { '200': { description: 'Resumed' }, '404': { description: 'Not suspended, or not your key' } } },
+    },
+    '/admin/gateway-keys': {
+      get: { tags: ['Admin'], summary: 'Every live API key: owner, services, last use, and whether it is suspended', security: [{ SessionToken: [] }], responses: { '200': { description: 'OK' }, '403': { description: 'Not an administrator, or the sign-in is older than 24 hours' } } },
+    },
+    '/admin/gateway-keys/{id}/suspend': {
+      post: { tags: ['Admin'], summary: 'Suspend any API key (nothing is revoked)', security: [{ SessionToken: [] }], parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }], responses: { '200': { description: 'Suspended' }, '404': { description: 'No such key' } } },
+    },
+    '/admin/gateway-keys/{id}/resume': {
+      post: { tags: ['Admin'], summary: 'Resume a suspended API key', security: [{ SessionToken: [] }], parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }], responses: { '200': { description: 'Resumed' }, '404': { description: 'Not suspended' } } },
+    },
+    '/admin/users/{id}/suspend': {
+      post: { tags: ['Admin'], summary: 'Suspend an account: sessions end now, sign-in and all its keys are refused', security: [{ SessionToken: [] }], parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }], responses: { '200': { description: 'Suspended' }, '404': { description: 'No such account' } } },
+    },
+    '/admin/users/{id}/unsuspend': {
+      post: { tags: ['Admin'], summary: 'Lift an account suspension', security: [{ SessionToken: [] }], parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }], responses: { '200': { description: 'Lifted' }, '404': { description: 'Not suspended' } } },
+    },
     '/auth/account/delete': {
       post: {
         tags: ['Auth'],

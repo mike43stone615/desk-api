@@ -448,13 +448,23 @@ async function proxyUpstreamMutation(
   );
 }
 
-async function guard(request: FastifyRequest, reply: FastifyReply): Promise<void> {
+export async function guard(request: FastifyRequest, reply: FastifyReply): Promise<void> {
   const provided = request.headers['x-api-key'];
   if (
     config.adminApiKey &&
     typeof provided === 'string' &&
     timingSafeEqualString(provided, config.adminApiKey)
   ) {
+    // The static admin key is the most powerful credential this service has and belongs to no person: every use
+    // is written down (log line and audit row) with the address it came from, and it can be limited to named addresses.
+    const ip = requestIp(request);
+    const allowed = config.adminApiKeyAllowedIps;
+    if (allowed.length > 0 && !(ip && allowed.includes(ip))) {
+      request.log.warn({ level: 'audit', event: 'admin_api_key_refused', requestId: request.id, ip });
+      throw new HttpError(403, 'The administrator key is not accepted from this address.', 'admin_key_ip_not_allowed');
+    }
+    request.log.warn({ level: 'audit', event: 'admin_api_key_used', requestId: request.id, ip, method: request.method, url: request.url.split('?')[0] });
+    logMutation({ userEmail: 'admin-api-key', action: 'admin_api_key_used', entityType: 'route', entityId: `${request.method} ${request.url.split('?')[0]}`.slice(0, 200), ipAddress: ip, userAgent: requestUserAgent(request) });
     return;
   }
   await requireAuth(request, reply);

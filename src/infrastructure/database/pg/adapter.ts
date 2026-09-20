@@ -134,7 +134,8 @@ export class PgDatabaseAdapter implements DatabaseRepository {
   }
 
   async deleteExpiredSessions(): Promise<void> {
-    await this.pool.query(`DELETE FROM sessions WHERE expires_at < $1`, [nowUtc()]);
+    // Expired, or unused for the idle limit (see SESSION_IDLE_DAYS in auth-service.ts).
+    await this.pool.query(`DELETE FROM sessions WHERE expires_at < $1 OR COALESCE(last_used_at, created_at) < $2`, [nowUtc(), new Date(Date.now() - 14 * 86_400_000).toISOString()]);
   }
 
   async createResetToken(

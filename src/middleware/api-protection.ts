@@ -53,15 +53,18 @@ const sweepInterval = setInterval(() => {
 }, 15 * 60 * 1000);
 sweepInterval.unref();
 
-function memGetOrCreate(key: string): BucketState {
+/** A bucket's size is the configured limit times a factor (1 for an address, less for one key, more for one person). */
+const scaled = (limit: number, factor: number) => Math.max(1, Math.ceil(limit * factor));
+
+function memGetOrCreate(key: string, factor: number): BucketState {
   let b = memBuckets.get(key);
   if (!b) {
     const now = Date.now();
     b = {
-      minuteTokens: config.rateLimitPerMinute,
-      hourTokens: config.rateLimitPerHour,
-      dayTokens: config.rateLimitDaily,
-      monthTokens: config.rateLimitMonthly,
+      minuteTokens: scaled(config.rateLimitPerMinute, factor),
+      hourTokens: scaled(config.rateLimitPerHour, factor),
+      dayTokens: scaled(config.rateLimitDaily, factor),
+      monthTokens: scaled(config.rateLimitMonthly, factor),
       lastMinuteReset: now,
       lastHourReset: now,
       lastDayReset: now,
@@ -75,23 +78,23 @@ function memGetOrCreate(key: string): BucketState {
   return b;
 }
 
-function memCheck(key: string): RateLimitResult {
-  const b = memGetOrCreate(key);
+function memCheck(key: string, factor: number): RateLimitResult {
+  const b = memGetOrCreate(key, factor);
   const now = Date.now();
   if (now - b.lastMinuteReset > 60_000) {
-    b.minuteTokens = config.rateLimitPerMinute;
+    b.minuteTokens = scaled(config.rateLimitPerMinute, factor);
     b.lastMinuteReset = now;
   }
   if (now - b.lastHourReset > 3_600_000) {
-    b.hourTokens = config.rateLimitPerHour;
+    b.hourTokens = scaled(config.rateLimitPerHour, factor);
     b.lastHourReset = now;
   }
   if (now - b.lastDayReset > 86_400_000) {
-    b.dayTokens = config.rateLimitDaily;
+    b.dayTokens = scaled(config.rateLimitDaily, factor);
     b.lastDayReset = now;
   }
   if (now - b.lastMonthReset > 2_592_000_000) {
-    b.monthTokens = config.rateLimitMonthly;
+    b.monthTokens = scaled(config.rateLimitMonthly, factor);
     b.lastMonthReset = now;
   }
   const resetAt = Math.ceil((b.lastMinuteReset + 60_000) / 1000);
@@ -108,16 +111,25 @@ function memCheck(key: string): RateLimitResult {
 
 // ── Redis sliding window ──────────────────────────────────────────────────────
 
-async function redisCheck(key: string): Promise<RateLimitResult> {
+/**
+ * Counts one request against a named bucket. `factor` scales the configured limits: 1 for a network address, less for
+ * a single API key (so one busy key cannot use up the whole allowance of an address it shares), more for a signed-in
+ * person (a person legitimately uses several devices).
+ */
+export async function checkRateBucket(key: string, factor = 1): Promise<RateLimitResult> {
+  return redisCheck(key, factor);
+}
+
+async function redisCheck(key: string, factor = 1): Promise<RateLimitResult> {
   const redis = getRedis();
-  if (!redis) return memCheck(key);
+  if (!redis) return memCheck(key, factor);
 
   const now = Date.now();
   const windows: Array<{ key: string; limit: number; windowMs: number; label: string }> = [
-    { key: `rl:min:${key}`, limit: config.rateLimitPerMinute, windowMs: 60_000, label: 'per-minute' },
-    { key: `rl:hr:${key}`, limit: config.rateLimitPerHour, windowMs: 3_600_000, label: 'per-hour' },
-    { key: `rl:day:${key}`, limit: config.rateLimitDaily, windowMs: 86_400_000, label: 'daily' },
-    { key: `rl:mo:${key}`, limit: config.rateLimitMonthly, windowMs: 2_592_000_000, label: 'monthly' },
+    { key: `rl:min:${key}`, limit: scaled(config.rateLimitPerMinute, factor), windowMs: 60_000, label: 'per-minute' },
+    { key: `rl:hr:${key}`, limit: scaled(config.rateLimitPerHour, factor), windowMs: 3_600_000, label: 'per-hour' },
+    { key: `rl:day:${key}`, limit: scaled(config.rateLimitDaily, factor), windowMs: 86_400_000, label: 'daily' },
+    { key: `rl:mo:${key}`, limit: scaled(config.rateLimitMonthly, factor), windowMs: 2_592_000_000, label: 'monthly' },
   ];
 
   let minuteRemaining = 0;
@@ -202,13 +214,18 @@ export function normalizePath(url: string): string {
 // ── Registration ──────────────────────────────────────────────────────────────
 
 /** Same error shape as everywhere else, plus the standard Retry-After header. */
-function tooManyRequests(request: FastifyRequest, reply: FastifyReply, reason: string | undefined, resetAt?: number) {
+/** One API key gets half of what one address gets. */
+export const KEY_BUCKET_FACTOR = 0.5;
+/** One signed-in person gets two and a half times an address's allowance (several devices, one account). */
+export const USER_BUCKET_FACTOR = 2.5;
+
+function tooManyRequests(request: FastifyRequest, reply: FastifyReply, reason: string | undefined, resetAt?: number, limit?: number) {
   return reply
     .status(429)
     .header('Content-Type', 'application/problem+json')
     .header('Retry-After', '60')
     // The same limit headers a successful answer carries, so a client can read them from the refusal too.
-    .header('X-RateLimit-Limit', String(config.rateLimitPerMinute))
+    .header('X-RateLimit-Limit', String(limit ?? config.rateLimitPerMinute))
     .header('X-RateLimit-Remaining', '0')
     .header('X-RateLimit-Reset', String(resetAt ?? Math.ceil(Date.now() / 1000) + 60))
     .send(problemBody(request.url, 429, reason ?? 'Rate limit exceeded.', { retryAfterSeconds: 60 }));
@@ -219,23 +236,23 @@ export function registerApiProtection(app: FastifyInstance) {
     const path = normalizePath(request.url);
     if (path === '/health' || path === '/metrics') return;
 
+    // An API Library key gets its OWN bucket, checked FIRST and at half the size of an address's: one developer's key is
+    // limited no matter how many addresses it is used from, and a key that is over its limit is refused without
+    // costing the address anything, so one busy key cannot use up the allowance of another key (or a person) that
+    // shares its address. Keyed by a hash of whatever was presented, so the header value itself is never stored; a
+    // made-up key still costs the address's own allowance below, so rotating fake keys gains nothing.
+    const presentedKey = request.headers['x-api-key'];
+    if (typeof presentedKey === 'string' && presentedKey.startsWith(GATEWAY_KEY_PREFIX)) {
+      const keyResult = await redisCheck(`key:${createHash('sha256').update(presentedKey).digest('hex')}`, KEY_BUCKET_FACTOR);
+      if (!keyResult.allowed) {
+        return tooManyRequests(request, reply, keyResult.reason, keyResult.resetAt, scaled(config.rateLimitPerMinute, KEY_BUCKET_FACTOR));
+      }
+    }
+
     const bucketKey = `ip:${getClientIp(request)}`;
     const result = await redisCheck(bucketKey);
     if (!result.allowed) {
       return tooManyRequests(request, reply, result.reason, result.resetAt);
-    }
-
-    // An API Library key gets its OWN bucket on top of the IP one (both must
-    // pass): one developer's key is limited no matter how many IPs it's used
-    // from, and a shared IP (a cloud host) can't let one key starve another.
-    // Keyed by a hash of whatever was presented, so an invalid key still costs
-    // a bucket entry but the header value itself is never stored.
-    const presentedKey = request.headers['x-api-key'];
-    if (typeof presentedKey === 'string' && presentedKey.startsWith(GATEWAY_KEY_PREFIX)) {
-      const keyResult = await redisCheck(`key:${createHash('sha256').update(presentedKey).digest('hex')}`);
-      if (!keyResult.allowed) {
-        return tooManyRequests(request, reply, keyResult.reason, keyResult.resetAt);
-      }
     }
 
     reply.header('X-RateLimit-Limit', String(config.rateLimitPerMinute));

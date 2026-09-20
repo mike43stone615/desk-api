@@ -246,6 +246,28 @@ describe('verifySession', () => {
     expect(await service.verifySession(token)).toBeNull();
     expect(db.sessions.has(token)).toBe(false);
   });
+
+  it('a session unused for 14 days is over (and removed), one used yesterday is not; it never expires the absolute 30 days early', async () => {
+    const userId = generateId();
+    await db.createUser(userId, 'idle@example.com', 'hash', 'A', 'B');
+    const mk = async (lastUsedDaysAgo: number | null, createdDaysAgo: number) => {
+      const token = generateToken(32);
+      const s = await db.createSession(generateId(), userId, token, new Date(Date.now() + 10 * 86_400_000).toISOString());
+      s.createdAt = new Date(Date.now() - createdDaysAgo * 86_400_000).toISOString();
+      s.lastUsedAt = lastUsedDaysAgo === null ? null : new Date(Date.now() - lastUsedDaysAgo * 86_400_000).toISOString();
+      return token;
+    };
+    const idle = await mk(15, 20);
+    const neverUsedOld = await mk(null, 15);
+    const active = await mk(1, 25);
+    const fresh = await mk(null, 0);
+    expect(await service.verifySession(idle)).toBeNull();
+    expect(db.sessions.has(idle)).toBe(false);
+    expect(await service.verifySession(neverUsedOld)).toBeNull();
+    expect((await service.verifySession(active))?.id).toBe(userId);
+    expect((await service.verifySession(fresh))?.id).toBe(userId);
+    expect((await service.listSessions(userId)).map((x) => x.token).sort()).toEqual([active, fresh].sort());
+  });
 });
 
 describe('password reset — enumeration-safety and cooldown', () => {

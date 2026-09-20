@@ -9,6 +9,7 @@
 import type { FastifyReply, FastifyRequest } from 'fastify';
 import type { Session } from '../interfaces/database';
 import { HttpError, validationError } from '../middleware/http-error';
+import { isUserSuspended } from '../domain/suspension';
 import { authService } from '../infrastructure/auth';
 import { AuthError } from '../infrastructure/auth/auth-service';
 import { requireAuth, extractSessionToken } from '../middleware/auth';
@@ -116,6 +117,13 @@ export async function signInHandler(request: FastifyRequest, reply: FastifyReply
     throw new HttpError(401, 'Invalid email or password.', 'invalid_credentials');
   }
   await clearSigninFailures(ip, email);
+  // A suspended account is refused after the password is right (so a wrong password still says "wrong password" and
+  // nobody learns from this answer whether an account is suspended without knowing its password).
+  if (await isUserSuspended(result.user.id)) {
+    await authService.revokeSession(result.token);
+    audit(request, 'signin_suspended', 'error', { userId: result.user.id });
+    throw new HttpError(403, 'This account is suspended.', 'account_suspended');
+  }
 
   // Decided before this sign-in is recorded, or it would always look familiar.
   const uaHeader = request.headers['user-agent'];

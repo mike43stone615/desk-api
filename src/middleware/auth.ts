@@ -10,6 +10,8 @@ import { gatewayApiKeys, looksLikeGatewayKey, type VerifiedGatewayKey } from '..
 import { SESSION_COOKIE_NAME } from '../infrastructure/auth/session-cookie';
 import { config } from '../config';
 import { enforceUserRouteLimit, routeKey } from './route-limits';
+import { checkRateBucket, USER_BUCKET_FACTOR } from './api-protection';
+import { isUserSuspended } from '../domain/suspension';
 import type { User } from '../interfaces/database';
 
 declare module 'fastify' {
@@ -41,6 +43,7 @@ export const GATEWAY_KEY_ALLOWED_ROUTES: ReadonlySet<string> = new Set([
 async function authenticateWithGatewayKey(request: FastifyRequest, apiKey: string): Promise<void> {
   const verified = await gatewayApiKeys.verify(apiKey);
   if (!verified) throw new HttpError(401, 'Invalid or revoked API key.', 'invalid_api_key');
+  if (verified.suspended) throw new HttpError(403, 'This API key is suspended.', 'api_key_suspended');
   if (!verified.services.has('desk_api')) {
     throw new HttpError(403, 'This API key is not enabled for the Desk API.', 'api_key_service_not_enabled');
   }
@@ -78,7 +81,16 @@ export async function requireAuth(request: FastifyRequest, reply: FastifyReply):
   } else {
     const user = await authService.verifySession(token);
     if (!user) throw new HttpError(401, 'Session expired or invalid.', 'session_invalid');
+    // Suspending an account ends its sessions; this catches one created in the same instant.
+    if (await isUserSuspended(user.id)) throw new HttpError(403, 'This account is suspended.', 'account_suspended');
     request.currentUser = user;
+  }
+  // The general limit per PERSON, on top of the one per address: a leaked session or key used from many addresses is
+  // still one account with one allowance.
+  const person = await checkRateBucket(`user:${request.currentUser!.id}`, USER_BUCKET_FACTOR);
+  if (!person.allowed) {
+    reply.header('Retry-After', '60');
+    throw new HttpError(429, person.reason ?? 'Rate limit exceeded.', 'rate_limited');
   }
   await enforceUserRouteLimit(request, reply);
 }
@@ -113,7 +125,17 @@ export async function requireAdmin(request: FastifyRequest, _reply: FastifyReply
   if (request.gatewayKey) throw new HttpError(403, 'Admin access is not available with an API key.', 'admin_not_available_for_keys');
   const email = user.email.trim().toLowerCase();
   if (!config.adminEmails.includes(email)) throw new HttpError(403, 'Admin access required.', 'admin_required');
+  // A stolen or forgotten session must not stay an administrator for its whole 30 days: the admin tools need a
+  // sign-in from the last 24 hours (a normal session still works for everything else).
+  const token = extractSessionToken(request);
+  const session = token ? await authService.currentSession(token) : null;
+  if (!session || Date.now() - Date.parse(session.createdAt) > ADMIN_SIGNIN_MAX_AGE_MS) {
+    throw new HttpError(403, 'Please sign in again to use the administrator tools.', 'admin_recent_signin_required');
+  }
 }
+
+/** How recent the sign-in must be for the administrator tools. */
+export const ADMIN_SIGNIN_MAX_AGE_MS = 24 * 60 * 60 * 1000;
 
 /**
  * Optional Fastify preHandler gating GET /metrics and GET /docs (+

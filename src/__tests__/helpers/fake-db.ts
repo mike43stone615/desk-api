@@ -32,6 +32,8 @@ export function createFakeDb() {
   const gatewayGrants: FakeRow[] = [];
   const appliedMigrations: string[] = readdirSync(join(__dirname, '..', '..', '..', 'migrations')).filter((f) => f.endsWith('.sql')).sort();
   const securityEvents: FakeRow[] = []; // migration 0014
+  const accountSuspensions = new Map<string, FakeRow>(); // migration 0016, keyed by user id
+  const keySuspensions = new Map<string, FakeRow>(); // migration 0016, keyed by key id
   const emailInvites = new Map<string, FakeRow>(); // keyed by id (migration 0013)
   const backendRevocations = new Map<string, FakeRow>(); // the queue filled by the grant-delete trigger (migration 0010)
 
@@ -46,6 +48,40 @@ export function createFakeDb() {
     const s = sql.replace(/\s+/g, ' ').trim();
     const p = params as string[];
 
+    // ── suspensions (migration 0016) ── (before the generic "SELECT 1" liveness answer below)
+    if (s === 'SELECT 1 FROM account_suspensions WHERE user_id = $1') return accountSuspensions.has(p[0]) ? { rows: [{}], rowCount: 1 } : { rows: [], rowCount: 0 };
+    if (s === 'SELECT 1 FROM users WHERE id = $1') return users.has(p[0]) ? { rows: [{}], rowCount: 1 } : { rows: [], rowCount: 0 };
+    if (s.startsWith('INSERT INTO account_suspensions')) { accountSuspensions.set(p[0], { user_id: p[0], reason: p[1], suspended_by: p[2], suspended_at: nowIso() }); return { rows: [], rowCount: 1 }; }
+    if (s === 'DELETE FROM account_suspensions WHERE user_id = $1') { const had = accountSuspensions.delete(p[0]); return { rows: [], rowCount: had ? 1 : 0 }; }
+    if (s.startsWith('SELECT 1 FROM key_suspensions WHERE api_key_id = $1 UNION ALL SELECT 1 FROM account_suspensions WHERE user_id = $2')) {
+      const rows = [...(keySuspensions.has(p[0]) ? [{}] : []), ...(accountSuspensions.has(p[1]) ? [{}] : [])];
+      return { rows, rowCount: rows.length };
+    }
+    if (s.startsWith('SELECT id FROM gateway_api_keys WHERE id = $1 AND')) {
+      const k = gatewayKeys.get(p[0]);
+      const ok = k && !k.revoked_at && (s.includes('owner_user_id = $2') ? k.owner_user_id === p[1] : true);
+      return ok ? { rows: [{ id: p[0] }], rowCount: 1 } : { rows: [], rowCount: 0 };
+    }
+    if (s.startsWith('INSERT INTO key_suspensions')) { keySuspensions.set(p[0], { api_key_id: p[0], reason: p[1], suspended_by: p[2], suspended_at: nowIso() }); return { rows: [], rowCount: 1 }; }
+    if (s.startsWith('DELETE FROM key_suspensions WHERE api_key_id = $1')) {
+      const owned = !s.includes('owner_user_id') || gatewayKeys.get(p[0])?.owner_user_id === p[1];
+      const had = owned && keySuspensions.delete(p[0]);
+      return { rows: [], rowCount: had ? 1 : 0 };
+    }
+    if (s === 'SELECT api_key_id FROM key_suspensions WHERE api_key_id = ANY($1)') {
+      const ids = (p[0] as unknown as string[]).filter((id) => keySuspensions.has(id));
+      return { rows: ids.map((api_key_id) => ({ api_key_id })), rowCount: ids.length };
+    }
+    if (s.startsWith('SELECT k.id, k.label, k.key_prefix, k.created_at, k.last_used_at, u.email AS owner_email')) {
+      const rows = [...gatewayKeys.values()].filter((k) => !k.revoked_at).map((k) => ({
+        id: k.id, label: k.label, key_prefix: k.key_prefix, created_at: k.created_at, last_used_at: k.last_used_at ?? null,
+        owner_email: users.get(k.owner_user_id as string)?.email, owner_id: k.owner_user_id,
+        services: gatewayGrants.filter((g) => g.api_key_id === k.id).map((g) => g.service as string).sort().join(',') || null,
+        key_suspended_reason: (keySuspensions.get(k.id as string)?.reason as string) ?? null,
+        key_suspended: keySuspensions.has(k.id as string), owner_suspended: accountSuspensions.has(k.owner_user_id as string),
+      }));
+      return { rows, rowCount: rows.length };
+    }
     if (s.startsWith('SELECT 1')) return { rows: [{ '?column?': 1 }], rowCount: 1 };
 
     // ── users ──────────────────────────────────────────────────────────────
@@ -181,7 +217,7 @@ export function createFakeDb() {
       const row = sessions.get(p[0]);
       return { rows: row ? [row] : [], rowCount: row ? 1 : 0 };
     }
-    if (s.startsWith('DELETE FROM sessions WHERE expires_at')) {
+    if (s.startsWith('DELETE FROM sessions WHERE expires_at')) { // (the idle part of the condition is covered at service level)
       let count = 0;
       const cutoff = p[0];
       for (const [token, row] of sessions) {
@@ -762,6 +798,8 @@ export function createFakeDb() {
     backendRevocations,
     emailInvites,
     securityEvents,
+    accountSuspensions,
+    keySuspensions,
     appliedMigrations,
   };
 }

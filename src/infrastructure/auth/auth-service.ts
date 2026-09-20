@@ -104,6 +104,12 @@ export class DeskAuthService implements AuthService {
       await this.db.deleteSession(token);
       return null;
     }
+    // A session that has not been used for two weeks is over, even though its 30 days have not run out: a laptop left
+    // open in a drawer, or a stolen cookie that was never used, stops working by itself.
+    if (isIdle(session)) {
+      await this.db.deleteSession(token);
+      return null;
+    }
     // "Last used" is only refreshed when it is stale, so a busy session does not write on every request.
     if (!session.lastUsedAt || Date.now() - Date.parse(session.lastUsedAt) > LAST_USED_REFRESH_MS) {
       this.db.touchSession(session.id, new Date().toISOString()).catch(() => {});
@@ -112,7 +118,7 @@ export class DeskAuthService implements AuthService {
   }
 
   async listSessions(userId: string): Promise<Session[]> {
-    return this.db.listSessionsForUser(userId);
+    return (await this.db.listSessionsForUser(userId)).filter((s) => !isIdle(s));
   }
 
   async currentSession(token: string): Promise<Session | null> {
@@ -289,6 +295,12 @@ function validatePassword(password: string): void {
 // response-time timing on signIn) takes roughly as long as a real one; it is
 // never a valid credential for any real account.
 const LAST_USED_REFRESH_MS = 10 * 60 * 1000;
+/** Sessions unused for this long are invalid (the absolute lifetime, 30 days from sign-in, still applies). */
+export const SESSION_IDLE_DAYS = 14;
+/** True when the session's last use (or, if it was never used, its creation) is older than the idle limit. */
+export function isIdle(session: { lastUsedAt: string | null; createdAt: string }, now = Date.now()): boolean {
+  return now - Date.parse(session.lastUsedAt ?? session.createdAt) > SESSION_IDLE_DAYS * 86_400_000;
+}
 
 const DUMMY_HASH =
   'pbkdf2:sha256:310000:AAAAAAAAAAAAAAAAAAAAAA==:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=';

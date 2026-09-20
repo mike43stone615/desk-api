@@ -84,6 +84,7 @@ async function forward(service: BrokeredService, request: FastifyRequest, reply:
   if (!looksLikeGatewayKey(presented)) throw new HttpError(401, 'An API key is required (x-api-key header).', 'api_key_required');
   const verified = await gatewayApiKeys.verify(presented);
   if (!verified) throw new HttpError(401, 'Invalid or revoked API key.', 'invalid_api_key');
+  if (verified.suspended) throw new HttpError(403, 'This API key is suspended.', 'api_key_suspended');
   if (!verified.services.has(service)) throw new HttpError(403, 'This API key is not enabled for this API.', 'api_key_service_not_enabled');
 
   const spec = SERVICES[service];

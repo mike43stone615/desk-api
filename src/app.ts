@@ -95,12 +95,15 @@ import { marketResearchAnalyzeHandler } from './routes/integrations/marketResear
 import {
   createGatewayKeyHandler,
   libraryOpenApiHandler,
+  resumeGatewayKeyHandler,
+  suspendGatewayKeyHandler,
   listGatewayKeysHandler,
   listGatewayServicesHandler,
   revokeGatewayKeyHandler,
 } from './routes/gateway';
 import { gatewayMarketProxyHandler, gatewayRegistryProxyHandler } from './routes/gatewayProxy';
 import { registerLibraryUi } from './routes/libraryUi';
+import { adminListKeysHandler, adminResumeKeyHandler, adminSuspendKeyHandler, adminSuspendUserHandler, adminUnsuspendUserHandler } from './routes/adminAccounts';
 import { registerSecurityTxt } from './routes/securityTxt';
 import { ERROR_CODES } from './middleware/error-codes';
 import { registerPathParamCheck } from './middleware/path-params';
@@ -405,6 +408,11 @@ async function registerLegacyAndVersionedRoutes(instance: FastifyInstance) {
   instance.delete('/setup/invites/:membershipId', declineBusinessInviteHandler);
 
   // ── Admin table browser (+ upstream aggregation) ────────────────────────
+  instance.get('/admin/gateway-keys', adminListKeysHandler);
+  instance.post('/admin/users/:id/suspend', small, adminSuspendUserHandler);
+  instance.post('/admin/users/:id/unsuspend', small, adminUnsuspendUserHandler);
+  instance.post('/admin/gateway-keys/:id/suspend', small, adminSuspendKeyHandler);
+  instance.post('/admin/gateway-keys/:id/resume', small, adminResumeKeyHandler);
   instance.get('/admin/tables', adminTablesHandler);
   instance.get('/admin/tables/:table/rows', adminTableRowsHandler);
   instance.patch('/admin/tables/:table/rows/:id', adminTableUpdateRowHandler);
@@ -437,6 +445,8 @@ async function registerLegacyAndVersionedRoutes(instance: FastifyInstance) {
   instance.get('/gateway/api-keys', listGatewayKeysHandler);
   instance.post('/gateway/api-keys', small, createGatewayKeyHandler);
   instance.delete('/gateway/api-keys/:id', revokeGatewayKeyHandler);
+  instance.post('/gateway/api-keys/:id/suspend', small, suspendGatewayKeyHandler);
+  instance.post('/gateway/api-keys/:id/resume', small, resumeGatewayKeyHandler);
 
   // ── API Library: key-authenticated proxies to registry-api / market-validation-api ──
   instance.get('/gateway/registry/*', gatewayRegistryProxyHandler);

@@ -5,6 +5,7 @@
 // fail-closed verify()), extended with per-service grants.
 import { createHash, randomBytes, randomUUID } from 'crypto';
 import { pool } from '../../db';
+import { suspendedKeyIds } from '../suspension';
 import { config } from '../../config';
 import { decryptSecret, encryptSecret } from './crypto';
 import { provisionBrokerKey, revokeBrokerKey } from './broker';
@@ -42,6 +43,8 @@ export interface GatewayKeySummary {
   createdAt: string;
   lastUsedAt: string | null;
   services: GatewayService[];
+  /** True while the owner (or an administrator) has switched the key off without revoking it. */
+  suspended?: boolean;
 }
 
 export interface CreatedGatewayKey extends GatewayKeySummary {
@@ -53,6 +56,8 @@ export interface VerifiedGatewayKey {
   id: string;
   ownerUserId: string;
   services: ReadonlySet<GatewayService>;
+  /** The key, or its owner's whole account, is switched off (see domain/suspension.ts). */
+  suspended: boolean;
 }
 
 export function looksLikeGatewayKey(value: unknown): value is string {
@@ -113,7 +118,8 @@ export const gatewayApiKeys = {
       list.push(g.service);
       byKey.set(g.api_key_id, list);
     }
-    return rows.map((r) => toSummary(r, orderServices(byKey.get(r.id) ?? [])));
+    const suspended = await suspendedKeyIds(rows.map((r) => r.id));
+    return rows.map((r) => ({ ...toSummary(r, orderServices(byKey.get(r.id) ?? [])), suspended: suspended.has(r.id) }));
   },
 
   async countActive(ownerUserId: string): Promise<number> {
@@ -284,7 +290,11 @@ export const gatewayApiKeys = {
         [key.id],
       );
       pool.query(`UPDATE gateway_api_keys SET last_used_at = ${NOW_SQL} WHERE id = $1`, [key.id]).catch(() => {});
-      return { id: key.id, ownerUserId: key.owner_user_id, services: new Set(grants.map((g) => g.service)) };
+      const { rows: off } = await pool.query(
+        `SELECT 1 FROM key_suspensions WHERE api_key_id = $1 UNION ALL SELECT 1 FROM account_suspensions WHERE user_id = $2`,
+        [key.id, key.owner_user_id],
+      );
+      return { id: key.id, ownerUserId: key.owner_user_id, services: new Set(grants.map((g) => g.service)), suspended: off.length > 0 };
     } catch {
       return null;
     }

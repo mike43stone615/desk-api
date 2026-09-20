@@ -11,6 +11,7 @@ import { HttpError, validationError } from '../middleware/http-error';
 import { sendWithEtag } from '../middleware/etag';
 import { requireAuth, requireConfirmedEmail } from '../middleware/auth';
 import { gatewayApiKeys, GatewayKeyError } from '../domain/gateway/keys';
+import { resumeKey, suspendKey } from '../domain/suspension';
 import { BrokerError } from '../domain/gateway/broker';
 import { getServiceCatalog } from '../domain/gateway/services';
 import { CreateGatewayKeySchema } from '../validators/gateway';
@@ -63,6 +64,25 @@ export async function createGatewayKeyHandler(request: FastifyRequest, reply: Fa
     }
     throw err;
   }
+}
+
+/** The owner switches one of their own keys off without revoking it (a leaked key under investigation, or a pause). */
+export async function suspendGatewayKeyHandler(request: FastifyRequest, reply: FastifyReply) {
+  await requireAuth(request, reply);
+  const { id } = request.params as { id: string };
+  const user = request.currentUser!;
+  if (!(await suspendKey(id, user.id, 'suspended by its owner', user.email))) throw new HttpError(404, 'That key does not exist, is not yours, or was revoked.', 'api_key_not_found');
+  auditKey(request, 'gateway_key_suspended', { userId: user.id, keyId: id });
+  return reply.send({ ok: true, suspended: true });
+}
+
+export async function resumeGatewayKeyHandler(request: FastifyRequest, reply: FastifyReply) {
+  await requireAuth(request, reply);
+  const { id } = request.params as { id: string };
+  const user = request.currentUser!;
+  if (!(await resumeKey(id, user.id))) throw new HttpError(404, 'That key is not suspended, or is not yours.', 'api_key_not_found');
+  auditKey(request, 'gateway_key_resumed', { userId: user.id, keyId: id });
+  return reply.send({ ok: true, suspended: false });
 }
 
 export async function revokeGatewayKeyHandler(request: FastifyRequest, reply: FastifyReply) {

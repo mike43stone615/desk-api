@@ -59,6 +59,10 @@ export const ERROR_CODES: Record<string, string> = {
   api_key_not_found: 'That key does not exist or is not yours.',
   api_key_already_revoked: 'That key was already revoked.',
   admin_required: 'Administrator access is required.',
+  admin_recent_signin_required: 'Administrator routes need a sign-in from the last 24 hours; sign in again.',
+  admin_key_ip_not_allowed: 'The administrator key is not accepted from this address.',
+  account_suspended: 'This account has been suspended.',
+  api_key_suspended: 'This API key is suspended (switched off without being revoked).',
   admin_not_available_for_keys: 'Administrator routes cannot be used with an API key.',
   // businesses and setup
   business_not_found: 'That business does not exist or you are not a member.',
