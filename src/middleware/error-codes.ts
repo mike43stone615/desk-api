@@ -30,6 +30,7 @@ export const ERROR_CODES: Record<string, string> = {
   session_invalid: 'The session is unknown or has expired.',
   session_not_found: 'That session does not exist or is not yours.',
   invalid_credentials: 'Wrong email or password.',
+  current_password_incorrect: 'The current password given is not correct.',
   signin_locked: 'Too many failed sign-ins; try again after the Retry-After time.',
   email_not_confirmed: 'The email address has not been confirmed yet.',
   email_in_use: 'An account with that email already exists.',

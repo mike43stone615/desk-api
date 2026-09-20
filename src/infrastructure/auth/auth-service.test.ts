@@ -20,6 +20,9 @@ class InMemoryDatabaseRepository implements DatabaseRepository {
   resetTokens = new Map<string, PasswordResetToken>();
   confirmationTokens = new Map<string, EmailConfirmationToken>();
 
+  async deleteUser(userId: string) {
+    this.users.delete(userId);
+  }
   async findUserById(id: string) {
     return this.users.get(id) ?? null;
   }

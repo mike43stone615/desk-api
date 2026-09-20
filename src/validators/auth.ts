@@ -38,6 +38,12 @@ export const PasswordResetConfirmSchema = z.object({
 export type PasswordResetConfirmRequest = z.infer<typeof PasswordResetConfirmSchema>;
 
 export const UpdatePasswordSchema = z.object({
+  // Proof that the person at the keyboard knows the password, not only that a session is open (a stolen session must
+  // not be enough to lock the owner out).
+  currentPassword: z.string().min(1, 'currentPassword is required').max(128, 'currentPassword must be at most 128 characters'),
+  password: z.string().min(1, 'password is required').max(128, 'password must be at most 128 characters'),
+});
+export const DeleteAccountSchema = z.object({
   password: z.string().min(1, 'password is required').max(128, 'password must be at most 128 characters'),
 });
 export type UpdatePasswordRequest = z.infer<typeof UpdatePasswordSchema>;

@@ -33,6 +33,7 @@ import {
   ConfirmEmailSchema,
   PasswordResetConfirmSchema,
   UpdatePasswordSchema,
+  DeleteAccountSchema,
 } from '../validators/auth';
 
 /** AuthError -> RFC 7807 status/message mapping, ported from the original's api/middleware/errors.ts. */
@@ -341,12 +342,49 @@ export async function confirmPasswordResetHandler(request: FastifyRequest, reply
   }
 }
 
+/**
+ * The person must prove they know the account's current password before something that cannot be undone by a
+ * stolen session alone. Wrong guesses count towards the same lock-out as sign-in (a 403, never a 401: a 401 makes the
+ * apps think the session itself expired and sign the person out).
+ */
+async function requireCurrentPassword(request: FastifyRequest, reply: FastifyReply, user: { id: string; email: string }, given: string, what: string): Promise<void> {
+  const ip = getClientIp(request);
+  const lockedFor = await signinLockedSeconds(ip, user.email);
+  if (lockedFor > 0) {
+    audit(request, `${what}_locked`, 'error', { userId: user.id });
+    reply.header('Retry-After', String(lockedFor));
+    throw new HttpError(429, `Too many wrong passwords. Try again in ${Math.ceil(lockedFor / 60)} minute(s).`, 'signin_locked');
+  }
+  if (!(await authService.checkPassword(user.id, given))) {
+    audit(request, `${what}_wrong_password`, 'error', { userId: user.id });
+    await recordSigninFailure(ip, user.email);
+    throw new HttpError(403, 'The current password is not correct.', 'current_password_incorrect');
+  }
+  await clearSigninFailures(ip, user.email);
+}
+
+/** Permanently deletes the caller's own account. Needs the password; a session (or a stolen laptop) is not enough. */
+export async function deleteAccountHandler(request: FastifyRequest, reply: FastifyReply) {
+  await requireAuth(request, reply);
+  const parsed = DeleteAccountSchema.safeParse(request.body ?? {});
+  if (!parsed.success) throw new HttpError(400, parsed.error.issues.map((i) => i.message).join('; '), 'validation_error');
+  const user = request.currentUser!;
+  await requireCurrentPassword(request, reply, user, parsed.data.password, 'account_delete');
+  // The notice is sent first, while the address is still known; the account is gone once this returns.
+  notifySecurityEvent(request, user.email, 'account_deleted');
+  audit(request, 'account_deleted', 'ok', { userId: user.id });
+  await authService.deleteAccount(user.id);
+  clearSessionCookie(reply);
+  return reply.send({ ok: true });
+}
+
 export async function updatePasswordHandler(request: FastifyRequest, reply: FastifyReply) {
   await requireAuth(request, reply);
   const parsed = UpdatePasswordSchema.safeParse(request.body ?? {});
   if (!parsed.success) throw new HttpError(400, parsed.error.issues.map((i) => i.message).join('; '), 'validation_error');
 
   const user = request.currentUser!;
+  await requireCurrentPassword(request, reply, user, parsed.data.currentPassword, 'password_change');
   try {
     await authService.updatePassword(user.id, parsed.data.password, extractSessionToken(request) ?? undefined);
     audit(request, 'password_updated', 'ok', { userId: user.id });

@@ -226,6 +226,16 @@ export class DeskAuthService implements AuthService {
     else await this.db.deleteAllSessionsForUser(userId);
   }
 
+  async checkPassword(userId: string, password: string): Promise<boolean> {
+    const user = await this.db.findUserById(userId);
+    if (!user || user.passwordHash === 'NEEDS_RESET') return false;
+    return verifyPassword(password, user.passwordHash);
+  }
+
+  async deleteAccount(userId: string): Promise<void> {
+    await this.db.deleteUser(userId);
+  }
+
   private async createSessionToken(userId: string, meta?: SessionMeta): Promise<string> {
     const token = generateToken(32);
     await this.db.createSession(generateId(), userId, token, addHours(this.sessionDurationHours), meta);

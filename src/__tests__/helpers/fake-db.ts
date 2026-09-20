@@ -53,9 +53,10 @@ export function createFakeDb() {
       const row = findUserByEmail(p[0]);
       return { rows: row ? [row] : [], rowCount: row ? 1 : 0 };
     }
-    if (s.startsWith('DELETE FROM "users" WHERE "id" = $1')) {
+    if (s.startsWith('DELETE FROM "users" WHERE "id" = $1') || s === 'DELETE FROM users WHERE id = $1') {
       // Mirrors the database: the user's keys and grants cascade away, and the trigger queues each backend key id.
       const gone = users.delete(p[0]);
+      for (const [tok, sess] of [...sessions]) if (sess.user_id === p[0]) sessions.delete(tok);
       for (const [keyId, key] of [...gatewayKeys]) {
         if (key.owner_user_id !== p[0]) continue;
         gatewayKeys.delete(keyId);

@@ -343,7 +343,22 @@ const BASE_SPEC = {
       post: { tags: ['Auth'], summary: 'Confirm a password reset using a token', responses: { '200': { description: 'OK' }, '400': { description: 'Invalid or expired token' } } },
     },
     '/auth/password': {
-      post: { tags: ['Auth'], summary: 'Update password while authenticated', security: [{ SessionToken: [] }], responses: { '200': { description: 'OK' } } },
+      post: {
+        tags: ['Auth'],
+        summary: 'Change the password (needs the current password; ends the other sessions)',
+        security: [{ SessionToken: [] }],
+        requestBody: { required: true, content: { 'application/json': { schema: { type: 'object', required: ['currentPassword', 'password'], properties: { currentPassword: { type: 'string' }, password: { type: 'string' } } } } } },
+        responses: { '200': { description: 'OK' }, '403': { description: 'The current password is not correct (code current_password_incorrect)' } },
+      },
+    },
+    '/auth/account/delete': {
+      post: {
+        tags: ['Auth'],
+        summary: 'Delete your own account, keys and solely-owned businesses (needs the password)',
+        security: [{ SessionToken: [] }],
+        requestBody: { required: true, content: { 'application/json': { schema: { type: 'object', required: ['password'], properties: { password: { type: 'string' } } } } } },
+        responses: { '200': { description: 'Deleted' }, '403': { description: 'The password is not correct (code current_password_incorrect)' } },
+      },
     },
     '/setup/drafts': {
       get: { tags: ['Setup'], summary: 'List the caller\'s setup drafts', security: [{ SessionToken: [] }, { ApiLibraryKey: [] }], responses: { '200': { description: 'OK' } } },

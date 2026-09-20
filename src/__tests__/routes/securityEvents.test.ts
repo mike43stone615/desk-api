@@ -74,7 +74,7 @@ describe('stored security events', () => {
   it('password changes, session endings and API keys are recorded', async () => {
     const u = seedUser();
     const t = tokenOf(await signIn(u.email, '203.0.113.5', 'me/1'));
-    await app.inject({ method: 'POST', url: '/auth/password', headers: bearer(t), payload: { password: 'An0ther!Pass1' } });
+    await app.inject({ method: 'POST', url: '/auth/password', headers: bearer(t), payload: { currentPassword: PASSWORD, password: 'An0ther!Pass1' } });
     await app.inject({ method: 'POST', url: '/auth/signout-all', headers: bearer(t), payload: { keepCurrent: true } });
     config.gatewayKeyEncryptionSecret = 'ab'.repeat(32);
     await app.inject({ method: 'POST', url: '/gateway/api-keys', headers: bearer(t), payload: { label: 'ci', services: ['desk_api'] } });
@@ -118,7 +118,7 @@ describe('security emails', () => {
   it('a password change emails the owner', async () => {
     const u = seedUser();
     const t = tokenOf(await signIn(u.email, '203.0.113.5', 'me/1'));
-    await app.inject({ method: 'POST', url: '/auth/password', headers: bearer(t), payload: { password: 'An0ther!Pass1' } });
+    await app.inject({ method: 'POST', url: '/auth/password', headers: bearer(t), payload: { currentPassword: PASSWORD, password: 'An0ther!Pass1' } });
     await flush();
     expect(emailed.security.get(u.email)).toContain('Your password was changed');
   });

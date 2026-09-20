@@ -30,6 +30,12 @@ Two kinds of credential exist. Which one a route accepts is shown in the OpenAPI
 - Password-reset and confirmation emails, sign-up, token checks, key creation, invitations and other sensitive routes have
   their own hourly limits (429 `rate_limited`, with `Retry-After`).
 - The reset and confirmation links are single-use, expire (60 minutes / 24 hours), and only a hash is stored.
+- **Changing the password** (`POST /auth/password`) needs `currentPassword` as well as the new `password`. A wrong one is
+  a 403 `current_password_incorrect` (not 401, which would sign the person out) and counts towards the sign-in
+  lock-out. The change ends every other session.
+- **Deleting the account** (`POST /auth/account/delete`, body `{ "password": "…" }`) needs the password too. It removes the
+  account, its sessions and API keys (their backend keys are revoked by the sweeper), and any business only that person
+  owned; businesses with another owner survive. The owner is emailed first. There is no undo. No screen exists yet.
 - The account is emailed when a password is changed or reset, when a new API key is created, and on a sign-in from a
   browser/network not seen for 90 days.
 

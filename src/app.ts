@@ -50,6 +50,7 @@ import {
   requestPasswordResetHandler,
   confirmPasswordResetHandler,
   updatePasswordHandler,
+  deleteAccountHandler,
 } from './routes/auth';
 import {
   listDraftsHandler,
@@ -353,6 +354,7 @@ async function registerLegacyAndVersionedRoutes(instance: FastifyInstance) {
   instance.post('/auth/password-reset/request', small, requestPasswordResetHandler);
   instance.post('/auth/password-reset/confirm', small, confirmPasswordResetHandler);
   instance.post('/auth/password', small, updatePasswordHandler);
+  instance.post('/auth/account/delete', small, deleteAccountHandler);
 
   // ── Business setup ───────────────────────────────────────────────────────
   instance.get('/setup/drafts', listDraftsHandler);

@@ -44,4 +44,8 @@ export interface AuthService {
   signOutEverywhere(userId: string, keepToken?: string): Promise<number>;
   /** Sets a new password and ends the user's other sessions (all of them when no current token is given). */
   updatePassword(userId: string, newPassword: string, keepSessionToken?: string): Promise<void>;
+  /** True when `password` is the account's current password. */
+  checkPassword(userId: string, password: string): Promise<boolean>;
+  /** Permanently removes the account and everything that belongs only to it. */
+  deleteAccount(userId: string): Promise<void>;
 }

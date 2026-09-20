@@ -47,6 +47,8 @@ export interface EmailConfirmationToken {
 export interface DatabaseRepository {
   // Users
   findUserById(id: string): Promise<User | null>;
+  /** Removes the user; sessions, keys and memberships go with them (see migrations 0010 and 0011 for what survives). */
+  deleteUser(userId: string): Promise<void>;
   findUserByEmail(email: string): Promise<User | null>;
   createUser(
     id: string,
