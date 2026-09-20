@@ -182,7 +182,7 @@ describe('creating keys', () => {
     const deskGrant = grants.find((g) => g.service === 'desk_api')!;
     expect(deskGrant.encrypted_backend_key).toBeNull();
     for (const g of grants.filter((x) => x.service !== 'desk_api')) {
-      expect(String(g.encrypted_backend_key).startsWith('v1:')).toBe(true);
+      expect(String(g.encrypted_backend_key).startsWith('v2:')).toBe(true);
       expect(String(g.encrypted_backend_key)).not.toContain('secret');
     }
   });
@@ -753,5 +753,45 @@ describe('deleting a user does not leave their backend keys alive', () => {
     await app.inject({ method: 'DELETE', url: `/gateway/api-keys/${apiKey.id}`, headers: user.headers });
     const { sweepBackendKeys } = await import('../../domain/gateway/orphans');
     expect(await sweepBackendKeys()).toEqual({ revoked: 0, failed: 0 });
+  });
+});
+
+describe('rotating GATEWAY_KEY_ENCRYPTION_SECRET', () => {
+  const OLD = 'ab'.repeat(32);
+  const NEW = '12'.repeat(32);
+  const use = async (key: string) =>
+    app.inject({ method: 'GET', url: '/gateway/registry/business-structures?state=FL', headers: { 'x-api-key': key } });
+
+  it('a key made under the old secret keeps working while both are configured, and keys made after use the new one', async () => {
+    const user = seedUser('rotate@example.com');
+    config.gatewayKeyEncryptionSecret = OLD;
+    const oldKey = JSON.parse((await createKey(user, ['registry_api'])).body).apiKey.key;
+    expect((await use(oldKey)).statusCode).toBe(200);
+
+    config.gatewayKeyEncryptionSecret = NEW;
+    config.gatewayKeyEncryptionSecretsPrevious = [OLD];
+    try {
+      expect((await use(oldKey)).statusCode).toBe(200);
+      const newKey = JSON.parse((await createKey(user, ['registry_api'])).body).apiKey.key;
+      expect((await use(newKey)).statusCode).toBe(200);
+      const stored = fakeDb.gatewayGrants.filter((g) => g.service === 'registry_api').map((g) => String(g.encrypted_backend_key));
+      expect(new Set(stored.map((s) => s.split(':')[1])).size).toBe(2); // two different key ids in use
+    } finally {
+      config.gatewayKeyEncryptionSecretsPrevious = [];
+    }
+  });
+
+  it('once the old secret is dropped without re-encrypting, the old key stops working cleanly (not a crash)', async () => {
+    const user = seedUser('rotate-drop@example.com');
+    config.gatewayKeyEncryptionSecret = OLD;
+    const oldKey = JSON.parse((await createKey(user, ['registry_api'])).body).apiKey.key;
+    config.gatewayKeyEncryptionSecret = NEW;
+    config.gatewayKeyEncryptionSecretsPrevious = [];
+    fetchCalls = [];
+    const res = await use(oldKey);
+    expect(res.statusCode).toBe(503);
+    expect(res.headers['content-type']).toMatch(/problem\+json/);
+    expect(fetchCalls).toHaveLength(0);
+    config.gatewayKeyEncryptionSecret = OLD;
   });
 });

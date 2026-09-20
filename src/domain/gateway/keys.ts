@@ -301,7 +301,8 @@ export const gatewayApiKeys = {
     const blob = rows[0]?.encrypted_backend_key;
     if (!blob) return null;
     try {
-      return decryptSecret(blob, secret);
+      // The current secret first; the previous ones only exist while a rotation is in progress.
+      return decryptSecret(blob, [secret, ...config.gatewayKeyEncryptionSecretsPrevious]);
     } catch {
       return null;
     }

@@ -83,6 +83,14 @@ const schema = z.object({
       .regex(/^[0-9a-fA-F]{64}$/, 'GATEWAY_KEY_ENCRYPTION_SECRET must be 64 hex characters')
       .optional(),
   ),
+  // Only while rotating the secret above: the OLD secret(s), comma-separated, so values still encrypted under them
+  // stay readable until scripts/rotate-gateway-secret.ts has re-encrypted everything. Remove afterwards.
+  GATEWAY_KEY_ENCRYPTION_SECRET_PREVIOUS: z.preprocess(
+    (v) => (typeof v === 'string' && v.trim() === '' ? undefined : typeof v === 'string' ? v.split(',').map((s) => s.trim()).filter(Boolean) : v),
+    z
+      .array(z.string().regex(/^[0-9a-fA-F]{64}$/, 'GATEWAY_KEY_ENCRYPTION_SECRET_PREVIOUS entries must each be 64 hex characters'))
+      .optional(),
+  ),
 
   OPENAI_API_KEY: z.string().optional(),
   OPENAI_MODEL: z.string().default('gpt-4.1-mini'),
@@ -154,6 +162,7 @@ export interface AppConfig {
   marketApiKey: string | undefined;
   marketApiAdminKey: string | undefined;
   gatewayKeyEncryptionSecret: string | undefined;
+  gatewayKeyEncryptionSecretsPrevious: string[];
   openaiApiKey: string | undefined;
   openaiModel: string;
   googlePlacesApiKey: string | undefined;
@@ -194,6 +203,7 @@ export const config: AppConfig = {
   marketApiKey: env.MARKET_API_KEY,
   marketApiAdminKey: env.MARKET_API_ADMIN_KEY,
   gatewayKeyEncryptionSecret: env.GATEWAY_KEY_ENCRYPTION_SECRET,
+  gatewayKeyEncryptionSecretsPrevious: env.GATEWAY_KEY_ENCRYPTION_SECRET_PREVIOUS ?? [],
   openaiApiKey: env.OPENAI_API_KEY,
   openaiModel: env.OPENAI_MODEL,
   googlePlacesApiKey: env.GOOGLE_PLACES_API_KEY,
