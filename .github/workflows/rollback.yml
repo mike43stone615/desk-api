@@ -6,6 +6,10 @@ name: Rollback
 on:
   workflow_dispatch:
 
+# The workflow token can only read the repository (least privilege; nothing here writes back to GitHub).
+permissions:
+  contents: read
+
 jobs:
   rollback:
     runs-on: [self-hosted, windows, deploy]

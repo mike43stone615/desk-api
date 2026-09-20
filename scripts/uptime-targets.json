@@ -63,6 +63,50 @@
       "expectStatus": 200
     },
     {
+      "name": "canary-desk-api",
+      "what": "a real API Library key works end to end through Cloudflare (Desk API grant)",
+      "url": "https://api.deskbusiness.co/v1/auth/session",
+      "headers": {
+        "x-api-key": "file:C:/Users/User/.desk/canary-key.txt"
+      },
+      "timeoutSec": 20,
+      "expectStatus": 200,
+      "expectKeys": [
+        "user"
+      ],
+      "everyMinutes": 5
+    },
+    {
+      "name": "canary-registry",
+      "what": "the same key reaches the Registry API through the gateway",
+      "url": "https://api.deskbusiness.co/v1/gateway/registry/name-availability",
+      "method": "POST",
+      "body": {
+        "businessName": "Canary Probe Widgets LLC",
+        "stateOfFormation": "FL"
+      },
+      "headers": {
+        "x-api-key": "file:C:/Users/User/.desk/canary-key.txt"
+      },
+      "timeoutSec": 30,
+      "expectStatus": 200,
+      "expectKeys": [
+        "status"
+      ],
+      "everyMinutes": 5
+    },
+    {
+      "name": "canary-market",
+      "what": "the same key reaches the Market Validation API through the gateway",
+      "url": "https://api.deskbusiness.co/v1/gateway/market/scoring-methodology",
+      "headers": {
+        "x-api-key": "file:C:/Users/User/.desk/canary-key.txt"
+      },
+      "timeoutSec": 30,
+      "expectStatus": 200,
+      "everyMinutes": 5
+    },
+    {
       "name": "name-check-co",
       "what": "a real business-name lookup for Colorado (checks the state's data source is answering and understood)",
       "url": "http://localhost:3456/functions/v1/check-business-name-availability",

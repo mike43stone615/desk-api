@@ -3,10 +3,15 @@
   "version": "2.0.0",
   "private": true,
   "description": "Desk business-management API — Fastify/TypeScript/Postgres. Rewritten in place from the original Hono/Cloudflare Workers/D1 implementation (see git history).",
+  "engines": {
+    "node": ">=24 <25"
+  },
   "scripts": {
     "dev": "tsx watch src/server.ts",
     "start": "tsx src/server.ts",
     "check:chaos": "tsx scripts/chaos-check.ts",
+    "sbom": "node scripts/make-sbom.mjs",
+    "scan:secrets": "node scripts/scan-secrets.mjs",
     "build": "tsc",
     "build:prod": "tsc -p tsconfig.build.json",
     "start:prod": "node dist/supervisor.js",

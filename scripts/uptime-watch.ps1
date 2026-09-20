@@ -93,6 +93,8 @@ function Resolve-Headers($headers) {
   foreach ($p in $headers.PSObject.Properties) {
     $v = [string]$p.Value
     if ($v.StartsWith('env:')) { $v = Get-DeployedSetting $v.Substring(4); if (-not $v) { return $null } }
+    # "file:<path>": the value is the first line of a file on this machine (used for the canary's key, which lives outside git).
+    elseif ($v.StartsWith('file:')) { $f = $v.Substring(5); if (-not (Test-Path $f)) { return $null }; $v = (Get-Content $f -TotalCount 1).Trim(); if (-not $v) { return $null } }
     $out[$p.Name] = $v
   }
   return $out

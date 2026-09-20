@@ -113,6 +113,9 @@ export const envSchema = z.object({
   // Optional — where security researchers should report a problem: an email address or an https:// page. Served as
   // /.well-known/security.txt (RFC 9116); the path answers 404 until this is set. See routes/securityTxt.ts.
   SECURITY_CONTACT: z.string().optional(),
+
+  // Optional — the signing secret of the mail provider's webhook ("whsec_..."). Without it POST /webhooks/resend is off (404).
+  RESEND_WEBHOOK_SECRET: z.string().optional(),
 });
 
 const parsed = envSchema.safeParse(process.env);
@@ -180,6 +183,7 @@ export interface AppConfig {
   appBaseUrl: string;
   metricsDocsApiKey: string | undefined;
   securityContact: string | undefined;
+  resendWebhookSecret: string | undefined;
 }
 
 /** A development copy of the service must never run jobs that act on the SHARED backends on behalf of its own (empty) database. */
@@ -233,4 +237,5 @@ export const config: AppConfig = {
   appBaseUrl: env.APP_BASE_URL,
   metricsDocsApiKey: env.METRICS_DOCS_API_KEY,
   securityContact: env.SECURITY_CONTACT,
+  resendWebhookSecret: env.RESEND_WEBHOOK_SECRET,
 };

@@ -7,6 +7,7 @@
 // Cloudflare Pages) DOES have a real frontend that serves /reset-password
 // and /confirm-email, so the link-based design stays.
 import { outcomeForStatus, recordProviderCall } from '../../modules/provider-metrics';
+import { isSuppressed } from '../../domain/email/suppressions';
 import type { AppConfig } from '../../config';
 
 export async function sendPasswordResetEmail(
@@ -188,6 +189,12 @@ async function sendEmail(config: AppConfig, request: EmailRequest): Promise<void
     return;
   }
 
+  // An address that bounced for good, or whose owner marked us as spam, is not written to again.
+  if (await isSuppressed(request.to)) {
+    console.warn(JSON.stringify({ level: 'warn', event: 'email_suppressed_skipped', requestId: request.requestId, reason: 'address bounced or complained before' }));
+    return;
+  }
+
   const resp = await fetch('https://api.resend.com/emails', {
     method: 'POST',
     headers: {
@@ -199,6 +206,8 @@ async function sendEmail(config: AppConfig, request: EmailRequest): Promise<void
       to: [request.to],
       subject: request.subject,
       html: request.html,
+      // A plain-text copy for mail programs that do not show HTML, and a better score with spam filters.
+      text: htmlToText(request.html),
     }),
   });
 
@@ -227,6 +236,18 @@ async function sendEmail(config: AppConfig, request: EmailRequest): Promise<void
       requestId: request.requestId,
     }),
   );
+}
+
+/** A readable plain-text version of an email's HTML: links become "label: address", block ends become line breaks. */
+export function htmlToText(html: string): string {
+  return html
+    .replace(/<(style|head|script)[\s\S]*?<\/\1>/gi, '')
+    .replace(/<a\b[^>]*href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/gi, (_m, href: string, label: string) => `${label.replace(/<[^>]+>/g, '').trim()}: ${href}`)
+    .replace(/<\/?(?:br|p|div|h[1-6]|tr|li|table)\b[^>]*>/gi, '\n')
+    .replace(/<[^>]+>/g, '')
+    .replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&nbsp;/g, ' ')
+    .replace(/[ \t]+\n/g, '\n').replace(/\n{3,}/g, '\n\n')
+    .trim();
 }
 
 function themedEmailHtml(content: ThemedEmailContent): string {

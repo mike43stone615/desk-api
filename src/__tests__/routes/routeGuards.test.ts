@@ -34,6 +34,7 @@ const PUBLIC: Record<string, string> = {
   'POST /auth/email-confirmation/confirm': 'pre-sign-in flow; authorised by the emailed token',
   'POST /auth/password-reset/request': 'pre-sign-in flow; answers identically for every address',
   'POST /auth/password-reset/confirm': 'pre-sign-in flow; authorised by the emailed token',
+  'POST /webhooks/resend': 'the mail provider calls this; authorised by its signature only (404 until configured, 401 for a bad signature)',
   'GET /errors': 'catalogue of error codes (documentation only)',
   'GET /errors/:code': 'one error code explained (documentation only)',
   'GET /.well-known/security.txt': 'RFC 9116 contact file for security researchers (404 until a contact is chosen)',
@@ -89,7 +90,8 @@ describe('route guards', () => {
 
   it('every public route that changes data is one of the pre-sign-in account routes', () => {
     const mutating = Object.keys(PUBLIC).filter((k) => !k.startsWith('GET '));
-    expect(mutating.every((k) => k.startsWith('POST /auth/'))).toBe(true);
+    // ...plus the one signature-authorised webhook (404 until configured, 401 unless correctly signed).
+    expect(mutating.every((k) => k.startsWith('POST /auth/') || k === 'POST /webhooks/resend')).toBe(true);
   });
 
   it('the routes an API Library key may call all exist and are read-only', () => {

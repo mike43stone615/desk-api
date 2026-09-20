@@ -107,6 +107,7 @@ import { gatewayMarketProxyHandler, gatewayRegistryProxyHandler } from './routes
 import { registerLibraryUi } from './routes/libraryUi';
 import { adminReconcileReportHandler, adminReconcileRunHandler, adminListKeysHandler, adminResumeKeyHandler, adminSuspendKeyHandler, adminSuspendUserHandler, adminUnsuspendUserHandler } from './routes/adminAccounts';
 import { registerSecurityTxt } from './routes/securityTxt';
+import { registerWebhooks } from './routes/webhooks';
 import { ERROR_CODES } from './middleware/error-codes';
 import { registerPathParamCheck } from './middleware/path-params';
 import { recordKeyUsage } from './domain/gateway/usage';
@@ -255,6 +256,7 @@ export async function buildApp(options: { logStream?: { write: (line: string) =>
   // this same origin. See routes/libraryUi.ts.
   registerLibraryUi(app);
   registerSecurityTxt(app);
+  registerWebhooks(app);
 
   // OpenAPI spec + Swagger UI — optionally gated behind METRICS_DOCS_API_KEY
   // (see middleware/auth.ts's requireMetricsDocsKey, a no-op unless that env var

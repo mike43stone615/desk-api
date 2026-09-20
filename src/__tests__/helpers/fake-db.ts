@@ -33,6 +33,7 @@ export function createFakeDb() {
   const appliedMigrations: string[] = readdirSync(join(__dirname, '..', '..', '..', 'migrations')).filter((f) => f.endsWith('.sql')).sort();
   const securityEvents: FakeRow[] = []; // migration 0014
   const keyUsage: FakeRow[] = []; // migration 0017
+  const suppressions = new Map<string, FakeRow>(); // migration 0018
   const accountSuspensions = new Map<string, FakeRow>(); // migration 0016, keyed by user id
   const keySuspensions = new Map<string, FakeRow>(); // migration 0016, keyed by key id
   const emailInvites = new Map<string, FakeRow>(); // keyed by id (migration 0013)
@@ -97,6 +98,8 @@ export function createFakeDb() {
       const rows = keyUsage.filter((u) => u.api_key_id === p[0] && String(u.day) >= p[1]).sort((a, b) => String(b.day).localeCompare(String(a.day)));
       return { rows, rowCount: rows.length };
     }
+    if (s === 'SELECT 1 FROM email_suppressions WHERE email = $1') return suppressions.has(p[0]) ? { rows: [{}], rowCount: 1 } : { rows: [], rowCount: 0 };
+    if (s.startsWith('INSERT INTO email_suppressions')) { if (!suppressions.has(p[0])) suppressions.set(p[0], { email: p[0], reason: p[1] }); return { rows: [], rowCount: 1 }; }
     if (s.startsWith('SELECT 1')) return { rows: [{ '?column?': 1 }], rowCount: 1 };
 
     // ── users ──────────────────────────────────────────────────────────────
@@ -816,6 +819,7 @@ export function createFakeDb() {
     accountSuspensions,
     keySuspensions,
     keyUsage,
+    suppressions,
     appliedMigrations,
   };
 }

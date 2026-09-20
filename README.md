@@ -47,6 +47,19 @@ After startup:
 
 ---
 
+## Running in production, and the documents
+
+In production the service runs from a live copy under a small supervisor (`src/supervisor.ts`) that swaps in a new
+version with no gap; a deploy is `Actions -> Deploy`. Documents (all in `docs/`):
+
+| For | Read |
+| --- | --- |
+| A developer using the API | [GETTING-STARTED](docs/GETTING-STARTED.md), [API-LIMITS](docs/API-LIMITS.md), [GLOSSARY](docs/GLOSSARY.md), [API-VERSIONING](docs/API-VERSIONING.md), [../CHANGELOG.md](CHANGELOG.md) |
+| People signing in | [AUTHENTICATION](docs/AUTHENTICATION.md), [PERSONAL-DATA](docs/PERSONAL-DATA.md), [DATA-RETENTION](docs/DATA-RETENTION.md) |
+| The operator | [HOSTING-AND-RECOVERY](docs/HOSTING-AND-RECOVERY.md), [ROLLBACK](docs/ROLLBACK.md), [TIMEOUTS](docs/TIMEOUTS.md), [DATABASE](docs/DATABASE.md), [BACKUP-RESTORE](docs/BACKUP-RESTORE.md), [SECRET-ROTATION](docs/SECRET-ROTATION.md), [ROTATING-GATEWAY-SECRETS](docs/ROTATING-GATEWAY-SECRETS.md), [COMPROMISED-KEY-PLAYBOOK](docs/COMPROMISED-KEY-PLAYBOOK.md) |
+| Decisions | [ADR-002 (API Library)](docs/ADR-002-api-library.md); ADR-001 and the D1/Workers notes are history |
+| Drafts awaiting the owner | [legal/](docs/legal/README.md) |
+
 ## Market research
 
 `POST /integrations/market-research/analyze` proxies to market-validation-api's
@@ -100,7 +113,7 @@ matching `x-api-key` header there; neither is needed by the Flutter client.
 ## Architecture
 
 ```
-Flutter client (unprefixed paths — see api_client.dart)
+Clients: the Desk web app and Flutter app (versioned paths, /v1/...), developers' servers (an API Library key)
    |
    v
 Fastify app (src/app.ts)

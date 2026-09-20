@@ -181,6 +181,9 @@ const BASE_SPEC = {
         responses: { '200': { description: 'Prometheus text format', content: { 'text/plain': { schema: { type: 'string' } } } } },
       },
     },
+    '/webhooks/resend': {
+      post: { tags: ['System'], summary: 'The mail provider reports bounces and spam complaints (signature-authorised; off until configured)', responses: { '200': { description: 'Accepted' }, '401': { description: 'Missing or invalid signature' }, '404': { description: 'Not configured' } } },
+    },
     '/errors': {
       get: { tags: ['System'], summary: 'Every error code and what it means (the `type` of each error answer links here)', responses: { '200': { description: 'The catalogue' } } },
     },

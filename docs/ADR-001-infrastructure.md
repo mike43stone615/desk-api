@@ -1,3 +1,7 @@
+> **HISTORY.** This record describes the original Cloudflare Workers / D1 / Hono design. It was superseded when the
+> service was rewritten onto Fastify and PostgreSQL (see README.md and docs/DATABASE.md for what runs today). It is kept
+> to explain why the code is shaped the way it is; do not follow it as instructions.
+
 # ADR-001: Infrastructure Architecture Decisions
 
 **Status**: Accepted
