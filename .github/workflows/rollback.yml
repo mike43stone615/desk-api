@@ -1,0 +1,19 @@
+name: Rollback
+
+# Puts the previous desk-api version back (the one running before the last deploy). Run it from Actions -> Rollback ->
+# Run workflow when a release is bad in a way the deploy's own health check could not see. Runs on the same machine and
+# account as the deploy, because that account owns the running service. See docs/ROLLBACK.md.
+on:
+  workflow_dispatch:
+
+jobs:
+  rollback:
+    runs-on: [self-hosted, windows, deploy]
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Restore the previous version
+        shell: powershell
+        run: |
+          $live = Join-Path (Split-Path (Split-Path $env:GITHUB_WORKSPACE -Parent) -Parent) 'live'
+          & "$env:GITHUB_WORKSPACE\scripts\rollback.ps1" -LivePath $live -Port 3458

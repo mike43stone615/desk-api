@@ -6,6 +6,8 @@
 // end to end without a real Postgres connection. Modeled on
 // market-validation-api's src/__tests__/helpers/fake-auth-db.ts.
 import { vi } from 'vitest';
+import { readdirSync } from 'node:fs';
+import { join } from 'node:path';
 import { hashToken } from '../../infrastructure/auth/token-hash';
 
 export interface FakeRow {
@@ -28,6 +30,7 @@ export function createFakeDb() {
   const idempotencyKeys = new Map<string, FakeRow>(); // keyed by key
   const gatewayKeys = new Map<string, FakeRow>(); // keyed by id
   const gatewayGrants: FakeRow[] = [];
+  const appliedMigrations: string[] = readdirSync(join(__dirname, '..', '..', '..', 'migrations')).filter((f) => f.endsWith('.sql')).sort();
   const securityEvents: FakeRow[] = []; // migration 0014
   const emailInvites = new Map<string, FakeRow>(); // keyed by id (migration 0013)
   const backendRevocations = new Map<string, FakeRow>(); // the queue filled by the grant-delete trigger (migration 0010)
@@ -337,6 +340,9 @@ export function createFakeDb() {
     }
 
     // ── business_memberships ─────────────────────────────────────────────
+    if (s.startsWith('SELECT filename FROM schema_migrations')) {
+      return { rows: appliedMigrations.map((filename) => ({ filename })), rowCount: appliedMigrations.length };
+    }
     // ── stored security events (src/modules/audit/security-events.ts) ──
     if (s.startsWith('INSERT INTO security_events')) {
       const [id, user_id, subject, event, outcome, ip_address, user_agent, detail] = p;
@@ -733,5 +739,6 @@ export function createFakeDb() {
     backendRevocations,
     emailInvites,
     securityEvents,
+    appliedMigrations,
   };
 }

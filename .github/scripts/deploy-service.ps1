@@ -18,7 +18,10 @@ param(
   # old version serving while the new one is checked out, installed and built, so the only gap is the few seconds
   # between stopping the old process and the new one answering.
   [string]$LivePath = '',
-  [string]$BuildCommand = 'build'                         # npm script that compiles (used with -Build)
+  [string]$BuildCommand = 'build',                        # npm script that compiles (used with -Build)
+  # Refuse to deploy while the code being deployed has database migrations that have not been applied yet (deploys
+  # never run migrations; see scripts/check-migrations.ts). The old version keeps serving.
+  [switch]$CheckMigrations
 )
 
 $ErrorActionPreference = 'Stop'
@@ -32,6 +35,12 @@ if ($LASTEXITCODE -ne 0) { throw "npm ci failed" }
 if ($Build) {
   npm run $BuildCommand
   if ($LASTEXITCODE -ne 0) { throw "npm run $BuildCommand failed" }
+}
+
+if ($CheckMigrations) {
+  Write-Output "Checking that every database migration in this version has been applied ..."
+  npx tsx scripts/check-migrations.ts
+  if ($LASTEXITCODE -ne 0) { throw "Deploy refused: there are unapplied migrations (listed above). Apply them first: npm run migrate -- --production --env-file <the deployed .env>  (--dry-run first). The running version was not touched." }
 }
 
 function Stop-CurrentService {
@@ -64,6 +73,12 @@ if ($LivePath) {
     Stop-CurrentService
     Copy-Tree (Join-Path $RepoPath 'node_modules') (Join-Path $LivePath 'node_modules')
   }
+  # Keep the version that is running now, so a bad release can be undone in seconds (see rollback below and
+  # scripts/rollback.ps1).
+  foreach ($dir in @('dist', 'library-ui')) {
+    $current = Join-Path $LivePath $dir
+    if (Test-Path $current) { Copy-Tree $current (Join-Path $LivePath "$dir.prev") }
+  }
   foreach ($dir in @('dist', 'library-ui', 'migrations')) {
     if (Test-Path (Join-Path $RepoPath $dir)) { Copy-Tree (Join-Path $RepoPath $dir) (Join-Path $LivePath $dir) }
   }
@@ -95,32 +110,50 @@ Stop-CurrentService
 # the first step of the next checkout) wipes it, so nothing accumulates.
 $outLog = Join-Path $RepoPath "deploy.out.log"
 $errLog = Join-Path $RepoPath "deploy.err.log"
-$cmdLine = "cmd.exe /c `"npm run $StartCommand > `"$outLog`" 2> `"$errLog`"`""
-$created = Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{
-  CommandLine      = $cmdLine
-  CurrentDirectory = $RepoPath
+
+function Start-Service {
+  $cmdLine = "cmd.exe /c `"npm run $StartCommand > `"$outLog`" 2> `"$errLog`"`""
+  $created = Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{
+    CommandLine      = $cmdLine
+    CurrentDirectory = $RepoPath
+  }
+  if ($created.ReturnValue -ne 0) { throw "Failed to launch service via WMI (Win32_Process.Create returned $($created.ReturnValue))" }
+  Write-Output "Launched via WMI, new PID $($created.ProcessId)"
 }
-if ($created.ReturnValue -ne 0) { throw "Failed to launch service via WMI (Win32_Process.Create returned $($created.ReturnValue))" }
-Write-Output "Launched via WMI, new PID $($created.ProcessId)"
 
-# 30s, then 90s, both proved too tight: confirmed live multiple times that
-# a service started right after a fresh `npm ci` under this account can
-# take well over 90s to bind (likely Windows Defender scanning the
-# just-written node_modules under this service account specifically --
-# the same code starts in ~12-25s interactively from a warm directory).
-# Each time, the process was actually healthy and serving fine when
-# checked minutes later; the deploy just gave up on it too early. 180s
-# gives real headroom over the worst case observed so far.
-$deadline = (Get-Date).AddSeconds(180)
-do {
-  Start-Sleep -Seconds 2
-  try {
-    $health = Invoke-WebRequest -Uri "http://127.0.0.1:$Port/health" -UseBasicParsing -TimeoutSec 3
-    if ($health.StatusCode -eq 200) {
-      Write-Output "Healthy: $($health.Content)"
-      exit 0
-    }
-  } catch {}
-} while ((Get-Date) -lt $deadline)
+function Wait-Healthy([int]$seconds) {
+  $deadline = (Get-Date).AddSeconds($seconds)
+  do {
+    Start-Sleep -Seconds 2
+    try {
+      $health = Invoke-WebRequest -Uri "http://127.0.0.1:$Port/health" -UseBasicParsing -TimeoutSec 3
+      if ($health.StatusCode -eq 200) {
+        Write-Output "Healthy: $($health.Content)"
+        return $true
+      }
+    } catch {}
+  } while ((Get-Date) -lt $deadline)
+  return $false
+}
 
-throw "Service did not report healthy on port $Port within 180s of restart."
+Start-Service
+
+# 30s, then 90s, both proved too tight for the old layout (started from a fresh `npm ci` under this account, likely
+# Windows Defender scanning the just-written node_modules): confirmed live the process was healthy minutes later, the
+# deploy had just given up too early. The compiled service in its live copy answers within seconds, so with a live
+# copy a version that is not healthy after 60s is treated as broken and rolled back; otherwise the old 180s applies.
+$patience = if ($LivePath) { 60 } else { 180 }
+if (Wait-Healthy $patience) { exit 0 }
+
+if ($LivePath -and (Test-Path (Join-Path $LivePath 'dist.prev'))) {
+  Write-Output "The new version did not become healthy within ${patience}s. Rolling back to the previous version."
+  Stop-CurrentService
+  foreach ($dir in @('dist', 'library-ui')) {
+    if (Test-Path (Join-Path $LivePath "$dir.prev")) { Copy-Tree (Join-Path $LivePath "$dir.prev") (Join-Path $LivePath $dir) }
+  }
+  Start-Service
+  if (Wait-Healthy 60) { throw "Deploy FAILED: the new version did not start. The previous version was restored and is serving." }
+  throw "Deploy FAILED and the automatic rollback did not recover the service either. Check deploy.err.log in $LivePath."
+}
+
+throw "Service did not report healthy on port $Port within ${patience}s of restart."

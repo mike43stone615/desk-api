@@ -28,6 +28,7 @@ import { registerApiProtection } from './middleware/api-protection';
 import { requireAuth } from './middleware/auth';
 import { registerRouteLimits } from './middleware/route-limits';
 import { checkDependencies, isDegraded } from './domain/health/dependencies';
+import { pendingMigrations } from './domain/health/migrations';
 import { loggerOptions } from './middleware/log-redaction';
 import { applyHtmlCsp, docsCsp, docsInlineScript, SWAGGER_UI_CSS_SRI, SWAGGER_UI_JS_SRI, SWAGGER_UI_VERSION } from './middleware/csp';
 import { registerIdempotency } from './middleware/idempotency';
@@ -256,7 +257,17 @@ export async function buildApp(options: { logStream?: { write: (line: string) =>
       const { ok, checks } = await getReadiness();
       // Backends are reported but never make the service "not ready" (see domain/health/dependencies.ts).
       const dependencies = await checkDependencies();
-      return reply.status(ok ? 200 : 503).send({ ok, degraded: isDegraded(dependencies), checks, dependencies, processStartedAt: PROCESS_STARTED_AT });
+      // Migration files this version ships that the database has not had applied (the deploy refuses that, so it is
+      // normally empty). Reported, and makes the service "degraded", never "not ready".
+      const pending = checks.database === 'ok' ? await pendingMigrations().catch(() => []) : [];
+      return reply.status(ok ? 200 : 503).send({
+        ok,
+        degraded: isDegraded(dependencies) || pending.length > 0,
+        checks,
+        dependencies,
+        ...(pending.length > 0 ? { pendingMigrations: pending } : {}),
+        processStartedAt: PROCESS_STARTED_AT,
+      });
     });
     // Back-compat alias for the original Hono version's GET /health (basic liveness,
     // no dependency checks) — kept cheap/dependency-free since nothing in the Flutter

@@ -12,6 +12,7 @@ import { pool } from '../../db';
 import { buildApp } from '../../app';
 import { config } from '../../config';
 import { resetDependencyCache } from '../../domain/health/dependencies';
+import { resetMigrationCache } from '../../domain/health/migrations';
 import type { FastifyInstance } from 'fastify';
 
 const fakeDb = pool as unknown as ReturnType<typeof createFakeDb>;
@@ -44,6 +45,7 @@ beforeEach(() => {
   health = { registry: 'up', market: 'up', compliance: 'up' };
   calls = [];
   resetDependencyCache();
+  resetMigrationCache();
 });
 
 const ready = async () => {
@@ -133,5 +135,26 @@ describe('GET /health/ready', () => {
     const text = await metricsRegistry.metrics();
     expect(text).toMatch(/desk_dependency_up\{dependency="market_validation_api"\} 0/);
     expect(text).toMatch(/desk_dependency_up\{dependency="registry_api"\} 1/);
+  });
+});
+
+describe('pending migrations', () => {
+  it('none pending: nothing extra is reported', async () => {
+    const { body } = await ready();
+    expect(body.pendingMigrations).toBeUndefined();
+    expect(body.degraded).toBe(false);
+  });
+
+  it('a migration this version ships that the database lacks is named, and makes it degraded (still ready)', async () => {
+    const removed = fakeDb.appliedMigrations.pop()!;
+    try {
+      const { status, body } = await ready();
+      expect(status).toBe(200);
+      expect(body.ok).toBe(true);
+      expect(body.degraded).toBe(true);
+      expect(body.pendingMigrations).toEqual([removed]);
+    } finally {
+      fakeDb.appliedMigrations.push(removed);
+    }
   });
 });
