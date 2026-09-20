@@ -7,7 +7,7 @@
 import { createHash } from 'crypto';
 
 /** 'report-only' logs violations in the browser console without blocking, for checking a policy before enforcing it. */
-export const CSP_MODE = 'report-only' as 'enforce' | 'report-only';
+export const CSP_MODE = 'enforce' as 'enforce' | 'report-only';
 export const CSP_HEADER = CSP_MODE === 'enforce' ? 'content-security-policy' : 'content-security-policy-report-only';
 
 /** Applied to an HTML response: replaces the strict API policy every response starts with. */
@@ -20,12 +20,13 @@ export const API_CSP = "default-src 'none'; frame-ancestors 'none'; base-uri 'no
 
 export const LIBRARY_UI_CSP = [
   "default-src 'none'",
-  "script-src 'self' https://browser.sentry-cdn.com",
+  // static.cloudflareinsights.com: Cloudflare adds its own analytics beacon to HTML it proxies.
+  "script-src 'self' https://browser.sentry-cdn.com https://static.cloudflareinsights.com",
   "style-src 'self' https://fonts.googleapis.com",
   "style-src-attr 'unsafe-inline'",
   "font-src https://fonts.gstatic.com",
   "img-src 'self' data:",
-  "connect-src 'self' https://*.ingest.us.sentry.io",
+  "connect-src 'self' https://*.ingest.us.sentry.io https://cloudflareinsights.com",
   "base-uri 'none'",
   "form-action 'self'",
   "frame-ancestors 'none'",
@@ -49,11 +50,11 @@ export function docsCsp(base: string): string {
   const scriptHash = `'sha256-${createHash('sha256').update(docsInlineScript(base), 'utf8').digest('base64')}'`;
   return [
     "default-src 'none'",
-    `script-src https://unpkg.com/swagger-ui-dist@${SWAGGER_UI_VERSION}/ ${scriptHash}`,
+    `script-src https://unpkg.com/swagger-ui-dist@${SWAGGER_UI_VERSION}/ ${scriptHash} https://static.cloudflareinsights.com`,
     `style-src https://unpkg.com/swagger-ui-dist@${SWAGGER_UI_VERSION}/ 'unsafe-inline'`,
     "img-src 'self' data: https:",
     "font-src 'self' data:",
-    "connect-src 'self'",
+    "connect-src 'self' https://cloudflareinsights.com",
     "base-uri 'none'",
     "form-action 'none'",
     "frame-ancestors 'none'",
