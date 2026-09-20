@@ -6,6 +6,7 @@
 //   npx tsx --env-file=<the deployed service's .env> scripts/rotate-gateway-secret.ts --dry-run
 //   npx tsx --env-file=<the deployed service's .env> scripts/rotate-gateway-secret.ts
 // Prints counts only; never a secret or a key.
+import 'dotenv/config';
 import { pool } from '../src/db';
 import { config } from '../src/config';
 import { blobKeyId, decryptSecret, encryptSecret, keyFingerprint } from '../src/domain/gateway/crypto';
