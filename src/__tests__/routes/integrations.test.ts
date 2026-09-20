@@ -13,17 +13,22 @@ vi.mock('../../db', async () => {
 });
 vi.mock('../../middleware/redis-client', () => ({ getRedis: () => null, connectRedis: vi.fn() }));
 
+import { pool } from '../../db';
 import { buildApp } from '../../app';
+import { createFakeDb } from '../helpers/fake-db';
+import { seedSignedIn } from '../helpers/signed-in';
 import type { FastifyInstance } from 'fastify';
 
 let app: FastifyInstance;
+let auth: Record<string, string>;
 beforeAll(async () => {
   app = await buildApp();
+  auth = seedSignedIn(pool as unknown as ReturnType<typeof createFakeDb>);
 });
 
 describe('compliance integration — falls back to the local catalog when COMPLIANCE_OS_URL is unset', () => {
   it('GET /integrations/compliance/business-types returns the fallback list', async () => {
-    const res = await app.inject({ method: 'GET', url: '/integrations/compliance/business-types' });
+    const res = await app.inject({ method: 'GET', headers: auth, url: '/integrations/compliance/business-types' });
     expect(res.statusCode).toBe(200);
     const body = JSON.parse(res.body);
     expect(Array.isArray(body.items)).toBe(true);
@@ -31,7 +36,7 @@ describe('compliance integration — falls back to the local catalog when COMPLI
   });
 
   it('GET /integrations/compliance/requirements/search returns the fallback search shape', async () => {
-    const res = await app.inject({ method: 'GET', url: '/integrations/compliance/requirements/search?stateCode=CO' });
+    const res = await app.inject({ method: 'GET', headers: auth, url: '/integrations/compliance/requirements/search?stateCode=CO' });
     expect(res.statusCode).toBe(200);
     const body = JSON.parse(res.body);
     expect(Array.isArray(body.items)).toBe(true);
@@ -42,6 +47,7 @@ describe('registry integration — falls back to local name-availability heurist
   it('POST /functions/v1/check-business-name-availability returns a fallback result', async () => {
     const res = await app.inject({
       method: 'POST',
+      headers: auth,
       url: '/functions/v1/check-business-name-availability',
       payload: { businessName: 'Acme Bank', stateOfFormation: 'CO' },
     });
@@ -51,7 +57,7 @@ describe('registry integration — falls back to local name-availability heurist
   });
 
   it('GET /functions/v1/business-structures returns the local structures catalog', async () => {
-    const res = await app.inject({ method: 'GET', url: '/functions/v1/business-structures' });
+    const res = await app.inject({ method: 'GET', headers: auth, url: '/functions/v1/business-structures' });
     expect(res.statusCode).toBe(200);
     const body = JSON.parse(res.body);
     expect(body.count).toBeGreaterThan(0);
@@ -67,5 +73,50 @@ describe('removed wildcard gateways stay gone', () => {
   it('GET /registry/anything no longer exists (removed — see cross-44 in the audit)', async () => {
     const res = await app.inject({ method: 'GET', url: '/registry/anything' });
     expect(res.statusCode).toBe(404);
+  });
+});
+
+describe('the setup-wizard helper routes are for signed-in people only', () => {
+  const routes: Array<[string, string, object?]> = [
+    ['GET', '/integrations/compliance/business-types'],
+    ['GET', '/integrations/compliance/requirements/search?stateCode=CO'],
+    ['GET', '/integrations/compliance/jurisdictions'],
+    ['POST', '/integrations/market-research/analyze', { businessIdea: 'x' }],
+    ['POST', '/functions/v1/check-business-name-availability', { name: 'Acme', state: 'CO' }],
+    ['POST', '/functions/v1/check-dba-name-availability', { name: 'Acme' }],
+    ['POST', '/functions/v1/check-trademark-availability', { name: 'Acme' }],
+    ['POST', '/functions/v1/check-name-multi-state', { name: 'Acme' }],
+    ['POST', '/functions/v1/check-names-batch', { names: ['Acme'] }],
+    ['GET', '/functions/v1/registry-sync-status'],
+    ['GET', '/functions/v1/business-structures'],
+    ['GET', '/functions/v1/business-structures/llc'],
+    ['POST', '/functions/v1/business-structures/recommend', {}],
+    ['POST', '/functions/v1/analyze-business-setup', {}],
+    ['POST', '/functions/v1/search-place-areas', { query: 'Denver' }],
+  ];
+
+  it('every one answers 401 with no session, on both the plain and /v1 URLs', async () => {
+    for (const [method, url, payload] of routes) {
+      for (const prefix of ['', '/v1']) {
+        const res = await app.inject({ method: method as 'GET' | 'POST', url: prefix + url, payload });
+        expect(res.statusCode, `${method} ${prefix}${url}`).toBe(401);
+        expect(res.headers['content-type']).toMatch(/problem\+json/);
+      }
+    }
+  });
+
+  it('a bad or expired session is refused the same way', async () => {
+    const res = await app.inject({ method: 'GET', url: '/functions/v1/business-structures', headers: { authorization: 'Bearer not-a-real-session' } });
+    expect(res.statusCode).toBe(401);
+  });
+
+  it('an API Library key is not accepted here (keys use /v1/gateway/*)', async () => {
+    const res = await app.inject({ method: 'GET', url: '/functions/v1/business-structures', headers: { 'x-api-key': 'deskgw_' + 'a'.repeat(48) } });
+    expect(res.statusCode).toBe(401);
+  });
+
+  it('signed in, the same routes work', async () => {
+    const res = await app.inject({ method: 'GET', url: '/functions/v1/business-structures', headers: auth });
+    expect(res.statusCode).toBe(200);
   });
 });

@@ -25,6 +25,7 @@ import { registerErrorHandler } from './middleware/http-error';
 import { registerNotFound } from './middleware/not-found';
 import { registerOriginCheck } from './middleware/origin-check';
 import { registerApiProtection } from './middleware/api-protection';
+import { requireAuth } from './middleware/auth';
 import { registerRouteLimits } from './middleware/route-limits';
 import { registerIdempotency } from './middleware/idempotency';
 import { requireMetricsDocsKey } from './middleware/auth';
@@ -110,6 +111,10 @@ const PROCESS_STARTED_AT = new Date().toISOString();
 const BODY_LIMIT_DEFAULT = 1_048_576; // 1 MiB: drafts (up to 256 KB) and forwarded research requests
 const BODY_LIMIT_SMALL = 16_384; // 16 KiB: sign-in, sign-up, resets, invites, key creation
 const small = { bodyLimit: BODY_LIMIT_SMALL };
+// The setup wizard's helper routes (name checks, structure advice, compliance search, market analysis) call paid or
+// rate-limited backends on the caller's behalf, so only a signed-in person may use them. API Library keys are not
+// accepted here: they use /v1/gateway/* instead.
+const signedIn = { preHandler: requireAuth };
 
 export async function buildApp(): Promise<FastifyInstance> {
   const app = Fastify({
@@ -321,25 +326,25 @@ async function registerLegacyAndVersionedRoutes(instance: FastifyInstance) {
   instance.delete('/admin/tables/:table/rows/:id', adminTableDeleteRowHandler);
 
   // ── Edge Function replacements ───────────────────────────────────────────
-  instance.post('/functions/v1/analyze-business-setup', analyzeBusinessSetupHandler);
-  instance.post('/functions/v1/search-place-areas', searchPlaceAreasHandler);
+  instance.post('/functions/v1/analyze-business-setup', signedIn, analyzeBusinessSetupHandler);
+  instance.post('/functions/v1/search-place-areas', signedIn, searchPlaceAreasHandler);
 
   // ── Registry API proxy (mounted at /functions/v1, mirroring registry-api paths) ──
-  instance.post('/functions/v1/check-business-name-availability', checkBusinessNameAvailabilityHandler);
-  instance.post('/functions/v1/check-dba-name-availability', checkDbaNameAvailabilityHandler);
-  instance.post('/functions/v1/check-trademark-availability', checkTrademarkAvailabilityHandler);
-  instance.post('/functions/v1/check-name-multi-state', checkNameMultiStateHandler);
-  instance.post('/functions/v1/check-names-batch', checkNamesBatchHandler);
-  instance.get('/functions/v1/registry-sync-status', registrySyncStatusHandler);
-  instance.get('/functions/v1/business-structures', businessStructuresHandler);
-  instance.get('/functions/v1/business-structures/:slug', businessStructureBySlugHandler);
-  instance.post('/functions/v1/business-structures/recommend', recommendBusinessStructuresHandler);
+  instance.post('/functions/v1/check-business-name-availability', signedIn, checkBusinessNameAvailabilityHandler);
+  instance.post('/functions/v1/check-dba-name-availability', signedIn, checkDbaNameAvailabilityHandler);
+  instance.post('/functions/v1/check-trademark-availability', signedIn, checkTrademarkAvailabilityHandler);
+  instance.post('/functions/v1/check-name-multi-state', signedIn, checkNameMultiStateHandler);
+  instance.post('/functions/v1/check-names-batch', signedIn, checkNamesBatchHandler);
+  instance.get('/functions/v1/registry-sync-status', signedIn, registrySyncStatusHandler);
+  instance.get('/functions/v1/business-structures', signedIn, businessStructuresHandler);
+  instance.get('/functions/v1/business-structures/:slug', signedIn, businessStructureBySlugHandler);
+  instance.post('/functions/v1/business-structures/recommend', signedIn, recommendBusinessStructuresHandler);
 
   // ── Compliance-OS integration proxy (app.deskbusiness.co) ────────────────
-  instance.get('/integrations/compliance/business-types', businessTypesHandler);
-  instance.get('/integrations/compliance/requirements/search', requirementsSearchHandler);
-  instance.get('/integrations/compliance/jurisdictions', jurisdictionsHandler);
-  instance.post('/integrations/market-research/analyze', marketResearchAnalyzeHandler);
+  instance.get('/integrations/compliance/business-types', signedIn, businessTypesHandler);
+  instance.get('/integrations/compliance/requirements/search', signedIn, requirementsSearchHandler);
+  instance.get('/integrations/compliance/jurisdictions', signedIn, jurisdictionsHandler);
+  instance.post('/integrations/market-research/analyze', signedIn, marketResearchAnalyzeHandler);
 
   // ── API Library: developer key management (session-only) ─────────────────
   instance.get('/gateway/openapi.json', libraryOpenApiHandler);

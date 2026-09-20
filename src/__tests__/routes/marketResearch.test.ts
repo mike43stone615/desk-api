@@ -11,14 +11,19 @@ vi.mock('../../db', async () => {
 });
 vi.mock('../../middleware/redis-client', () => ({ getRedis: () => null, connectRedis: vi.fn() }));
 
+import { pool } from '../../db';
 import { buildApp } from '../../app';
+import { createFakeDb } from '../helpers/fake-db';
+import { seedSignedIn } from '../helpers/signed-in';
 import type { FastifyInstance } from 'fastify';
 
 let app: FastifyInstance;
+let auth: Record<string, string>;
 const originalFetch = global.fetch;
 
 beforeAll(async () => {
   app = await buildApp();
+  auth = seedSignedIn(pool as unknown as ReturnType<typeof createFakeDb>);
 });
 
 afterEach(() => {
@@ -36,6 +41,7 @@ describe('POST /integrations/market-research/analyze', () => {
     try {
       const response = await app.inject({
         method: 'POST',
+        headers: auth,
         url: '/integrations/market-research/analyze',
         payload: BODY,
       });
@@ -58,6 +64,7 @@ describe('POST /integrations/market-research/analyze', () => {
 
     const res = await app.inject({
       method: 'POST',
+      headers: auth,
       url: '/integrations/market-research/analyze',
       payload: BODY,
     });
@@ -73,7 +80,7 @@ describe('POST /integrations/market-research/analyze', () => {
       }),
     ) as unknown as typeof fetch;
 
-    const res = await app.inject({ method: 'POST', url: '/integrations/market-research/analyze', payload: BODY });
+    const res = await app.inject({ method: 'POST', headers: auth, url: '/integrations/market-research/analyze', payload: BODY });
     expect(res.statusCode).toBe(400);
     expect(JSON.parse(res.body).detail).toBe('businessIdea must be at most 2000 characters');
   });
@@ -81,7 +88,7 @@ describe('POST /integrations/market-research/analyze', () => {
   it('forwards the request id so the call can be traced into market-validation-api', async () => {
     const fetchMock = vi.fn().mockResolvedValue(new Response('{}', { status: 200 }));
     global.fetch = fetchMock as unknown as typeof fetch;
-    const res = await app.inject({ method: 'POST', url: '/integrations/market-research/analyze', payload: BODY });
+    const res = await app.inject({ method: 'POST', headers: auth, url: '/integrations/market-research/analyze', payload: BODY });
     const sent = (fetchMock.mock.calls[0][1] as { headers: Record<string, string> }).headers;
     expect(sent['x-request-id']).toBe(res.headers['x-request-id']);
   });
@@ -91,6 +98,7 @@ describe('POST /integrations/market-research/analyze', () => {
 
     const res = await app.inject({
       method: 'POST',
+      headers: auth,
       url: '/integrations/market-research/analyze',
       payload: BODY,
     });
@@ -106,6 +114,7 @@ describe('POST /integrations/market-research/analyze', () => {
 
     const res = await app.inject({
       method: 'POST',
+      headers: auth,
       url: '/integrations/market-research/analyze',
       payload: BODY,
     });
@@ -121,8 +130,11 @@ describe('MARKET_API_URL unset', () => {
     try {
       const { buildApp: buildFreshApp } = await import('../../app');
       const freshApp = await buildFreshApp();
+      const { pool: freshPool } = await import('../../db');
+      const freshAuth = seedSignedIn(freshPool as unknown as ReturnType<typeof createFakeDb>);
       const res = await freshApp.inject({
         method: 'POST',
+        headers: freshAuth,
         url: '/integrations/market-research/analyze',
         payload: BODY,
       });
