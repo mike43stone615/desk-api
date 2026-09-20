@@ -130,6 +130,13 @@ async function main(): Promise<void> {
     console.error("DATABASE_URL is required.");
     process.exit(1);
   }
+  // A developer's .env points at the throwaway dev database. Backing that up would "succeed" while protecting nothing,
+  // so refuse loudly instead (the scheduled task supplies the real DATABASE_URL, see run-backup-task.ps1).
+  const databaseName = new URL(databaseUrl).pathname.replace(/^\//, "");
+  if (/_(dev|test)$/.test(databaseName) && !process.argv.includes("--allow-dev")) {
+    console.error(`Refusing to back up "${databaseName}": it is a development/test database. Point DATABASE_URL at the real one.`);
+    process.exit(1);
+  }
 
   const { outDir, keep, offHostDir } = parseArgs(process.argv.slice(2));
   mkdirSync(outDir, { recursive: true });

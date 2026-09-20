@@ -1,24 +1,28 @@
+# Local DEVELOPMENT stack only. It is deliberately on different ports and uses a different database, user and volume
+# from the real services on this machine (Postgres 5432, Redis 6379...), so nothing here can touch production data.
 services:
   postgres:
-    image: postgres:16-alpine
+    image: postgres:17-alpine
+    container_name: desk-api-dev-postgres
     environment:
-      POSTGRES_DB: desk_api
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: desk_api_dev
+      POSTGRES_USER: desk_api_dev
+      POSTGRES_PASSWORD: desk_api_dev
     ports:
-      - '5432:5432'
+      - '127.0.0.1:5433:5432'
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ['CMD-SHELL', 'pg_isready -U postgres']
+      test: ['CMD-SHELL', 'pg_isready -U desk_api_dev -d desk_api_dev']
       interval: 5s
       timeout: 5s
       retries: 5
 
   redis:
     image: redis:7-alpine
+    container_name: desk-api-dev-redis
     ports:
-      - '6379:6379'
+      - '127.0.0.1:6390:6379'
     healthcheck:
       test: ['CMD', 'redis-cli', 'ping']
       interval: 5s

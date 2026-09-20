@@ -27,11 +27,17 @@ Proxies to:
 
 ```bash
 npm install
-cp .env.example .env             # fill in DATABASE_URL and any API keys you have
-createdb desk_api                # against the same local Postgres server as the other fleet services
-npm run migrate                  # applies migrations/*.sql, tracked in schema_migrations
+cp .env.example .env             # already points at the development database below; add any API keys you have
+docker compose up -d postgres    # a throwaway Postgres on 127.0.0.1:5433 (database desk_api_dev), separate from the real one
+npm run migrate                  # applies migrations/*.sql to the DEV database, tracked in schema_migrations
 npm run dev                      # http://localhost:3458
 ```
+
+`.env` must never point at the production database. `npm run migrate` enforces that: it refuses any database whose
+name does not end in `_dev` or `_test`. To migrate production on purpose (deploys do not run migrations), give both
+flags: `npm run migrate -- --dry-run --production --env-file <the deployed service's .env>` first, then again without
+`--dry-run`. Tests that need a real database (`npm run test:e2e`) use `E2E_DATABASE_URL`, for example
+`postgresql://desk_api_dev:desk_api_dev@127.0.0.1:5433/desk_api_dev`.
 
 After startup:
 - Swagger UI: http://localhost:3458/docs

@@ -5,9 +5,15 @@
 // registry-api's/market-validation-api's scripts/apply-migrations.ts.
 //
 // Usage:
-//   npm run migrate                 # apply + record everything pending
+//   npm run migrate                 # apply + record everything pending (development / test databases only)
 //   npm run migrate -- --dry-run    # print what WOULD run, without running it
-import 'dotenv/config';
+//   npm run migrate -- --production --env-file <the deployed service's .env>
+//                                   # the real database: needs BOTH flags, so it can never happen by accident
+//
+// Safety: unless the database name ends in _dev or _test, this refuses to run without --production. A developer's
+// local .env points at the dev database, so a stray `npm run migrate` cannot touch production.
+import dotenv from 'dotenv';
+dotenv.config();
 import { readdirSync, readFileSync } from 'fs';
 import { join } from 'path';
 import pg from 'pg';
@@ -30,11 +36,37 @@ function listMigrationFiles(): string[] {
 
 async function main() {
   const dryRun = process.argv.includes('--dry-run');
+  const production = process.argv.includes('--production');
+  const envFileIndex = process.argv.indexOf('--env-file');
+  if (envFileIndex !== -1) {
+    const path = process.argv[envFileIndex + 1];
+    if (!path) {
+      console.error('--env-file needs a path.');
+      process.exit(1);
+    }
+    dotenv.config({ path, override: true });
+  }
   const databaseUrl = process.env.DATABASE_URL;
   if (!databaseUrl) {
     console.error('DATABASE_URL is not set.');
     process.exit(1);
   }
+
+  const databaseName = new URL(databaseUrl).pathname.replace(/^\//, '');
+  const isSafeTarget = /_(dev|test)$/.test(databaseName);
+  if (!isSafeTarget && !production) {
+    console.error(
+      `Refusing to run: database "${databaseName}" is not a development or test database (its name must end in _dev or _test).
+` +
+        'To migrate the real database on purpose, add --production (and --env-file <path to the deployed .env>).',
+    );
+    process.exit(1);
+  }
+  if (isSafeTarget && production) {
+    console.error(`--production was given but "${databaseName}" looks like a development database. Check the env file.`);
+    process.exit(1);
+  }
+  console.log(`Target database: ${databaseName}${production ? ' (PRODUCTION)' : ''}${dryRun ? ' — dry run' : ''}`);
 
   const client = new Client({ connectionString: databaseUrl });
   await client.connect();

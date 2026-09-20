@@ -47,7 +47,7 @@ tracked in `docs/KNOWN-LIMITATIONS.md`.
 
 ```bash
 # From the repo root, with the local stack running (docker compose up -d)
-docker compose exec -T postgres pg_dump -U postgres desk_api > backup-$(date +%Y%m%d-%H%M).sql
+docker compose exec -T postgres pg_dump -U desk_api_dev desk_api_dev > backup-$(date +%Y%m%d-%H%M).sql
 
 # Compress for storage
 gzip backup-$(date +%Y%m%d-%H%M).sql
@@ -60,11 +60,11 @@ gzip backup-$(date +%Y%m%d-%H%M).sql
 # Stop the app first so nothing writes during the restore.
 
 # Drop and recreate
-docker compose exec -T postgres psql -U postgres -c "DROP DATABASE desk_api;"
-docker compose exec -T postgres psql -U postgres -c "CREATE DATABASE desk_api;"
+docker compose exec -T postgres psql -U desk_api_dev -d postgres -c "DROP DATABASE desk_api_dev;"
+docker compose exec -T postgres psql -U desk_api_dev -d postgres -c "CREATE DATABASE desk_api_dev;"
 
 # Restore schema + data
-gunzip -c backup-20260101-0000.sql.gz | docker compose exec -T postgres psql -U postgres desk_api
+gunzip -c backup-20260101-0000.sql.gz | docker compose exec -T postgres psql -U desk_api_dev desk_api_dev
 
 # Re-apply any migrations newer than the dump (a no-op if the dump already
 # includes every row of schema_migrations up to the current HEAD)

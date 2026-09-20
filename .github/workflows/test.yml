@@ -17,9 +17,9 @@ jobs:
     # need it.
     services:
       postgres:
-        image: postgres:16-alpine
+        image: postgres:17-alpine
         env:
-          POSTGRES_DB: desk_api
+          POSTGRES_DB: desk_api_test
           POSTGRES_USER: postgres
           POSTGRES_PASSWORD: postgres
         ports:
@@ -53,12 +53,12 @@ jobs:
       - name: Apply database migrations for E2E
         run: npm run migrate
         env:
-          DATABASE_URL: postgresql://postgres:postgres@localhost:5432/desk_api
+          DATABASE_URL: postgresql://postgres:postgres@localhost:5432/desk_api_test
 
       - name: Run E2E tests
         run: npm run test:e2e
         env:
-          E2E_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/desk_api
+          E2E_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/desk_api_test
 
       - name: Security audit
         run: npm audit --audit-level=high
