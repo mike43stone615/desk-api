@@ -23,6 +23,7 @@ import { config } from './config';
 import { getRedis } from './middleware/redis-client';
 import { registerErrorHandler } from './middleware/http-error';
 import { registerNotFound } from './middleware/not-found';
+import { registerOriginCheck } from './middleware/origin-check';
 import { registerApiProtection } from './middleware/api-protection';
 import { registerIdempotency } from './middleware/idempotency';
 import { requireMetricsDocsKey } from './middleware/auth';
@@ -253,6 +254,7 @@ export async function buildApp(): Promise<FastifyInstance> {
   );
 
   registerErrorHandler(app);
+  registerOriginCheck(app);
   registerApiProtection(app);
   registerIdempotency(app);
 
