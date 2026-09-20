@@ -99,10 +99,11 @@ describe('every operation documents its errors in the one shape', () => {
 
 describe('the Problem schema', () => {
   it('names every error code, requires code, and the ErrorCode schema explains each', () => {
-    const problem = (OPENAPI_SPEC.components.schemas as unknown as Record<string, { properties: { code: { enum: string[] } }; required: string[]; enum?: string[]; description?: string }>).Problem;
-    expect(problem.properties.code.enum.sort()).toEqual(Object.keys(ERROR_CODES).sort());
-    expect(problem.required).toContain('code');
-    const errorCode = (OPENAPI_SPEC.components.schemas as unknown as Record<string, { description: string }>).ErrorCode;
-    for (const code of Object.keys(ERROR_CODES)) expect(errorCode.description).toContain(`${code}: `);
+    const schemas = OPENAPI_SPEC.components.schemas as unknown as Record<string, { properties?: { code: { $ref?: string } }; required?: string[]; enum?: string[]; description?: string }>;
+    // Problem.code points at the ErrorCode schema, which lists every code (and explains each)
+    expect(schemas.Problem.properties!.code.$ref).toBe('#/components/schemas/ErrorCode');
+    expect(schemas.Problem.required).toContain('code');
+    expect([...schemas.ErrorCode.enum!].sort()).toEqual(Object.keys(ERROR_CODES).sort());
+    for (const code of Object.keys(ERROR_CODES)) expect(schemas.ErrorCode.description).toContain(`${code}: `);
   });
 });

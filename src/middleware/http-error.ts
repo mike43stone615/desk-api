@@ -3,6 +3,7 @@
 // Ported from registry-api's/market-validation-api's src/middleware/http-error.ts.
 import { ZodError } from 'zod';
 import type { FastifyInstance, FastifyRequest } from 'fastify';
+import { trimTrailingSlashes } from '../utils/strings';
 
 /**
  * An error with the HTTP status to answer with, a human message, and optionally a stable machine-readable `code`
@@ -148,7 +149,7 @@ export function problemBody(instance: string, status: number, detail: string, ex
 export function errorTypeUrl(code: string): string {
   return `${ERROR_DOCS_BASE}/errors/${code}`;
 }
-const ERROR_DOCS_BASE = (process.env.API_PUBLIC_URL || 'https://api.deskbusiness.co').replace(/\/+$/, '');
+const ERROR_DOCS_BASE = trimTrailingSlashes(process.env.API_PUBLIC_URL || 'https://api.deskbusiness.co');
 
 function problem(request: FastifyRequest, status: number, detail: string, errors?: unknown, code?: string): ProblemDetails {
   return problemBody(request.url, status, detail, { ...(errors !== undefined ? { errors } : {}), ...(code ? { code } : {}) });

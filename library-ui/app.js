@@ -28,7 +28,7 @@ export const API_BASE = '';
 // Nothing personal or secret may leave the browser in a report: addresses lose their query string and fragment (reset and
 // confirmation links carry a one-time token there), emails and long secret-looking strings inside messages are blanked,
 // and cookies, authorization headers and the signed-in user are never attached. See scrubSentryEvent.
-const EMAIL_RE = /[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g;
+const EMAIL_RE = /[A-Za-z0-9._%+-]{1,64}@[A-Za-z0-9.-]{1,255}\.[A-Za-z]{2,}/g;
 const SECRET_RE = /\b(?:deskgw_[A-Za-z0-9]{8,}|[A-Fa-f0-9]{32,}|[A-Za-z0-9_-]{40,})\b/g;
 const TOKEN_PARAM_RE = /([?&#](?:token|code|key|password|secret)=)[^&#\s"']+/gi;
 

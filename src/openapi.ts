@@ -23,11 +23,7 @@ const problemSchema = {
     detail: { type: 'string' },
     instance: { type: 'string' },
     error: { type: 'string', description: 'Duplicates detail — kept for the current Flutter client.' },
-    code: {
-      type: 'string',
-      description: 'Stable machine-readable identifier of what went wrong. Branch on this, not on the wording of detail. The full list with meanings is in the ErrorCode schema.',
-      enum: Object.keys(ERROR_CODES),
-    },
+    code: { $ref: '#/components/schemas/ErrorCode' },
     errors: {
       type: 'array',
       description: 'Present on validation errors: one entry per problem, in plain English.',
@@ -48,8 +44,6 @@ const publicUserSchema = {
     emailConfirmedAt: { type: 'string', nullable: true },
   },
 };
-
-const okSchema = { type: 'object', properties: { ok: { type: 'boolean' } } };
 
 // List endpoints: `?limit=` (1-200, default 100) and `?offset=`; the body says whether more remain.
 const pageParameters = [
@@ -108,6 +102,7 @@ const BASE_SPEC = {
   info: {
     title: 'Desk API',
     version: '2.0.0',
+    license: { name: 'Proprietary (all rights reserved)' },
     description:
       'Desk business-management API — self-service email/password auth, business-setup drafts/businesses/memberships, and an admin table browser aggregating this service plus registry-api and compliance-os. Rewritten from the original Hono/Cloudflare Workers/D1 implementation onto Fastify/TypeScript/Postgres.\n\n**Errors** always use one shape (RFC 7807: type, title, status, detail, instance; plus `error`, a copy of `detail`, and `code`, a stable machine-readable identifier: branch on that, not on the wording). An unknown URL is 404; a known URL with the wrong method is 405 with an `Allow` header. **API Library keys** are for servers: browsers are not allowed to send the `x-api-key` header cross-site, so keep keys out of web pages.',
   },
@@ -153,7 +148,6 @@ const BASE_SPEC = {
       Problem: problemSchema,
       ErrorCode: { type: 'string', enum: Object.keys(ERROR_CODES), description: Object.entries(ERROR_CODES).map(([c, d]) => c + ': ' + d).join(String.fromCharCode(10)) },
       PublicUser: publicUserSchema,
-      Ok: okSchema,
     },
   },
   paths: {
@@ -699,6 +693,15 @@ function withStandardResponses<T extends { paths: Record<string, Record<string, 
   for (const [path, operations] of Object.entries(spec.paths)) {
     for (const [method, raw] of Object.entries(operations)) {
       const op = raw as SpecOperation;
+      // Client generators need a name for every operation and every {placeholder} in the path described as a parameter.
+      const opRecord = op as Record<string, unknown>;
+      opRecord.operationId ??= method + path.replace(/[{}]/g, '').split(/[/\-_.]+/).filter(Boolean).map((w) => w[0].toUpperCase() + w.slice(1)).join('');
+      const declared = (op.parameters ?? []) as Array<{ name: string; in: string }>;
+      const missing = [...path.matchAll(/\{(\w+)\}/g)].map((m) => m[1]).filter((name) => !declared.some((p) => p.name === name && p.in === 'path'));
+      // A NEW array: the shared page-parameter list must not be changed for every other operation that uses it.
+      if (missing.length > 0) opRecord.parameters = [...declared, ...missing.map((name) => ({ name, in: 'path', required: true, schema: { type: 'string' } }))];
+      // Public operations say so explicitly (security: []) instead of leaving it undefined.
+      if (op.security === undefined) opRecord.security = [];
       const responses = (op.responses ??= {});
       const add = (status: string, description: string) => {
         const existing = responses[status] as { description?: string; content?: unknown } | undefined;
@@ -773,6 +776,7 @@ function buildLibrarySpec() {
     info: {
       title: 'Desk API Library',
       version: OPENAPI_SPEC.info.version,
+      license: OPENAPI_SPEC.info.license,
       description: OPENAPI_SPEC.info.description,
     },
     servers: [{ url: '/v1', description: 'Versioned base path' }],
@@ -780,7 +784,8 @@ function buildLibrarySpec() {
       { name: 'API Library', description: 'Keys, and the Registry and Market Validation APIs they unlock' },
       { name: 'Setup', description: 'Read-only access to your own businesses and drafts (Desk API)' },
     ],
-    components: OPENAPI_SPEC.components,
+    // Only what the published paths actually use (a description with unused parts trips linters and confuses readers).
+    components: { ...OPENAPI_SPEC.components, schemas: { Problem: OPENAPI_SPEC.components.schemas.Problem, ErrorCode: OPENAPI_SPEC.components.schemas.ErrorCode } },
     paths,
   };
 }

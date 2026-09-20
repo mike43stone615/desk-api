@@ -4,6 +4,7 @@
 // (and the desk_dependency_up gauge) instead.
 import { config } from '../../config';
 import { dependencyUp } from '../../modules/metrics';
+import { trimTrailingSlashes } from '../../utils/strings';
 
 export type DependencyState = 'ok' | 'down' | 'not_configured';
 
@@ -26,7 +27,7 @@ function targets(): Target[] {
 
 async function probe(baseUrl: string): Promise<boolean> {
   try {
-    const res = await fetch(`${baseUrl.replace(/\/+$/, '')}/health`, { signal: AbortSignal.timeout(TIMEOUT_MS) });
+    const res = await fetch(`${trimTrailingSlashes(baseUrl)}/health`, { signal: AbortSignal.timeout(TIMEOUT_MS) });
     return res.ok;
   } catch {
     return false;

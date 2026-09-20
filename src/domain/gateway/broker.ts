@@ -10,6 +10,7 @@
 // process.
 import { config } from '../../config';
 import type { BrokeredService } from './services';
+import { trimTrailingSlashes } from '../../utils/strings';
 
 const TIMEOUT_MS = 10_000;
 
@@ -33,7 +34,7 @@ function upstream(service: BrokeredService): { baseUrl: string; adminKey: string
   const baseUrl = service === 'registry_api' ? config.registryApiUrl : config.marketApiUrl;
   const adminKey = service === 'registry_api' ? config.registryApiAdminKey : config.marketApiAdminKey;
   if (!baseUrl || !adminKey) throw new BrokerError(`${service} is not configured.`);
-  return { baseUrl: baseUrl.replace(/\/+$/, ''), adminKey };
+  return { baseUrl: trimTrailingSlashes(baseUrl), adminKey };
 }
 
 export async function provisionBrokerKey(service: BrokeredService, label: string): Promise<ProvisionedKey> {

@@ -22,7 +22,7 @@ const re = /^desk_http_request_duration_ms_(bucket|sum|count)\{([^}]*)\}\s+([0-9
 for (const line of lines) {
   const m = re.exec(line);
   if (!m) continue;
-  const labels = Object.fromEntries([...m[2].matchAll(/(\w+)="([^"]*)"/g)].map((x) => [x[1], x[2]]));
+  const labels = Object.fromEntries([...m[2].matchAll(/(\w{1,40})="([^"]*)"/g)].map((x) => [x[1], x[2]]));
   const route = `${labels.method} ${labels.route}`;
   const r = routes.get(route) ?? { count: 0, sum: 0, buckets: new Map() };
   const v = Number(m[3]);

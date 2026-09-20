@@ -14,19 +14,46 @@ const NULLABLE_MEMBERS = new Set(['lastUsedAt', 'expiresAt', 'emailConfirmedAt',
 export function bodySchemaFrom(schema: z.ZodType): Json {
   const json = z.toJSONSchema(schema, { io: 'input', unrepresentable: 'any' }) as Json;
   delete json.$schema;
-  return json;
+  return stripUnsupported(json);
+}
+
+/** OpenAPI 3.0 does not know some JSON Schema keywords zod emits (propertyNames, const arrays...); remove them. */
+function stripUnsupported(node: unknown): Json {
+  if (Array.isArray(node)) return node.map(stripUnsupported) as unknown as Json;
+  if (node && typeof node === 'object') {
+    const out: Json = {};
+    for (const [k, v] of Object.entries(node as Json)) if (k !== 'propertyNames') out[k] = stripUnsupported(v);
+    return out;
+  }
+  return node as Json;
+}
+
+/** The shape that fits both: members present in both are required, members in only one are optional. */
+function mergeShapes(a: Json, b: Json): Json {
+  if (a.type === 'object' && b.type === 'object') {
+    const pa = (a.properties ?? {}) as Record<string, Json>;
+    const pb = (b.properties ?? {}) as Record<string, Json>;
+    const names = [...new Set([...Object.keys(pa), ...Object.keys(pb)])];
+    const properties = Object.fromEntries(names.map((n) => [n, n in pa && n in pb ? mergeShapes(pa[n], pb[n]) : (pa[n] ?? pb[n])]));
+    const required = names.filter((n) => n in pa && n in pb && ((a.required as string[]) ?? []).includes(n) && ((b.required as string[]) ?? []).includes(n));
+    return { type: 'object', properties, required };
+  }
+  if (a.type === 'array' && b.type === 'array') return { type: 'array', items: mergeShapes((a.items ?? {}) as Json, (b.items ?? {}) as Json) };
+  if (Object.keys(a).length === 0) return b; // one of them said nothing (null): keep what the other knows
+  if (Object.keys(b).length === 0) return a;
+  return a.type === b.type ? a : {};
 }
 
 /** A description of the shape of an example value: object properties (all required), array item shape, primitive type. */
 export function inferSchema(value: unknown): Json {
-  if (value === null || value === undefined) return { nullable: true };
-  if (Array.isArray(value)) return { type: 'array', items: value.length > 0 ? inferSchema(value[0]) : {} };
+  if (value === null || value === undefined) return {}; // nothing to infer from: any value is accepted
+  if (Array.isArray(value)) return { type: 'array', items: value.length > 0 ? value.map(inferSchema).reduce(mergeShapes) : {} };
   switch (typeof value) {
     case 'string': return { type: 'string' };
     case 'number': return { type: Number.isInteger(value) ? 'integer' : 'number' };
     case 'boolean': return { type: 'boolean' };
     case 'object': {
-      const props = Object.fromEntries(Object.entries(value as Json).map(([k, v]) => [k, NULLABLE_MEMBERS.has(k) ? { ...inferSchema(v), nullable: true } : inferSchema(v)]));
+      const props = Object.fromEntries(Object.entries(value as Json).map(([k, v]) => [k, NULLABLE_MEMBERS.has(k) ? { ...(v === null ? { type: 'string' } : inferSchema(v)), nullable: true } : inferSchema(v)]));
       return { type: 'object', properties: props, required: Object.keys(props) };
     }
     default: return {};

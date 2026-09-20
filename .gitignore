@@ -30,3 +30,5 @@ logs/
 # a local-only helper, never committed
 scripts/delete-test-accounts.mjs
 sbom.cdx.json
+openapi-out/
+.oa_tmp/

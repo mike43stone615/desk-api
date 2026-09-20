@@ -18,6 +18,7 @@ import { bindAuthToLog, expiredKeyError } from '../middleware/auth';
 import type { BrokeredService } from '../domain/gateway/services';
 import { abortWhenClientLeaves, callUpstream } from '../domain/upstream/client';
 import { MARKET_POLICY, REGISTRY_POLICY } from '../domain/upstream/policies';
+import { trimTrailingSlashes } from '../utils/strings';
 
 interface UpstreamRoute {
   method: 'GET' | 'POST';
@@ -123,7 +124,7 @@ async function forward(service: BrokeredService, request: FastifyRequest, reply:
   // Timeout, one retry for lookups, circuit breaker, in-flight limits (per API key too) and an answer-size ceiling
   // all live in the shared upstream client. A refusal from it is an HttpError like any other.
   const upstream = await callUpstream(
-    `${baseUrl.replace(/\/+$/, '')}${upstreamPath}${query}`,
+    `${trimTrailingSlashes(baseUrl)}${upstreamPath}${query}`,
     {
       method: route.method,
       headers: {

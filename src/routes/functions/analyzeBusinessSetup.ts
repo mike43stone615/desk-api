@@ -2391,14 +2391,16 @@ function looksLikeIdeaRequest(value: string): boolean {
   );
 }
 
-function looksLikeUrlOrContactDump(value: string): boolean {
+function looksLikeUrlOrContactDump(text: string): boolean {
+  // Only the start of a very long text is inspected: these patterns are meant for short fields, and this bounds their work.
+  const value = text.slice(0, 4000);
   const lower = value.toLowerCase();
   const trimmed = value.trim();
   const urlOnly = /^https?:\/\/\S+$/.test(lower) || /^\S+\.\w{2,}$/.test(lower);
   const hasUrl = /https?:\/\/\S+|www\.\S+|\b[a-z0-9-]+\.(com|net|org|io|co|biz|info)\b/i.test(
     value,
   );
-  const hasEmail = /\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/i.test(value);
+  const hasEmail = /\b[A-Z0-9._%+-]{1,64}@[A-Z0-9.-]{1,255}\.[A-Z]{2,}\b/i.test(value);
   const hasSsn = /\b\d{3}-\d{2}-\d{4}\b/.test(value);
   const hasPhone = /\b(?:\+?1[-.\s]?)?(?:\(?\d{3}\)?[-.\s]?)\d{3}[-.\s]?\d{4}\b/.test(value);
   const hasPhoneOnly = /^[\d\s().+-]{7,}$/.test(trimmed);
