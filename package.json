@@ -11,6 +11,7 @@
     "start": "tsx src/server.ts",
     "check:chaos": "tsx scripts/chaos-check.ts",
     "sbom": "node scripts/make-sbom.mjs",
+    "check:compat": "node scripts/check-api-compat.mjs",
     "check:openapi": "tsx scripts/export-openapi.ts openapi-out && npx --yes @redocly/cli@latest lint openapi-out/library.json && npx --yes @redocly/cli@latest lint openapi-out/desk-api.json && npx --yes openapi-typescript openapi-out/library.json -o openapi-out/library-client.d.ts",
     "scan:secrets": "node scripts/scan-secrets.mjs",
     "build": "tsc",

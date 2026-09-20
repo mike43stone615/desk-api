@@ -222,6 +222,10 @@
         "VA"
       ],
       "maxAgeHours": 1080,
+      "minCounts": {
+        "FL": 11000000,
+        "VA": 1900000
+      },
       "everyMinutes": 720
     },
     {
@@ -254,6 +258,11 @@
     "drive": "C",
     "minFreePercent": 10,
     "what": "free space on the drive holding the databases and backups"
+  },
+  "memory": {
+    "minFreePercent": 4,
+    "failuresBeforeAlert": 3,
+    "what": "free memory on this machine (it runs all the services and databases; measured at about 12% free in September 2026)"
   },
   "backups": {
     "dir": "C:\\Users\\User\\desk-api\\backups",

@@ -164,7 +164,14 @@ function Invoke-FreshnessCheck($check) {
     $age = ((Get-Date).ToUniversalTime() - ([datetime]$stamp).ToUniversalTime()).TotalHours
     if ($age -gt [double]$check.maxAgeHours) { $stale += ("{0} ({1:N0} days old)" -f $name, ($age / 24)) }
   }
-  if ($stale.Count -gt 0) { return ('not refreshed within {0:N0} days: {1}' -f ([double]$check.maxAgeHours / 24), ($stale -join ', ')) }
+  # A sync that finishes but loaded only part of the file has a fresh timestamp and a shrunken count: `minCounts` catches that.
+  if ($check.minCounts) {
+    foreach ($prop in $check.minCounts.PSObject.Properties) {
+      $count = $items.($prop.Name).recordCount
+      if ($null -ne $count -and [double]$count -lt [double]$prop.Value) { $stale += ("{0} has only {1:N0} records (expected at least {2:N0})" -f $prop.Name, $count, $prop.Value) }
+    }
+  }
+  if ($stale.Count -gt 0) { return ('problem with the imported data (stale for over {0:N0} days, or too few records): {1}' -f ([double]$check.maxAgeHours / 24), ($stale -join ', ')) }
   return $null
 }
 
@@ -205,6 +212,14 @@ function Invoke-DiskCheck($disk) {
   return $null
 }
 
+# Memory: the machine runs every service plus the databases; when little is free, Windows starts swapping and everything slows.
+function Invoke-MemoryCheck($m) {
+  $os = Get-CimInstance Win32_OperatingSystem
+  $freePct = [math]::Round(100 * $os.FreePhysicalMemory / $os.TotalVisibleMemorySize, 1)
+  if ($freePct -lt [double]$m.minFreePercent) { return ("only {0}% of memory free ({1:N1} GB)" -f $freePct, ($os.FreePhysicalMemory / 1MB)) }
+  return $null
+}
+
 function Invoke-BackupCheck($b) {
   if (-not (Test-Path $b.dir)) { return "backup folder missing" }
   $latest = Get-ChildItem $b.dir -Filter *.gz -ErrorAction SilentlyContinue | Sort-Object LastWriteTime -Descending | Select-Object -First 1
@@ -233,6 +248,7 @@ foreach ($c in $targets.checks) {
 }
 foreach ($pr in $targets.processes) { $all += [pscustomobject]@{ name = $pr.name; what = $pr.what; run = { param($st) Invoke-ProcessCheck $pr }.GetNewClosure() } }
 if ($targets.disk) { $all += [pscustomobject]@{ name = 'disk-space'; what = $targets.disk.what; run = { param($st) Invoke-DiskCheck $targets.disk }.GetNewClosure() } }
+if ($targets.memory) { $all += [pscustomobject]@{ name = 'memory'; what = $targets.memory.what; run = { param($st) Invoke-MemoryCheck $targets.memory }.GetNewClosure(); need = $targets.memory.failuresBeforeAlert } }
 if ($targets.backups) { $all += [pscustomobject]@{ name = 'backup-fresh'; what = $targets.backups.what; run = { param($st) Invoke-BackupCheck $targets.backups }.GetNewClosure() } }
 
 $summary = @()

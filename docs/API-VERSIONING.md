@@ -65,3 +65,7 @@ Everything else (statuses, bodies, errors) is identical on both.
 
 Send `X-Request-Id` (8-64 characters from `A-Z a-z 0-9 . _ : -`) to follow a call through the service logs; it is echoed
 back. Anything else in that header (too long, spaces, control characters) is ignored and a new id is generated.
+
+## Checking for breaking changes
+
+`npm run check:compat [git-ref]` compares the API description in the working tree (`docs/openapi.json`) with the one at a git ref (default: the last commit) and fails on anything that would break an existing client: a removed path or method, a removed or retyped response property, a request property that became required. Additions are never reported. The clients treat `role` values as plain text (the web app and the Flutter app only display them), so a new role does not break either.

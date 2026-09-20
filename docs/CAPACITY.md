@@ -40,3 +40,16 @@ bursty and far below its limits, so the practical ceiling is well above that.
   (HOSTING-AND-RECOVERY.md).
 
 The numbers above come from one run on one afternoon; re-run the script after big changes and update this page.
+
+## Measured on the host, 20 September 2026
+
+- **Disk:** C: had 174 GB free of 476 GB. Logs are 4 MB (30 days kept, rotated daily), so they are not a concern.
+- **Memory:** 15.9 GB total, about 1.9 GB (12%) free with everything running; PostgreSQL uses about 1.4 GB and each Node service 60-190 MB (one process, the largest at about 720 MB, is not a Desk service). This is the tightest resource. The uptime watch now alerts if free memory stays under 4% for three checks in a row (`memory` in `scripts/uptime-targets.json`).
+- **CPU:** about 14% at rest.
+- **Database queries:** the 13 queries behind the busiest routes all use indexes (`scripts/query-plans.mjs`; tables hold at most a few hundred rows).
+- **First request after a restart:** at most about 130 ms slower than a warm one; the service starts listening in 3-4 s.
+- **Cloudflare (read from the account):** security level medium, browser integrity check on, minimum TLS 1.2, always-use-HTTPS on, HSTS one year with subdomains (not preloaded, see DECISIONS.md). The bot-management and custom firewall rulesets could not be read with the available token.
+
+## Locking under concurrency
+
+`scripts/stress-locks.mjs` runs the same locking statements the routes use (creating drafts, removing owners, deleting an account) 13 at a time, for many rounds, and reports database deadlocks and broken rules (a sixth draft, a business left with no owner). It only runs against a scratch database (name ending `_test` or `_dev`). **It has not been run yet**: creating a scratch database on the shared server was not permitted in the session that wrote it. Run it once after creating `deskapi_stress_test` and migrating it.
