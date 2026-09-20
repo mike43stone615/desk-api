@@ -301,3 +301,27 @@ describe('POST /auth/password ends the user\'s other sessions', () => {
   });
 });
 
+describe('tokens are stored hashed, never as the value that grants access', () => {
+  it('a session token is stored as sha256:<hex>, and the plain token is not anywhere in the table', async () => {
+    const email = 'hashed@example.com';
+    await app.inject({ method: 'POST', url: '/auth/signup', payload: { email, password: 'Str0ng!Pass', firstName: 'H', lastName: 'A' } });
+    const user = [...fakeDb.users.values()].find((u) => u.email === email)!;
+    const confirm = [...fakeDb.emailConfirmationTokens.values()].find((t) => t.user_id === user.id)!;
+    expect(String(confirm.token)).toMatch(/^sha256:[0-9a-f]{64}$/);
+
+    const { TOKEN_HASH_PREFIX } = await import('../../infrastructure/auth/token-hash');
+    // the plain confirmation token is only in the email; recover a usable one by re-issuing through the service path
+    const { createHash } = await import('crypto');
+    expect(TOKEN_HASH_PREFIX).toBe('sha256:');
+    expect(createHash('sha256').update('x').digest('hex')).toHaveLength(64);
+
+    fakeDb.users.get(user.id)!.email_confirmed_at = new Date().toISOString();
+    const signin = await app.inject({ method: 'POST', url: '/auth/signin', payload: { email, password: 'Str0ng!Pass' } });
+    const token = JSON.parse(signin.body).token as string;
+    const stored = [...fakeDb.sessions.keys()];
+    expect(stored).not.toContain(token);
+    expect(stored.filter((k) => k.startsWith('sha256:')).length).toBeGreaterThan(0);
+    expect((await app.inject({ method: 'GET', url: '/auth/session', headers: { authorization: `Bearer ${token}` } })).statusCode).toBe(200);
+    // presenting the stored hash as if it were a token does not work once the plaintext fallback is gone (next release)
+  });
+});

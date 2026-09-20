@@ -124,7 +124,7 @@ export function createFakeDb() {
       return { rows: [row], rowCount: 1 };
     }
     if (s.startsWith('DELETE FROM sessions WHERE user_id = $1 AND token <> $2')) {
-      for (const [token, row] of sessions) if (row.user_id === p[0] && token !== p[1]) sessions.delete(token);
+      for (const [token, row] of sessions) if (row.user_id === p[0] && token !== p[1] && token !== p[2]) sessions.delete(token);
       return { rows: [], rowCount: 1 };
     }
     if (s.startsWith('DELETE FROM sessions WHERE token = $1')) {

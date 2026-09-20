@@ -150,6 +150,8 @@ export class DeskAuthService implements AuthService {
     const user = await this.db.findUserByEmail(email);
     if (!user || user.emailConfirmedAt) return null;
 
+    // Only a hash of an issued token is stored, so an earlier link cannot be re-sent. A request inside the
+    // cooldown sends nothing (the answer to the caller is identical either way); the previous email is still valid.
     const latest = await this.db.findLatestEmailConfirmationTokenForUser(user.id);
     if (
       latest &&
@@ -157,7 +159,7 @@ export class DeskAuthService implements AuthService {
       !isExpired(latest.expiresAt) &&
       secondsSince(latest.createdAt) < this.resendCooldownSeconds
     ) {
-      return latest.token;
+      return null;
     }
 
     return this.createEmailConfirmationToken(user.id);

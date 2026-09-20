@@ -388,3 +388,11 @@ describe('updatePassword ends other sessions', () => {
   });
 });
 
+describe('email confirmation resend cooldown', () => {
+  it('sends nothing for a second request inside the cooldown (the first link stays valid)', async () => {
+    const signup = await service.signUp('cool@example.com', 'Str0ng!Pass', 'Cool', 'Down');
+    expect(signup!.confirmationToken).toBeTruthy();
+    expect(await service.requestEmailConfirmation('cool@example.com')).toBeNull();
+    expect(await service.confirmEmail(signup!.confirmationToken)).toBe(true);
+  });
+});
