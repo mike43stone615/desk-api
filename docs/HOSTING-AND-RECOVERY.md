@@ -93,3 +93,14 @@ The order matters: data first, then services, then the tunnel.
 - **Backups that live only on this machine's disk or OneDrive** protect against disk failure, not against losing
   this machine and the OneDrive account together.
 - **No monitoring from outside the machine** (see above).
+
+## Deploys of the other four services (from 20 September 2026)
+
+registry-api, market-validation-api, compliance-os and desk-oracle now deploy the same way desk-api does. Each runs from its own **live folder** (`C:\actions-runners\<repo>\_work\live`) under a small **supervisor** (`scripts/supervisor.mjs`, configured by `supervisor.config.json`; control ports 13456 registry, 13457 market, 13000 compliance, 13459 oracle). A deploy checks out and installs in the runner's workspace while the old version keeps serving. When only code changed, the supervisor starts the new version beside the old one and the old one leaves once the new one answers: **no gap** (measured with a health check every 0.25 s: 0 failed requests in 2 deploys of each service; before, a deploy took the service down for about 2 minutes, 114 s measured for compliance-os).
+
+- A release that changes dependencies (or a supervisor that is not running, e.g. after a reboot) does a full start: about 1 to 2 minutes with the service stopped, as before.
+- A release whose new version does not become ready is discarded; the old one never stopped. Previous files are kept as `*.prev` in the live folder.
+- Logs: `logs\<service>-<date>.log` (and `.err.log`) in the live folder, 30 days kept.
+- desk-oracle's `data\source-snapshots` now lives in its live folder and survives deploys (before, every deploy wiped it).
+- For a few seconds during a reload two copies run, so a scheduled job that starts at that instant can run twice. Jobs that must not run twice should take a lock.
+- Boot recovery and the uptime watch's recovery still just start the service's deploy workflow; it starts the supervisor when none is running.
