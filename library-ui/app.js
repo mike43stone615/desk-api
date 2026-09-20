@@ -417,6 +417,25 @@ async function route() {
   }
 }
 
+// Every floating-label field is drawn as <div class="field-float"><label>Email</label><input ...></div>. Without a link
+// between the two, a screen reader announces the box as "edit text" with no name. This links each label to its input
+// (for/id) whenever the page draws new fields, so every page gets it without each one having to remember.
+let fieldSeq = 0;
+export function associateLabels(root) {
+  if (!root) return;
+  for (const box of root.querySelectorAll('.field-float')) {
+    const label = box.querySelector('label');
+    const input = box.querySelector('input, select, textarea');
+    if (!label || !input || label.htmlFor) continue;
+    if (!input.id) input.id = `field-${input.name || 'input'}-${++fieldSeq}`;
+    label.htmlFor = input.id;
+  }
+}
+const appRoot = document.getElementById('app');
+if (appRoot && typeof MutationObserver !== 'undefined') {
+  new MutationObserver(() => associateLabels(appRoot)).observe(appRoot, { childList: true, subtree: true });
+}
+
 function renderChrome(path) {
   const topbar = document.getElementById('topbar');
   const authbox = document.getElementById('authbox');
