@@ -1,0 +1,7 @@
+{
+  "_readme": "Copy to alerts.json (git-ignored) and fill in ONE OR BOTH. Without alerts.json, alerts only go to logs/uptime-watch.log and a Windows notification on this machine.",
+  "webhookUrl": "https://hooks.slack.com/services/... or a Discord webhook URL (posted as JSON with text/content/title/message)",
+  "emailTo": "you@example.com",
+  "emailFrom": "optional: defaults to the service's EMAIL_FROM",
+  "resendApiKey": "optional: defaults to the service's RESEND_API_KEY"
+}

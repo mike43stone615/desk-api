@@ -1,0 +1,85 @@
+{
+  "checks": [
+    {
+      "name": "api-public-ready",
+      "what": "the public API, through Cloudflare and the tunnel",
+      "url": "https://api.deskbusiness.co/health/ready",
+      "timeoutSec": 10,
+      "expectStatus": 200,
+      "expectJson": {
+        "ok": true
+      }
+    },
+    {
+      "name": "api-public-degraded",
+      "what": "a backend behind the API is down (the API itself still answers)",
+      "url": "https://api.deskbusiness.co/health/ready",
+      "timeoutSec": 10,
+      "expectStatus": 200,
+      "expectJson": {
+        "degraded": false
+      }
+    },
+    {
+      "name": "web-app",
+      "what": "the web app (Cloudflare Pages)",
+      "url": "https://app.deskbusiness.co/",
+      "timeoutSec": 10,
+      "expectStatus": 200
+    },
+    {
+      "name": "desk-api",
+      "what": "desk-api on this machine",
+      "url": "http://localhost:3458/health",
+      "timeoutSec": 5,
+      "expectStatus": 200
+    },
+    {
+      "name": "registry-api",
+      "what": "registry-api on this machine",
+      "url": "http://localhost:3456/health",
+      "timeoutSec": 5,
+      "expectStatus": 200
+    },
+    {
+      "name": "market-validation-api",
+      "what": "market-validation-api on this machine",
+      "url": "http://localhost:3457/health",
+      "timeoutSec": 5,
+      "expectStatus": 200
+    },
+    {
+      "name": "compliance-os",
+      "what": "compliance-os on this machine",
+      "url": "http://localhost:3000/health",
+      "timeoutSec": 5,
+      "expectStatus": 200
+    },
+    {
+      "name": "desk-oracle",
+      "what": "desk-oracle on this machine",
+      "url": "http://localhost:3459/health",
+      "timeoutSec": 5,
+      "expectStatus": 200
+    }
+  ],
+  "processes": [
+    {
+      "name": "cloudflare-tunnel",
+      "what": "the Cloudflare tunnel that carries all public traffic to this machine (a watchdog restarts it every 5 minutes if it dies)",
+      "processName": "cloudflared.exe",
+      "commandLineLike": "tunnel"
+    }
+  ],
+  "disk": {
+    "drive": "C",
+    "minFreePercent": 10,
+    "what": "free space on the drive holding the databases and backups"
+  },
+  "backups": {
+    "dir": "C:\\Users\\User\\desk-api\\backups",
+    "maxAgeHours": 36,
+    "what": "the newest desk-api database backup"
+  },
+  "failuresBeforeAlert": 2
+}

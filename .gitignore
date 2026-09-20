@@ -21,3 +21,7 @@ logs/
 # Real user data exported for scripts/migrate-from-d1.ts — password
 # hashes, session tokens. Never commit.
 d1-export/
+
+# Uptime watch: where alerts go (may hold a webhook URL / API key) and its runtime state
+scripts/alerts.json
+logs/
