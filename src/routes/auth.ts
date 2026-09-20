@@ -8,7 +8,7 @@
 // Flutter client (lib/core/api_client.dart) needs no changes.
 import type { FastifyReply, FastifyRequest } from 'fastify';
 import type { Session } from '../interfaces/database';
-import { HttpError } from '../middleware/http-error';
+import { HttpError, validationError } from '../middleware/http-error';
 import { authService } from '../infrastructure/auth';
 import { AuthError } from '../infrastructure/auth/auth-service';
 import { requireAuth, extractSessionToken } from '../middleware/auth';
@@ -90,7 +90,7 @@ function audit(request: FastifyRequest, event: string, outcome: 'ok' | 'error', 
 
 export async function signInHandler(request: FastifyRequest, reply: FastifyReply) {
   const parsed = SignInSchema.safeParse(request.body ?? {});
-  if (!parsed.success) throw new HttpError(400, parsed.error.issues.map((i) => i.message).join('; '), 'validation_error');
+  if (!parsed.success) throw validationError(parsed.error);
   const { email, password } = parsed.data;
 
   // Refuse before checking the password, so a locked-out caller cannot learn whether a guess was right.
@@ -135,7 +135,7 @@ export async function signUpHandler(request: FastifyRequest, reply: FastifyReply
     throw new HttpError(429, 'Too many signup attempts. Please try again later.', 'rate_limited');
   }
   const parsed = SignUpSchema.safeParse(request.body ?? {});
-  if (!parsed.success) throw new HttpError(400, parsed.error.issues.map((i) => i.message).join('; '), 'validation_error');
+  if (!parsed.success) throw validationError(parsed.error);
   const { email, password, firstName, lastName } = parsed.data;
 
   const trimmedEmail = email.trim();
@@ -171,7 +171,7 @@ export async function signUpHandler(request: FastifyRequest, reply: FastifyReply
 
 export async function requestEmailConfirmationHandler(request: FastifyRequest, reply: FastifyReply) {
   const parsed = EmailOnlySchema.safeParse(request.body ?? {});
-  if (!parsed.success) throw new HttpError(400, parsed.error.issues.map((i) => i.message).join('; '), 'validation_error');
+  if (!parsed.success) throw validationError(parsed.error);
   const email = parsed.data.email.trim();
 
   const token = await authService.requestEmailConfirmation(email);
@@ -187,7 +187,7 @@ export async function requestEmailConfirmationHandler(request: FastifyRequest, r
 
 export async function confirmEmailHandler(request: FastifyRequest, reply: FastifyReply) {
   const parsed = ConfirmEmailSchema.safeParse(request.body ?? {});
-  if (!parsed.success) throw new HttpError(400, parsed.error.issues.map((i) => i.message).join('; '), 'validation_error');
+  if (!parsed.success) throw validationError(parsed.error);
 
   const ok = await authService.confirmEmail(parsed.data.token);
   if (!ok) throw new HttpError(400, 'Confirmation link is invalid or has expired.', 'invalid_or_expired_token');
@@ -311,7 +311,7 @@ export async function sessionHandler(request: FastifyRequest, reply: FastifyRepl
 
 export async function requestPasswordResetHandler(request: FastifyRequest, reply: FastifyReply) {
   const parsed = EmailOnlySchema.safeParse(request.body ?? {});
-  if (!parsed.success) throw new HttpError(400, parsed.error.issues.map((i) => i.message).join('; '), 'validation_error');
+  if (!parsed.success) throw validationError(parsed.error);
   const email = parsed.data.email.trim();
 
   const token = await authService.requestPasswordReset(email);
@@ -327,7 +327,7 @@ export async function requestPasswordResetHandler(request: FastifyRequest, reply
 
 export async function confirmPasswordResetHandler(request: FastifyRequest, reply: FastifyReply) {
   const parsed = PasswordResetConfirmSchema.safeParse(request.body ?? {});
-  if (!parsed.success) throw new HttpError(400, parsed.error.issues.map((i) => i.message).join('; '), 'validation_error');
+  if (!parsed.success) throw validationError(parsed.error);
 
   try {
     const owner = await authService.resetTokenOwner(parsed.data.token);
@@ -367,7 +367,7 @@ async function requireCurrentPassword(request: FastifyRequest, reply: FastifyRep
 export async function deleteAccountHandler(request: FastifyRequest, reply: FastifyReply) {
   await requireAuth(request, reply);
   const parsed = DeleteAccountSchema.safeParse(request.body ?? {});
-  if (!parsed.success) throw new HttpError(400, parsed.error.issues.map((i) => i.message).join('; '), 'validation_error');
+  if (!parsed.success) throw validationError(parsed.error);
   const user = request.currentUser!;
   await requireCurrentPassword(request, reply, user, parsed.data.password, 'account_delete');
   // The notice is sent first, while the address is still known; the account is gone once this returns.
@@ -381,7 +381,7 @@ export async function deleteAccountHandler(request: FastifyRequest, reply: Fasti
 export async function updatePasswordHandler(request: FastifyRequest, reply: FastifyReply) {
   await requireAuth(request, reply);
   const parsed = UpdatePasswordSchema.safeParse(request.body ?? {});
-  if (!parsed.success) throw new HttpError(400, parsed.error.issues.map((i) => i.message).join('; '), 'validation_error');
+  if (!parsed.success) throw validationError(parsed.error);
 
   const user = request.currentUser!;
   await requireCurrentPassword(request, reply, user, parsed.data.currentPassword, 'password_change');

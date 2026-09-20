@@ -23,7 +23,11 @@ const problemSchema = {
       description: 'Stable machine-readable identifier of what went wrong. Branch on this, not on the wording of detail. The full list with meanings is in the ErrorCode schema.',
       enum: Object.keys(ERROR_CODES),
     },
-    errors: { type: 'array', items: { type: 'object' }, description: 'Present on validation errors: the individual field problems.' },
+    errors: {
+      type: 'array',
+      description: 'Present on validation errors: one entry per problem, in plain English.',
+      items: { type: 'object', properties: { field: { type: 'string', description: 'Where in the body, for example "email" or "services.0".' }, message: { type: 'string' }, code: { type: 'string', enum: ['required', 'wrong_type', 'too_short', 'too_long', 'too_many', 'invalid_format', 'invalid_value', 'other'] } } },
+    },
     retryAfterSeconds: { type: 'number', description: 'Present on rate-limit and temporary-unavailable answers; the Retry-After header carries the same.' },
   },
   required: ['type', 'title', 'status', 'detail', 'instance', 'error', 'code'],
@@ -171,6 +175,12 @@ const BASE_SPEC = {
         summary: 'Prometheus metrics',
         responses: { '200': { description: 'Prometheus text format', content: { 'text/plain': { schema: { type: 'string' } } } } },
       },
+    },
+    '/errors': {
+      get: { tags: ['System'], summary: 'Every error code and what it means (the `type` of each error answer links here)', responses: { '200': { description: 'The catalogue' } } },
+    },
+    '/errors/{code}': {
+      get: { tags: ['System'], summary: 'One error code explained', parameters: [{ name: 'code', in: 'path', required: true, schema: { type: 'string' } }], responses: { '200': { description: 'The code and its meaning' }, '404': { description: 'Unknown code' } } },
     },
     '/.well-known/security.txt': {
       get: {

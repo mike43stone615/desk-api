@@ -64,7 +64,7 @@ describe('every error has a code', () => {
       expect(typeof b.error).toBe('string');
       expect(b.detail).toBe(b.error);
       expect(b.title).toBeTruthy();
-      expect(b.type).toBe('about:blank');
+      expect(b.type).toBe(`https://api.deskbusiness.co/errors/${code}`);
       expect(b.instance).toBeTruthy();
     });
   }

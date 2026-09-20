@@ -263,7 +263,7 @@ describe('listing and revoking are scoped to the owner', () => {
 
     const after = await app.inject({ method: 'GET', url: '/setup/businesses', headers: { 'x-api-key': apiKey.key } });
     expect(after.statusCode).toBe(401);
-    expect((await app.inject({ method: 'DELETE', url: `/gateway/api-keys/${apiKey.id}`, headers: user.headers })).statusCode).toBe(409);
+    expect((await app.inject({ method: 'DELETE', url: `/gateway/api-keys/${apiKey.id}`, headers: user.headers })).statusCode).toBe(404);
   });
 
   it('still revokes the gateway key if a backend is unreachable during revoke', async () => {

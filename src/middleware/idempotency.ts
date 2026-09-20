@@ -16,6 +16,7 @@ import { createHash } from 'crypto';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { pool } from '../db';
 import { normalizePath } from './api-protection';
+import { problemBody } from './http-error';
 
 declare module 'fastify' {
   interface FastifyRequest {
@@ -67,14 +68,7 @@ function conflictProblem(request: FastifyRequest, reply: FastifyReply, detail: s
   return reply
     .status(409)
     .header('Content-Type', 'application/problem+json')
-    .send({
-      type: 'about:blank',
-      title: 'Conflict',
-      status: 409,
-      detail,
-      instance: request.url,
-      error: detail,
-    });
+    .send(problemBody(request.url, 409, detail, { code: 'idempotency_conflict' }));
 }
 
 /**

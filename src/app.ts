@@ -21,7 +21,7 @@ import { randomUUID } from 'crypto';
 import { pool } from './db';
 import { config } from './config';
 import { getRedis } from './middleware/redis-client';
-import { registerErrorHandler } from './middleware/http-error';
+import { HttpError, errorTypeUrl, registerErrorHandler } from './middleware/http-error';
 import { registerNotFound } from './middleware/not-found';
 import { registerOriginCheck } from './middleware/origin-check';
 import { registerApiProtection } from './middleware/api-protection';
@@ -102,6 +102,9 @@ import {
 import { gatewayMarketProxyHandler, gatewayRegistryProxyHandler } from './routes/gatewayProxy';
 import { registerLibraryUi } from './routes/libraryUi';
 import { registerSecurityTxt } from './routes/securityTxt';
+import { ERROR_CODES } from './middleware/error-codes';
+import { registerPathParamCheck } from './middleware/path-params';
+import { sendWithEtag } from './middleware/etag';
 
 // Captured once at module load (= process start for all practical purposes)
 // specifically so /health can answer "is this actually the process I think
@@ -269,7 +272,7 @@ export async function buildApp(options: { logStream?: { write: (line: string) =>
   }
 
   for (const base of ['', '/v1']) {
-    app.get(`${base}/docs/openapi.json`, { preHandler: requireMetricsDocsKey }, async (_req, reply) => reply.send(OPENAPI_SPEC));
+    app.get(`${base}/docs/openapi.json`, { preHandler: requireMetricsDocsKey }, async (req, reply) => sendWithEtag(req, reply, OPENAPI_SPEC));
     app.get(`${base}/docs`, { preHandler: requireMetricsDocsKey }, async (_req, reply) => {
       reply.header('Content-Type', 'text/html; charset=utf-8');
       applyHtmlCsp(reply, docsCsp(base));
@@ -295,7 +298,19 @@ export async function buildApp(options: { logStream?: { write: (line: string) =>
     // Back-compat alias for the original Hono version's GET /health (basic liveness,
     // no dependency checks) — kept cheap/dependency-free since nothing in the Flutter
     // client depends on it reflecting DB health specifically.
-    app.get(`${base}/health`, async (_req, reply) => reply.send({ ok: true, service: 'desk-api', ts: new Date().toISOString(), processStartedAt: PROCESS_STARTED_AT }));
+    // Same members as the other two services' health answers (responseId, servedAt, ok), plus the older ones.
+    app.get(`${base}/health`, async (req, reply) => {
+      const now = new Date().toISOString();
+      return reply.send({ ok: true, service: 'desk-api', responseId: req.id, servedAt: now, ts: now, processStartedAt: PROCESS_STARTED_AT });
+    });
+    // What each error code means. Public documentation: no data, and the `type` of every error answer links here.
+    app.get(`${base}/errors`, async (_req, reply) => sendWithEtag(_req, reply, { errors: Object.entries(ERROR_CODES).map(([code, meaning]) => ({ code, meaning, type: errorTypeUrl(code) })) }));
+    app.get(`${base}/errors/:code`, async (req, reply) => {
+      const { code } = req.params as { code: string };
+      const meaning = (ERROR_CODES as Record<string, string>)[code];
+      if (!meaning) throw new HttpError(404, 'Unknown error code.', 'not_found');
+      return sendWithEtag(req, reply, { code, meaning, type: errorTypeUrl(code) });
+    });
     app.get(`${base}/metrics`, { preHandler: requireMetricsDocsKey }, async (_req, reply) => {
       reply.header('Content-Type', metricsRegistry.contentType);
       return reply.send(await metricsRegistry.metrics());
@@ -309,11 +324,17 @@ export async function buildApp(options: { logStream?: { write: (line: string) =>
       version: 'v1',
       health: '/v1/health',
       libraryDocs: '/v1/gateway/openapi.json',
+      errors: '/v1/errors',
+      versions: [{ version: 'v1', status: 'current', base: '/v1' }],
+      // Unprefixed paths (/setup/drafts) still answer, and are the legacy spelling of the /v1 ones.
+      legacyPaths: 'unprefixed paths answer the same as /v1 but are not covered by the versioning policy',
+      policy: 'https://github.com/mike43stone615/desk-api/blob/main/docs/API-VERSIONING.md',
       apiLibrary: '/',
     }),
   );
 
   registerErrorHandler(app);
+  registerPathParamCheck(app);
   registerOriginCheck(app);
   registerApiProtection(app);
   registerRouteLimits(app);

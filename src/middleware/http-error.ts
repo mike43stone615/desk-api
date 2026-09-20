@@ -14,10 +14,61 @@ export class HttpError extends Error {
     public readonly status: number,
     message: string,
     public readonly code?: string,
+    /** For a validation failure: every problem found, one entry per field (see validationError). */
+    public readonly errors?: FieldProblem[],
   ) {
     super(message);
     this.name = 'HttpError';
   }
+}
+
+/** One thing wrong with one field of a request, in words a person can act on. */
+export interface FieldProblem {
+  /** Where in the body: "email", "services.0". Empty when the whole body is the problem. */
+  field: string;
+  message: string;
+  /** The kind of problem: required, wrong_type, too_short, too_long, invalid_format, invalid_value, too_many, other. */
+  code: string;
+}
+
+const DEFAULT_MESSAGE = /^(Invalid input|Too small|Too big|Invalid (option|email|string|number|literal|value|format)|Unrecognized key)/i;
+const NOUN: Record<string, string> = { string: 'text', number: 'a number', boolean: 'true or false', array: 'a list', object: 'an object', integer: 'a whole number' };
+
+/** Turns one zod issue into a plain-English problem. A message someone wrote on purpose is kept as it is. */
+function describeIssue(issue: ZodError['issues'][number]): FieldProblem {
+  const field = issue.path.map(String).join('.');
+  const name = field ? `"${field}"` : 'The request';
+  const custom = !DEFAULT_MESSAGE.test(issue.message);
+  const i = issue as unknown as { expected?: string; origin?: string; format?: string; minimum?: number | bigint; maximum?: number | bigint; values?: unknown[] };
+  switch (issue.code) {
+    case 'invalid_type': {
+      if (/received undefined/.test(issue.message)) return { field, code: 'required', message: custom ? issue.message : `${name} is required.` };
+      return { field, code: 'wrong_type', message: custom ? issue.message : `${name} must be ${NOUN[i.expected ?? ''] ?? `of type ${i.expected}`}.` };
+    }
+    case 'too_small': {
+      if (i.origin === 'string' && Number(i.minimum) <= 1) return { field, code: 'required', message: custom ? issue.message : `${name} cannot be empty.` };
+      const unit = i.origin === 'array' ? 'items' : i.origin === 'string' ? 'characters' : '';
+      return { field, code: 'too_short', message: custom ? issue.message : `${name} must be at least ${i.minimum}${unit ? ` ${unit}` : ''}.` };
+    }
+    case 'too_big': {
+      const unit = i.origin === 'array' ? 'items' : i.origin === 'string' ? 'characters' : '';
+      return { field, code: i.origin === 'array' ? 'too_many' : 'too_long', message: custom ? issue.message : `${name} must be at most ${i.maximum}${unit ? ` ${unit}` : ''}.` };
+    }
+    case 'invalid_format':
+      return { field, code: 'invalid_format', message: custom ? issue.message : i.format === 'email' ? `${name} is not a valid email address.` : `${name} is not in the expected format.` };
+    case 'invalid_value':
+      return { field, code: 'invalid_value', message: custom ? issue.message : `${name} must be one of: ${(i.values ?? []).map(String).join(', ')}.` };
+    case 'unrecognized_keys':
+      return { field, code: 'other', message: custom ? issue.message : `${name} has a field that is not allowed.` };
+    default:
+      return { field, code: 'other', message: custom ? issue.message : `${name} is not valid.` };
+  }
+}
+
+/** The one way a failed validation is reported: a sentence for people and a list per field for programs. */
+export function validationError(error: ZodError): HttpError {
+  const errors = error.issues.map(describeIssue);
+  return new HttpError(400, errors.map((e) => e.message).join(' '), 'validation_error', errors);
 }
 
 const DEFAULT_CODES: Record<number, string> = {
@@ -64,6 +115,7 @@ interface ProblemDetails {
   status: number;
   detail: string;
   instance: string;
+  /** Validation failures only: one entry per field, see FieldProblem. */
   errors?: unknown;
   // Extension member (RFC 7807 §3.2 explicitly allows extra members).
   // Duplicates `detail` so the current Flutter client (lib/core/api_client.dart,
@@ -78,17 +130,25 @@ interface ProblemDetails {
 
 /** The one error body every response uses (RFC 7807 + the legacy `error` member). */
 export function problemBody(instance: string, status: number, detail: string, extra?: Record<string, unknown>): ProblemDetails {
+  const code = typeof extra?.code === 'string' ? extra.code : defaultCode(status);
   return {
-    type: 'about:blank',
+    // A real address that explains this kind of error (GET /errors/<code>), as RFC 7807 intends.
+    type: errorTypeUrl(code),
     title: TITLES[status] ?? 'Error',
     status,
     detail,
     instance,
     error: detail,
-    code: defaultCode(status),
+    code,
     ...extra,
   };
 }
+
+/** Where a developer reads what an error code means. */
+export function errorTypeUrl(code: string): string {
+  return `${ERROR_DOCS_BASE}/errors/${code}`;
+}
+const ERROR_DOCS_BASE = (process.env.API_PUBLIC_URL || 'https://api.deskbusiness.co').replace(/\/+$/, '');
 
 function problem(request: FastifyRequest, status: number, detail: string, errors?: unknown, code?: string): ProblemDetails {
   return problemBody(request.url, status, detail, { ...(errors !== undefined ? { errors } : {}), ...(code ? { code } : {}) });
@@ -119,10 +179,11 @@ export function registerErrorHandler(app: FastifyInstance) {
       // A refusal that says when to come back (rate limits, an open circuit breaker) carries a Retry-After header.
       const retryAfter = (error as { retryAfterSeconds?: number }).retryAfterSeconds;
       if (retryAfter && !reply.hasHeader('retry-after')) reply.header('Retry-After', String(retryAfter));
-      return reply.status(error.status).send(problem(request, error.status, error.message, undefined, error.code));
+      return reply.status(error.status).send(problem(request, error.status, error.message, error.errors, error.code));
     }
     if (error instanceof ZodError) {
-      return reply.status(400).send(problem(request, 400, 'Invalid request.', error.issues, 'validation_error'));
+      const e = validationError(error);
+      return reply.status(400).send(problem(request, 400, e.message, e.errors, 'validation_error'));
     }
     const fastifyErr = error as unknown as { statusCode?: number; message?: string; code?: string };
     if (typeof fastifyErr.statusCode === 'number' && fastifyErr.statusCode < 500) {

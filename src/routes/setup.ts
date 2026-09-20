@@ -11,7 +11,7 @@
 // (POST /drafts, POST /drafts/:id/complete) — see middleware/idempotency.ts,
 // registered against these exact two routes.
 import type { FastifyReply, FastifyRequest } from 'fastify';
-import { HttpError } from '../middleware/http-error';
+import { HttpError, validationError } from '../middleware/http-error';
 import { requireAuth, requireConfirmedEmail } from '../middleware/auth';
 import { generateId, nowUtc } from '../domain/auth/tokens';
 import { pool } from '../db';
@@ -196,9 +196,7 @@ export async function patchDraftHandler(request: FastifyRequest, reply: FastifyR
   const { id } = request.params as { id: string };
 
   const parsed = DraftPatchSchema.safeParse(request.body ?? {});
-  if (!parsed.success) {
-    throw new HttpError(400, parsed.error.issues.find((i) => i.code === 'custom')?.message ?? 'Draft must be a JSON object.', 'validation_error');
-  }
+  if (!parsed.success) throw validationError(parsed.error);
 
   const draftJson = JSON.stringify(parsed.data.draft);
   if (draftJson.length > MAX_DRAFT_BYTES) throw new HttpError(413, 'Setup draft is too large.', 'draft_too_large');
@@ -364,10 +362,7 @@ export async function inviteBusinessMemberHandler(request: FastifyRequest, reply
   }
 
   const parsed = MemberInviteSchema.safeParse(request.body ?? {});
-  if (!parsed.success) {
-    const tooLong = parsed.error.issues.find((i) => i.code === 'too_big');
-    throw new HttpError(400, tooLong ? tooLong.message : 'Member email is required.', 'validation_error');
-  }
+  if (!parsed.success) throw validationError(parsed.error);
   const email = parsed.data.email.trim().toLowerCase();
   const role = parseMemberRole(parsed.data.role);
   if (role === 'owner' && requester.role !== 'owner') {

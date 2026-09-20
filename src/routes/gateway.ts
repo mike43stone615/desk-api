@@ -7,7 +7,8 @@
 import { recordSecurityEvent } from '../modules/audit/security-events';
 import { notifySecurityEvent } from '../domain/auth/security-notices';
 import type { FastifyReply, FastifyRequest } from 'fastify';
-import { HttpError } from '../middleware/http-error';
+import { HttpError, validationError } from '../middleware/http-error';
+import { sendWithEtag } from '../middleware/etag';
 import { requireAuth, requireConfirmedEmail } from '../middleware/auth';
 import { gatewayApiKeys, GatewayKeyError } from '../domain/gateway/keys';
 import { BrokerError } from '../domain/gateway/broker';
@@ -22,12 +23,12 @@ function auditKey(request: FastifyRequest, event: string, meta: Record<string, u
 
 /** The developer-facing API description. Public: it documents only what a key can do. */
 export async function libraryOpenApiHandler(_request: FastifyRequest, reply: FastifyReply) {
-  return reply.send(LIBRARY_OPENAPI_SPEC);
+  return sendWithEtag(_request, reply, LIBRARY_OPENAPI_SPEC);
 }
 
 export async function listGatewayServicesHandler(request: FastifyRequest, reply: FastifyReply) {
   await requireAuth(request, reply);
-  return reply.send({ services: getServiceCatalog() });
+  return sendWithEtag(request, reply, { services: getServiceCatalog() });
 }
 
 export async function listGatewayKeysHandler(request: FastifyRequest, reply: FastifyReply) {
@@ -40,7 +41,7 @@ export async function createGatewayKeyHandler(request: FastifyRequest, reply: Fa
   await requireAuth(request, reply);
   await requireConfirmedEmail(request, reply);
   const parsed = CreateGatewayKeySchema.safeParse(request.body ?? {});
-  if (!parsed.success) throw new HttpError(400, parsed.error.issues.map((i) => i.message).join('; '), 'validation_error');
+  if (!parsed.success) throw validationError(parsed.error);
   const user = request.currentUser!;
 
   try {
@@ -80,7 +81,8 @@ export async function revokeGatewayKeyHandler(request: FastifyRequest, reply: Fa
     return reply.status(204).send();
   } catch (err) {
     if (err instanceof GatewayKeyError) {
-      throw new HttpError(err.code === 'not_found' ? 404 : 409, err.message, `api_key_${err.code}`);
+      // One rule for every DELETE: something that is already gone (or never was yours) is a 404.
+      throw new HttpError(404, err.message, `api_key_${err.code}`);
     }
     throw err;
   }

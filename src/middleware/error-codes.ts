@@ -25,6 +25,8 @@ export const ERROR_CODES: Record<string, string> = {
   validation_error: 'A field is missing or invalid; detail says which.',
   invalid_json: 'The body is not valid JSON.',
   invalid_request: 'The request was rejected by the service behind this API.',
+  invalid_id: 'An identifier in the address is not in the expected format.',
+  idempotency_conflict: 'The Idempotency-Key was reused with a different request, or the first request is still running.',
   // sign-in and sessions
   authentication_required: 'No session or API key was sent.',
   session_invalid: 'The session is unknown or has expired.',

@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { HttpError } from '../middleware/http-error';
+import { validationError } from '../middleware/http-error';
 
 export const DEFAULT_PAGE_SIZE = 100;
 export const MAX_PAGE_SIZE = 200;
@@ -17,7 +17,7 @@ export interface Page {
 /** `?limit=&offset=` for list endpoints; absent values mean the first DEFAULT_PAGE_SIZE rows. */
 export function parsePage(query: unknown): Page {
   const parsed = PageQuerySchema.safeParse(query ?? {});
-  if (!parsed.success) throw new HttpError(400, parsed.error.issues.map((i) => i.message).join('; '), 'validation_error');
+  if (!parsed.success) throw validationError(parsed.error);
   return parsed.data;
 }
 

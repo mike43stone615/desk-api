@@ -44,7 +44,7 @@ describe('unknown URLs and wrong methods', () => {
     const res = await app.inject({ method: 'GET', url: '/nope' });
     expect(res.statusCode).toBe(404);
     expect(res.headers['content-type']).toMatch(/application\/problem\+json/);
-    expect(JSON.parse(res.body)).toMatchObject({ type: 'about:blank', title: 'Not Found', status: 404, instance: '/nope' });
+    expect(JSON.parse(res.body)).toMatchObject({ type: 'https://api.deskbusiness.co/errors/not_found', title: 'Not Found', status: 404, instance: '/nope' });
     expect(JSON.parse(res.body).error).toBe(JSON.parse(res.body).detail);
   });
 
