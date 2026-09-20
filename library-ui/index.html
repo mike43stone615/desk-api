@@ -24,10 +24,12 @@
        the deferred module script below executes -- app.js calls Sentry.init
        at its own top level. Error-capture only, no tracing/replay bundle
        (this app doesn't need those, and the plain bundle is far smaller).
+       Pinned to an exact version AND to its content hash (integrity=): if the CDN ever served a different file, the
+       browser refuses to run it. When bumping the version, recompute the hash (see web_app/README.md).
        Matches the Flutter app's own Sentry setup (see lib/main.dart) with
        its own separate project, so a browser error doesn't get miscounted
        against the phone/desktop app's error rate. -->
-  <script src="https://browser.sentry-cdn.com/10.15.0/bundle.min.js" crossorigin="anonymous"></script>
+  <script src="https://browser.sentry-cdn.com/10.15.0/bundle.min.js" integrity="sha384-PeBKZgicpCcvNw2FCZjty5E+c1yPn1O2rL6YKozLvNJSUeD8nlkugwLFdLauBc1q" crossorigin="anonymous"></script>
   <script type="module" src="/app.js"></script>
 </body>
 </html>
