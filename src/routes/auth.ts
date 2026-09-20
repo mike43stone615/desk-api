@@ -7,6 +7,7 @@
 // return {ok:true} regardless of account existence) are unchanged so the
 // Flutter client (lib/core/api_client.dart) needs no changes.
 import type { FastifyReply, FastifyRequest } from 'fastify';
+import type { Session } from '../interfaces/database';
 import { HttpError } from '../middleware/http-error';
 import { authService } from '../infrastructure/auth';
 import { AuthError } from '../infrastructure/auth/auth-service';
@@ -98,7 +99,7 @@ export async function signInHandler(request: FastifyRequest, reply: FastifyReply
 
   let result;
   try {
-    result = await authService.signIn(email.trim(), password);
+    result = await authService.signIn(email.trim(), password, sessionMeta(request));
   } catch (err) {
     if (err instanceof AuthError) throw authErrorToHttpError(err);
     throw err;
@@ -184,6 +185,60 @@ export async function confirmEmailHandler(request: FastifyRequest, reply: Fastif
 
   audit(request, 'email_confirmed', 'ok');
   return reply.send({ ok: true });
+}
+
+/** What is kept about a new session so its owner can recognise it later: the browser/app and where it signed in from. */
+function sessionMeta(request: FastifyRequest): { userAgent: string | null; ip: string } {
+  const ua = request.headers['user-agent'];
+  return { userAgent: typeof ua === 'string' && ua ? ua.slice(0, 255) : null, ip: getClientIp(request) };
+}
+
+function formatSession(s: Session, currentId: string | null) {
+  return {
+    id: s.id,
+    createdAt: s.createdAt,
+    lastUsedAt: s.lastUsedAt ?? s.createdAt,
+    expiresAt: s.expiresAt,
+    userAgent: s.userAgent,
+    ip: s.ip,
+    current: s.id === currentId,
+  };
+}
+
+/** Where the signed-in person is signed in: their live sessions, with the one making this request marked. */
+export async function listSessionsHandler(request: FastifyRequest, reply: FastifyReply) {
+  await requireAuth(request, reply);
+  const user = request.currentUser!;
+  const token = extractSessionToken(request);
+  const current = token ? await authService.currentSession(token) : null;
+  const sessions = await authService.listSessions(user.id);
+  return reply.send({ sessions: sessions.map((s) => formatSession(s, current?.id ?? null)) });
+}
+
+/** Ends one of the caller's own sessions (another device, or this one). */
+export async function revokeSessionHandler(request: FastifyRequest, reply: FastifyReply) {
+  await requireAuth(request, reply);
+  const user = request.currentUser!;
+  const { id } = request.params as { id: string };
+  const token = extractSessionToken(request);
+  const current = token ? await authService.currentSession(token) : null;
+  if (!(await authService.revokeSessionById(user.id, id))) throw new HttpError(404, 'Session not found.');
+  audit(request, 'session_revoked', 'ok', { userId: user.id });
+  if (current && current.id === id) clearSessionCookie(reply);
+  return reply.send({ ok: true });
+}
+
+/** "Sign out everywhere": ends all the caller's sessions, or every other one when keepCurrent is true. */
+export async function signOutEverywhereHandler(request: FastifyRequest, reply: FastifyReply) {
+  await requireAuth(request, reply);
+  const user = request.currentUser!;
+  const body = (request.body ?? {}) as { keepCurrent?: unknown };
+  const keepCurrent = body.keepCurrent === true;
+  const token = extractSessionToken(request);
+  const revoked = await authService.signOutEverywhere(user.id, keepCurrent && token ? token : undefined);
+  audit(request, 'signout_everywhere', 'ok', { userId: user.id, revoked: String(revoked) });
+  if (!keepCurrent) clearSessionCookie(reply);
+  return reply.send({ ok: true, revoked });
 }
 
 export async function signOutHandler(request: FastifyRequest, reply: FastifyReply) {

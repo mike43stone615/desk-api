@@ -56,10 +56,25 @@ class InMemoryDatabaseRepository implements DatabaseRepository {
     const user = this.users.get(userId);
     if (user) user.emailConfirmedAt = confirmedAt;
   }
-  async createSession(id: string, userId: string, token: string, expiresAt: string) {
-    const session: Session = { id, userId, token, expiresAt, createdAt: nowUtc() };
+  async createSession(id: string, userId: string, token: string, expiresAt: string, meta: { userAgent?: string | null; ip?: string | null } = {}) {
+    const session: Session = { id, userId, token, expiresAt, createdAt: nowUtc(), userAgent: meta.userAgent ?? null, ip: meta.ip ?? null, lastUsedAt: null };
     this.sessions.set(token, session);
     return session;
+  }
+  async listSessionsForUser(userId: string) {
+    return [...this.sessions.values()].filter((s) => s.userId === userId && new Date(s.expiresAt) > new Date());
+  }
+  async deleteSessionById(userId: string, sessionId: string) {
+    for (const [token, s] of this.sessions) {
+      if (s.id === sessionId && s.userId === userId) {
+        this.sessions.delete(token);
+        return true;
+      }
+    }
+    return false;
+  }
+  async touchSession(sessionId: string, usedAt: string) {
+    for (const s of this.sessions.values()) if (s.id === sessionId) s.lastUsedAt = usedAt;
   }
   async findSessionByToken(token: string) {
     return this.sessions.get(token) ?? null;

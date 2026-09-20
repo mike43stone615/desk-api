@@ -36,6 +36,9 @@ import {
   signUpHandler,
   signInHandler,
   signOutHandler,
+  listSessionsHandler,
+  revokeSessionHandler,
+  signOutEverywhereHandler,
   sessionHandler,
   requestEmailConfirmationHandler,
   confirmEmailHandler,
@@ -297,6 +300,9 @@ async function registerLegacyAndVersionedRoutes(instance: FastifyInstance) {
   instance.post('/auth/signup', small, signUpHandler);
   instance.post('/auth/signin', small, signInHandler);
   instance.post('/auth/signout', signOutHandler);
+  instance.get('/auth/sessions', listSessionsHandler);
+  instance.delete('/auth/sessions/:id', revokeSessionHandler);
+  instance.post('/auth/signout-all', small, signOutEverywhereHandler);
   instance.get('/auth/session', sessionHandler);
   instance.post('/auth/email-confirmation/request', small, requestEmailConfirmationHandler);
   instance.post('/auth/email-confirmation/confirm', small, confirmEmailHandler);

@@ -229,6 +229,61 @@ export const OPENAPI_SPEC = {
     '/auth/signout': {
       post: { tags: ['Auth'], summary: 'Revoke the current session', security: [{ SessionToken: [] }], responses: { '200': { description: 'OK' } } },
     },
+    '/auth/sessions': {
+      get: {
+        tags: ['Auth'],
+        summary: 'Where the caller is signed in: their live sessions (the one making this request is marked current)',
+        security: [{ SessionToken: [] }],
+        responses: {
+          '200': {
+            description: 'OK',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    sessions: {
+                      type: 'array',
+                      items: {
+                        type: 'object',
+                        properties: {
+                          id: { type: 'string' },
+                          createdAt: { type: 'string', format: 'date-time' },
+                          lastUsedAt: { type: 'string', format: 'date-time' },
+                          expiresAt: { type: 'string', format: 'date-time' },
+                          userAgent: { type: 'string', nullable: true },
+                          ip: { type: 'string', nullable: true },
+                          current: { type: 'boolean' },
+                        },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+          '401': { description: 'Session expired or invalid' },
+        },
+      },
+    },
+    '/auth/sessions/{id}': {
+      delete: {
+        tags: ['Auth'],
+        summary: 'End one of your own sessions (another device, or this one)',
+        security: [{ SessionToken: [] }],
+        parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }],
+        responses: { '200': { description: 'OK' }, '401': { description: 'Not signed in' }, '404': { description: 'No such session of the caller' } },
+      },
+    },
+    '/auth/signout-all': {
+      post: {
+        tags: ['Auth'],
+        summary: 'Sign out everywhere: end all your sessions (or all but this one with {"keepCurrent": true})',
+        security: [{ SessionToken: [] }],
+        requestBody: { required: false, content: { 'application/json': { schema: { type: 'object', properties: { keepCurrent: { type: 'boolean' } } } } } },
+        responses: { '200': { description: 'OK; revoked is how many sessions were ended' }, '401': { description: 'Not signed in' } },
+      },
+    },
     '/auth/session': {
       get: {
         tags: ['Auth'],

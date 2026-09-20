@@ -15,7 +15,7 @@
 // src/interfaces/database.ts) rather than staying silently broken for the
 // sake of leaving the interface untouched.
 import type { AuthResult, AuthService, PublicUser, SignupResult } from '../../interfaces/auth';
-import type { DatabaseRepository, User } from '../../interfaces/database';
+import type { DatabaseRepository, Session, SessionMeta, User } from '../../interfaces/database';
 import { hashPassword, verifyPassword } from '../../domain/auth/password';
 import {
   addHours,
@@ -79,7 +79,7 @@ export class DeskAuthService implements AuthService {
     return { confirmationToken, user: toPublicUser(user) };
   }
 
-  async signIn(email: string, password: string): Promise<AuthResult | null> {
+  async signIn(email: string, password: string, meta?: SessionMeta): Promise<AuthResult | null> {
     const user = await this.db.findUserByEmail(email);
     const hash = user?.passwordHash ?? DUMMY_HASH;
 
@@ -91,7 +91,7 @@ export class DeskAuthService implements AuthService {
     if (!user || !valid) return null;
     if (!user.emailConfirmedAt) throw new AuthError('email_not_confirmed');
 
-    const token = await this.createSessionToken(user.id);
+    const token = await this.createSessionToken(user.id, meta);
     return { token, user: toPublicUser(user) };
   }
 
@@ -102,7 +102,31 @@ export class DeskAuthService implements AuthService {
       await this.db.deleteSession(token);
       return null;
     }
+    // "Last used" is only refreshed when it is stale, so a busy session does not write on every request.
+    if (!session.lastUsedAt || Date.now() - Date.parse(session.lastUsedAt) > LAST_USED_REFRESH_MS) {
+      this.db.touchSession(session.id, new Date().toISOString()).catch(() => {});
+    }
     return this.db.findUserById(session.userId);
+  }
+
+  async listSessions(userId: string): Promise<Session[]> {
+    return this.db.listSessionsForUser(userId);
+  }
+
+  async currentSession(token: string): Promise<Session | null> {
+    const session = await this.db.findSessionByToken(token);
+    return session && !isExpired(session.expiresAt) ? session : null;
+  }
+
+  async revokeSessionById(userId: string, sessionId: string): Promise<boolean> {
+    return this.db.deleteSessionById(userId, sessionId);
+  }
+
+  async signOutEverywhere(userId: string, keepToken?: string): Promise<number> {
+    const before = (await this.db.listSessionsForUser(userId)).length;
+    if (keepToken) await this.db.deleteOtherSessionsForUser(userId, keepToken);
+    else await this.db.deleteAllSessionsForUser(userId);
+    return keepToken ? Math.max(0, before - 1) : before;
   }
 
   async revokeSession(token: string): Promise<void> {
@@ -187,9 +211,9 @@ export class DeskAuthService implements AuthService {
     else await this.db.deleteAllSessionsForUser(userId);
   }
 
-  private async createSessionToken(userId: string): Promise<string> {
+  private async createSessionToken(userId: string, meta?: SessionMeta): Promise<string> {
     const token = generateToken(32);
-    await this.db.createSession(generateId(), userId, token, addHours(this.sessionDurationHours));
+    await this.db.createSession(generateId(), userId, token, addHours(this.sessionDurationHours), meta);
     return token;
   }
 
@@ -239,6 +263,8 @@ function validatePassword(password: string): void {
 // so the dummy verification (used to avoid leaking account existence via
 // response-time timing on signIn) takes roughly as long as a real one; it is
 // never a valid credential for any real account.
+const LAST_USED_REFRESH_MS = 10 * 60 * 1000;
+
 const DUMMY_HASH =
   'pbkdf2:sha256:310000:AAAAAAAAAAAAAAAAAAAAAA==:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=';
 

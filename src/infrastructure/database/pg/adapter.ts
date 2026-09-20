@@ -15,6 +15,7 @@ import type {
   EmailConfirmationToken,
   PasswordResetToken,
   Session,
+  SessionMeta,
   User,
 } from '../../../interfaces/database';
 import { nowUtc } from '../../../domain/auth/tokens';
@@ -77,10 +78,11 @@ export class PgDatabaseAdapter implements DatabaseRepository {
     userId: string,
     token: string,
     expiresAt: string,
+    meta: SessionMeta = {},
   ): Promise<Session> {
     await this.pool.query(
-      `INSERT INTO sessions (id, user_id, token, expires_at) VALUES ($1, $2, $3, $4)`,
-      [id, userId, hashToken(token), expiresAt],
+      `INSERT INTO sessions (id, user_id, token, expires_at, user_agent, ip) VALUES ($1, $2, $3, $4, $5, $6)`,
+      [id, userId, hashToken(token), expiresAt, meta.userAgent ?? null, meta.ip ?? null],
     );
     const session = await this.findSessionByToken(token);
     if (!session) throw new Error('Session not found after insert.');
@@ -89,10 +91,28 @@ export class PgDatabaseAdapter implements DatabaseRepository {
 
   async findSessionByToken(token: string): Promise<Session | null> {
     const { rows } = await this.pool.query<SessionRow>(
-      `SELECT id, user_id, token, expires_at, created_at FROM sessions WHERE token = $1`,
+      `SELECT id, user_id, token, expires_at, created_at, user_agent, ip, last_used_at FROM sessions WHERE token = $1`,
       [hashToken(token)],
     );
     return rows[0] ? mapSession(rows[0]) : null;
+  }
+
+  async listSessionsForUser(userId: string): Promise<Session[]> {
+    const { rows } = await this.pool.query<SessionRow>(
+      `SELECT id, user_id, token, expires_at, created_at, user_agent, ip, last_used_at
+       FROM sessions WHERE user_id = $1 AND expires_at > $2 ORDER BY created_at DESC, id`,
+      [userId, nowUtc()],
+    );
+    return rows.map(mapSession);
+  }
+
+  async deleteSessionById(userId: string, sessionId: string): Promise<boolean> {
+    const result = await this.pool.query(`DELETE FROM sessions WHERE id = $1 AND user_id = $2`, [sessionId, userId]);
+    return (result.rowCount ?? 0) > 0;
+  }
+
+  async touchSession(sessionId: string, usedAt: string): Promise<void> {
+    await this.pool.query(`UPDATE sessions SET last_used_at = $1 WHERE id = $2`, [usedAt, sessionId]);
   }
 
   async deleteSession(token: string): Promise<void> {
@@ -224,6 +244,9 @@ interface SessionRow {
   token: string;
   expires_at: string;
   created_at: string;
+  user_agent?: string | null;
+  ip?: string | null;
+  last_used_at?: string | null;
 }
 
 interface ResetTokenRow {
@@ -264,6 +287,9 @@ function mapSession(r: SessionRow): Session {
     token: r.token,
     expiresAt: r.expires_at,
     createdAt: r.created_at,
+    userAgent: r.user_agent ?? null,
+    ip: r.ip ?? null,
+    lastUsedAt: r.last_used_at ?? null,
   };
 }
 

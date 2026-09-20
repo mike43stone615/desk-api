@@ -15,6 +15,15 @@ export interface Session {
   token: string;
   expiresAt: string;
   createdAt: string;
+  /** The browser/app that signed in, and the address it signed in from (null for sessions from before these were kept). */
+  userAgent: string | null;
+  ip: string | null;
+  lastUsedAt: string | null;
+}
+
+export interface SessionMeta {
+  userAgent?: string | null;
+  ip?: string | null;
 }
 
 export interface PasswordResetToken {
@@ -50,7 +59,12 @@ export interface DatabaseRepository {
   markUserEmailConfirmed(userId: string, confirmedAt: string): Promise<void>;
 
   // Sessions
-  createSession(id: string, userId: string, token: string, expiresAt: string): Promise<Session>;
+  createSession(id: string, userId: string, token: string, expiresAt: string, meta?: SessionMeta): Promise<Session>;
+  /** The user's sessions that have not expired, newest first. */
+  listSessionsForUser(userId: string): Promise<Session[]>;
+  /** Ends one of the user's own sessions by its id. False when there is no such session of theirs. */
+  deleteSessionById(userId: string, sessionId: string): Promise<boolean>;
+  touchSession(sessionId: string, usedAt: string): Promise<void>;
   findSessionByToken(token: string): Promise<Session | null>;
   deleteSession(token: string): Promise<void>;
   deleteAllSessionsForUser(userId: string): Promise<void>;

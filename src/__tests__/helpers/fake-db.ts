@@ -135,13 +135,36 @@ export function createFakeDb() {
 
     // ── sessions ───────────────────────────────────────────────────────────
     if (s.startsWith('INSERT INTO sessions')) {
-      const [id, user_id, token, expires_at] = p;
-      const row: FakeRow = { id, user_id, token, expires_at, created_at: nowIso() };
+      const [id, user_id, token, expires_at, user_agent, ip] = p;
+      const row: FakeRow = { id, user_id, token, expires_at, created_at: nowIso(), user_agent: user_agent ?? null, ip: ip ?? null, last_used_at: null };
       sessions.set(token, row);
       return { rows: [row], rowCount: 1 };
     }
+    if (s === 'DELETE FROM sessions WHERE user_id = $1') {
+      for (const [token, row] of sessions) if (row.user_id === p[0]) sessions.delete(token);
+      return { rows: [], rowCount: 1 };
+    }
     if (s.startsWith('DELETE FROM sessions WHERE user_id = $1 AND token <> $2')) {
       for (const [token, row] of sessions) if (row.user_id === p[0] && token !== p[1]) sessions.delete(token);
+      return { rows: [], rowCount: 1 };
+    }
+    if (s.startsWith('SELECT id, user_id, token, expires_at, created_at, user_agent, ip, last_used_at FROM sessions WHERE user_id = $1')) {
+      const rows = [...sessions.values()]
+        .filter((r) => r.user_id === p[0] && (r.expires_at as string) > p[1])
+        .sort((a, b) => String(b.created_at).localeCompare(String(a.created_at)));
+      return { rows, rowCount: rows.length };
+    }
+    if (s.startsWith('DELETE FROM sessions WHERE id = $1 AND user_id = $2')) {
+      for (const [token, row] of sessions) {
+        if (row.id === p[0] && row.user_id === p[1]) {
+          sessions.delete(token);
+          return { rows: [], rowCount: 1 };
+        }
+      }
+      return { rows: [], rowCount: 0 };
+    }
+    if (s.startsWith('UPDATE sessions SET last_used_at = $1 WHERE id = $2')) {
+      for (const row of sessions.values()) if (row.id === p[1]) row.last_used_at = p[0];
       return { rows: [], rowCount: 1 };
     }
     if (s.startsWith('DELETE FROM sessions WHERE token = $1')) {
