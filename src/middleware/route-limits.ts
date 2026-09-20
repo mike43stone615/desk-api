@@ -52,6 +52,7 @@ export const USER_RULES: Record<string, Limit> = {
   'POST /setup/drafts/:id/complete': perHour('draft-complete', 20, 'businesses created'),
   'POST /auth/password': perHour('password-change', 10, 'password changes'),
   'POST /auth/account/delete': perHour('account-delete', 5, 'account deletion attempts'),
+  'GET /auth/account/export': perHour('account-export', 5, 'data exports'),
 };
 
 /** "METHOD /pattern" for the matched route, with any /v1 prefix removed; null when no route matched. */

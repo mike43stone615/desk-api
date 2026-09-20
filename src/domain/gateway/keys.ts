@@ -45,6 +45,8 @@ export interface GatewayKeySummary {
   services: GatewayService[];
   /** True while the owner (or an administrator) has switched the key off without revoking it. */
   suspended?: boolean;
+  /** When the key stops working, or null for a key that does not expire. */
+  expiresAt?: string | null;
 }
 
 export interface CreatedGatewayKey extends GatewayKeySummary {
@@ -58,6 +60,8 @@ export interface VerifiedGatewayKey {
   services: ReadonlySet<GatewayService>;
   /** The key, or its owner's whole account, is switched off (see domain/suspension.ts). */
   suspended: boolean;
+  /** Set when the key is past its expiry date or has been idle too long: it must be refused, with this reason. */
+  timeProblem?: 'expired' | 'idle';
 }
 
 export function looksLikeGatewayKey(value: unknown): value is string {
@@ -76,6 +80,17 @@ interface KeyRow {
   key_prefix: string;
   created_at: string;
   last_used_at: string | null;
+  expires_at?: string | null;
+}
+
+/** A key nobody has used for this long is refused (and revoked by the nightly job); the owner can simply make a new one. */
+export const KEY_IDLE_DAYS = 180;
+
+/** Why a key can no longer be used because of time, or null when it is fine. */
+export function keyTimeProblem(key: { created_at: string; last_used_at: string | null; expires_at?: string | null }, now = Date.now()): 'expired' | 'idle' | null {
+  if (key.expires_at && Date.parse(key.expires_at) <= now) return 'expired';
+  if (now - Date.parse(key.last_used_at ?? key.created_at) > KEY_IDLE_DAYS * 86_400_000) return 'idle';
+  return null;
 }
 
 function toSummary(row: KeyRow, services: GatewayService[]): GatewayKeySummary {
@@ -86,6 +101,7 @@ function toSummary(row: KeyRow, services: GatewayService[]): GatewayKeySummary {
     createdAt: row.created_at,
     lastUsedAt: row.last_used_at,
     services,
+    expiresAt: row.expires_at ?? null,
   };
 }
 
@@ -98,7 +114,7 @@ export const gatewayApiKeys = {
   /** The owner's non-revoked keys, newest first, each with its enabled services. */
   async list(ownerUserId: string): Promise<GatewayKeySummary[]> {
     const { rows } = await pool.query<KeyRow>(
-      `SELECT id, label, key_prefix, created_at, last_used_at
+      `SELECT id, label, key_prefix, created_at, last_used_at, expires_at
        FROM gateway_api_keys
        WHERE revoked_at IS NULL AND owner_user_id = $1
        ORDER BY created_at DESC`,
@@ -135,7 +151,7 @@ export const gatewayApiKeys = {
    * services are minted first; if anything after that fails, whatever was
    * already minted is revoked again so no orphaned live credentials remain.
    */
-  async create(ownerUserId: string, label: string, requested: GatewayService[]): Promise<CreatedGatewayKey> {
+  async create(ownerUserId: string, label: string, requested: GatewayService[], expiresInDays?: number): Promise<CreatedGatewayKey> {
     const services = orderServices(requested);
     if (services.length === 0) throw new GatewayKeyError('service_unavailable', 'Choose at least one API.');
 
@@ -181,10 +197,10 @@ export const gatewayApiKeys = {
       try {
         await client.query('BEGIN');
         const inserted = await client.query<KeyRow>(
-          `INSERT INTO gateway_api_keys (id, owner_user_id, label, key_hash, key_prefix)
-           VALUES ($1, $2, $3, $4, $5)
-           RETURNING id, label, key_prefix, created_at, last_used_at`,
-          [id, ownerUserId, label, keyHash, keyPrefix],
+          `INSERT INTO gateway_api_keys (id, owner_user_id, label, key_hash, key_prefix, expires_at)
+           VALUES ($1, $2, $3, $4, $5, $6)
+           RETURNING id, label, key_prefix, created_at, last_used_at, expires_at`,
+          [id, ownerUserId, label, keyHash, keyPrefix, expiresInDays ? new Date(Date.now() + expiresInDays * 86_400_000).toISOString() : null],
         );
         row = inserted.rows[0];
         for (const service of services) {
@@ -279,12 +295,15 @@ export const gatewayApiKeys = {
   async verify(plaintext: string): Promise<VerifiedGatewayKey | null> {
     if (!looksLikeGatewayKey(plaintext)) return null;
     try {
-      const { rows } = await pool.query<{ id: string; owner_user_id: string; revoked_at: string | null }>(
-        `SELECT id, owner_user_id, revoked_at FROM gateway_api_keys WHERE key_hash = $1`,
+      const { rows } = await pool.query<{ id: string; owner_user_id: string; revoked_at: string | null; created_at: string; last_used_at: string | null; expires_at: string | null }>(
+        `SELECT id, owner_user_id, revoked_at, created_at, last_used_at, expires_at FROM gateway_api_keys WHERE key_hash = $1`,
         [hashGatewayKey(plaintext)],
       );
       const key = rows[0];
       if (!key || key.revoked_at) return null;
+      // An expired or idle key is refused with its own reason (see verifyOrExplain in the routes).
+      const timeProblem = keyTimeProblem(key);
+      if (timeProblem) return { id: key.id, ownerUserId: key.owner_user_id, services: new Set(), suspended: false, timeProblem };
       const { rows: grants } = await pool.query<{ service: GatewayService }>(
         `SELECT service FROM gateway_api_key_grants WHERE api_key_id = $1`,
         [key.id],

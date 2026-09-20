@@ -179,6 +179,14 @@ export function registerErrorHandler(app: FastifyInstance) {
       // A refusal that says when to come back (rate limits, an open circuit breaker) carries a Retry-After header.
       const retryAfter = (error as { retryAfterSeconds?: number }).retryAfterSeconds;
       if (retryAfter && !reply.hasHeader('retry-after')) reply.header('Retry-After', String(retryAfter));
+      // Who tried what and was refused, as one structured line to search for (never the credential itself).
+      if (error.status === 401 || error.status === 403) {
+        const h = request.headers;
+        request.log.warn({
+          event: 'request_denied', status: error.status, code: error.code ?? defaultCode(error.status), method: request.method,
+          route: request.routeOptions?.url ?? '(no route)', credential: h['x-api-key'] ? 'api_key' : h.authorization ? 'bearer_token' : request.headers.cookie ? 'cookie' : 'none',
+        }, 'request denied');
+      }
       return reply.status(error.status).send(problem(request, error.status, error.message, error.errors, error.code));
     }
     if (error instanceof ZodError) {

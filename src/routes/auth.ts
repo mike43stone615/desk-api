@@ -10,6 +10,8 @@ import type { FastifyReply, FastifyRequest } from 'fastify';
 import type { Session } from '../interfaces/database';
 import { HttpError, validationError } from '../middleware/http-error';
 import { isUserSuspended } from '../domain/suspension';
+import { pool } from '../db';
+import { gatewayApiKeys } from '../domain/gateway/keys';
 import { authService } from '../infrastructure/auth';
 import { AuthError } from '../infrastructure/auth/auth-service';
 import { requireAuth, extractSessionToken } from '../middleware/auth';
@@ -371,6 +373,51 @@ async function requireCurrentPassword(request: FastifyRequest, reply: FastifyRep
   await clearSigninFailures(ip, user.email);
 }
 
+/**
+ * A copy of everything this service holds about the caller, as one JSON file they can keep (their right to their own
+ * data). Never includes password hashes, session tokens or API key secrets: those are not the person's data, they are
+ * credentials, and the service itself only stores hashes of them.
+ */
+export async function exportAccountHandler(request: FastifyRequest, reply: FastifyReply) {
+  await requireAuth(request, reply);
+  const user = request.currentUser!;
+  const [sessions, drafts, businesses, keys, events] = await Promise.all([
+    authService.listSessions(user.id),
+    pool.query<{ id: string; draft_json: string; created_at: string; updated_at: string }>(
+      `SELECT id, draft_json, created_at, updated_at FROM business_setup_drafts WHERE user_id = $1 ORDER BY updated_at DESC`,
+      [user.id],
+    ),
+    pool.query<{ id: string; name: string; industry: string | null; role: string }>(
+      `SELECT b.id, b.name, b.industry, bm.role
+     FROM businesses b
+     INNER JOIN business_memberships bm ON bm.business_id = b.id
+     WHERE bm.user_id = $1 AND bm.accepted_at IS NOT NULL
+     ORDER BY b.updated_at DESC, b.id
+     LIMIT $2 OFFSET $3`,
+      [user.id, 1000, 0],
+    ),
+    gatewayApiKeys.list(user.id),
+    listSecurityEvents(user.id, emailFingerprint(user.email), 1000),
+  ]);
+  const day = new Date().toISOString().slice(0, 10);
+  reply.header('Content-Disposition', `attachment; filename="desk-data-${day}.json"`);
+  audit(request, 'account_exported', 'ok', { userId: user.id });
+  return reply.send({
+    exportedAt: new Date().toISOString(),
+    note: 'Everything Desk holds about this account. Passwords, session tokens and API key secrets are stored only as one-way hashes and are not part of it.',
+    account: { id: user.id, email: user.email, firstName: user.firstName, lastName: user.lastName, emailConfirmedAt: user.emailConfirmedAt, createdAt: user.createdAt },
+    sessions: sessions.map((s) => ({ id: s.id, createdAt: s.createdAt, lastUsedAt: s.lastUsedAt, expiresAt: s.expiresAt, userAgent: s.userAgent, ip: s.ip })),
+    businesses: businesses.rows,
+    drafts: drafts.rows.map((d) => ({ id: d.id, createdAt: d.created_at, updatedAt: d.updated_at, draft: safeJson(d.draft_json) })),
+    apiKeys: keys,
+    securityEvents: events.map((e) => ({ id: e.id, event: e.event, outcome: e.outcome, at: new Date(e.created_at).toISOString(), ip: e.ip_address, userAgent: e.user_agent })),
+  });
+}
+
+function safeJson(text: string): unknown {
+  try { return JSON.parse(text); } catch { return null; }
+}
+
 /** Permanently deletes the caller's own account. Needs the password; a session (or a stolen laptop) is not enough. */
 export async function deleteAccountHandler(request: FastifyRequest, reply: FastifyReply) {
   await requireAuth(request, reply);
@@ -383,6 +430,8 @@ export async function deleteAccountHandler(request: FastifyRequest, reply: Fasti
   // Logged, but not stored as a security event: the person's stored events are deleted with the account (they hold
   // network addresses and browser details), and a new row for a user that no longer exists would fail anyway.
   request.log.info({ level: 'audit', event: 'account_deleted', requestId: request.id, ts: new Date().toISOString(), userId: user.id });
+  // Keys first, so their backend keys are revoked now rather than by the background sweeper a few minutes later.
+  await gatewayApiKeys.revokeAllForOwner(user.id).catch(() => 0);
   await authService.deleteAccount(user.id);
   clearSessionCookie(reply);
   return reply.send({ ok: true });

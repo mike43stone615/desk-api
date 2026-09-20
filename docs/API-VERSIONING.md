@@ -37,6 +37,19 @@ ignore fields they do not know and must branch on the error `code`, not on the w
 
 No `Sunset` date has been set for these yet.
 
+## Which older route duplicates which newer one (the legacy aliases)
+
+Every route exists twice: under `/v1` (the contract) and unprefixed (the legacy spelling, kept for the Desk app's older
+builds; identical apart from the table below). Beyond that, these older *names* duplicate newer ones:
+
+| Older name | Newer name | Where |
+| --- | --- | --- |
+| `/functions/v1/check-business-name-availability`, `check-dba-name-availability`, `check-trademark-availability`, `check-name-multi-state`, `check-names-batch`, `check-name-trend`, `registry-sync-status`, `business-structures*` | `/gateway/registry/name-availability`, `dba-availability`, `trademark-availability`, `multi-state-availability`, `batch-availability`, `name-trend`, `sync-status`, `business-structures*` | the first column is for a **signed-in person** (the Desk app); the second is for a **key** (developers) |
+| `/integrations/market-research/analyze` | `/gateway/market/research/analyze` | same split: person versus key |
+| `/gateway/registry/functions/v1/check-*` | the clean names above | deprecated, answers carry `Deprecation` and `Link` headers |
+
+Rule of thumb: developers use `/v1/gateway/...` with a key; the Desk app uses the person-facing names with a session.
+
 ## Conventions that differ between `/v1` and the unprefixed aliases
 
 Some conventions were tightened for the versioned contract. The unprefixed routes keep their original behaviour so no

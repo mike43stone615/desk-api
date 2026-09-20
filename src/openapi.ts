@@ -8,6 +8,11 @@
 // upstream isn't configured, and the failure-mode status code.
 
 import { ERROR_CODES } from './middleware/error-codes';
+import { GATEWAY_EXAMPLES } from './openapi-examples';
+import { bodySchemaFrom, inferSchema } from './openapi-schema';
+import { ConfirmEmailSchema, DeleteAccountSchema, EmailOnlySchema, PasswordResetConfirmSchema, SignInSchema, SignUpSchema, UpdatePasswordSchema } from './validators/auth';
+import { CreateGatewayKeySchema } from './validators/gateway';
+import { DraftPatchSchema, MemberInviteSchema } from './validators/setup';
 
 const problemSchema = {
   type: 'object',
@@ -361,6 +366,9 @@ const BASE_SPEC = {
         responses: { '200': { description: 'OK' }, '403': { description: 'The current password is not correct (code current_password_incorrect)' } },
       },
     },
+    '/gateway/api-keys/{id}/usage': {
+      get: { tags: ['API Library'], summary: 'Calls and errors per day for one of your own keys, its expiry, and the limits that apply', security: [{ SessionToken: [] }], parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }, { name: 'days', in: 'query', required: false, schema: { type: 'integer', minimum: 1, maximum: 90, default: 30 } }], responses: { '200': { description: 'Usage and limits' }, '404': { description: 'Not your key, or revoked' } } },
+    },
     '/gateway/api-keys/{id}/suspend': {
       post: { tags: ['API Library'], summary: 'Switch one of your own keys off without revoking it', security: [{ SessionToken: [] }], parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }], responses: { '200': { description: 'Suspended' }, '404': { description: 'Not your key, or already revoked' } } },
     },
@@ -369,6 +377,10 @@ const BASE_SPEC = {
     },
     '/admin/gateway-keys': {
       get: { tags: ['Admin'], summary: 'Every live API key: owner, services, last use, and whether it is suspended', security: [{ SessionToken: [] }], responses: { '200': { description: 'OK' }, '403': { description: 'Not an administrator, or the sign-in is older than 24 hours' } } },
+    },
+    '/admin/gateway-keys/reconcile': {
+      get: { tags: ['Admin'], summary: 'What the last comparison of our keys with the backends found', security: [{ SessionToken: [] }], responses: { '200': { description: 'The last report, or null before the first run' } } },
+      post: { tags: ['Admin'], summary: 'Compare our keys with the backends now (orphans are revoked), and return the report', security: [{ SessionToken: [] }], responses: { '200': { description: 'The new report' } } },
     },
     '/admin/gateway-keys/{id}/suspend': {
       post: { tags: ['Admin'], summary: 'Suspend any API key (nothing is revoked)', security: [{ SessionToken: [] }], parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }], responses: { '200': { description: 'Suspended' }, '404': { description: 'No such key' } } },
@@ -381,6 +393,9 @@ const BASE_SPEC = {
     },
     '/admin/users/{id}/unsuspend': {
       post: { tags: ['Admin'], summary: 'Lift an account suspension', security: [{ SessionToken: [] }], parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }], responses: { '200': { description: 'Lifted' }, '404': { description: 'Not suspended' } } },
+    },
+    '/auth/account/export': {
+      get: { tags: ['Auth'], summary: 'Download everything Desk holds about your account as one JSON file', security: [{ SessionToken: [] }], responses: { '200': { description: 'The export (a file download). No password hashes, tokens or key secrets.' } } },
     },
     '/auth/account/delete': {
       post: {
@@ -699,7 +714,43 @@ function withStandardResponses<T extends { paths: Record<string, Record<string, 
   return spec;
 }
 
+/** Which validator each documented request body comes from: the description is generated from what the routes accept. */
+const BODY_VALIDATORS: Array<[path: string, method: string, schema: Parameters<typeof bodySchemaFrom>[0]]> = [
+  ['/auth/signup', 'post', SignUpSchema],
+  ['/auth/signin', 'post', SignInSchema],
+  ['/auth/email-confirmation/request', 'post', EmailOnlySchema],
+  ['/auth/email-confirmation/confirm', 'post', ConfirmEmailSchema],
+  ['/auth/password-reset/request', 'post', EmailOnlySchema],
+  ['/auth/password-reset/confirm', 'post', PasswordResetConfirmSchema],
+  ['/auth/password', 'post', UpdatePasswordSchema],
+  ['/auth/account/delete', 'post', DeleteAccountSchema],
+  ['/gateway/api-keys', 'post', CreateGatewayKeySchema],
+  ['/setup/businesses/{id}/members', 'post', MemberInviteSchema],
+  ['/setup/drafts/{id}', 'patch', DraftPatchSchema],
+];
+export const DOCUMENTED_BODY_VALIDATORS = BODY_VALIDATORS;
+for (const [path, method, schema] of BODY_VALIDATORS) {
+  const op = (BASE_SPEC.paths as unknown as Record<string, Record<string, SpecOperation>>)[path]?.[method];
+  if (!op) throw new Error(`openapi: no ${method.toUpperCase()} ${path} to attach a request body to`);
+  (op as Record<string, unknown>).requestBody = { required: true, content: { 'application/json': { schema: bodySchemaFrom(schema) } } };
+}
+
 export const OPENAPI_SPEC = withStandardResponses(BASE_SPEC);
+
+/** Attaches the real captured request and answer (src/openapi-examples.ts) to an operation of the published description. */
+function withExample(method: string, path: string, op: SpecOperation): SpecOperation {
+  const example = GATEWAY_EXAMPLES[`${method.toUpperCase()} /v1${path}`];
+  if (!example) return op;
+  const copy: SpecOperation = { ...op, responses: { ...(op.responses ?? {}) } };
+  const status = String(example.status);
+  const existing = (copy.responses?.[status] ?? { description: 'OK' }) as { description?: string };
+  (copy.responses as Record<string, unknown>)[status] = { ...existing, content: { 'application/json': { schema: inferSchema(example.response), example: example.response } } };
+  if (example.request !== null && example.request !== undefined) {
+    const body = ((copy as Record<string, { content?: Record<string, { schema?: unknown }> }>).requestBody?.content?.['application/json'] ?? {}) as { schema?: unknown };
+    (copy as Record<string, unknown>).requestBody = { required: true, content: { 'application/json': { ...body, example: example.request } } };
+  }
+  return copy;
+}
 
 function buildLibrarySpec() {
   const paths: Record<string, Record<string, unknown>> = {};
@@ -707,7 +758,7 @@ function buildLibrarySpec() {
     const kept: Record<string, unknown> = {};
     for (const [method, op] of Object.entries(operations)) {
       const usesKey = (op.security ?? []).some((entry) => 'ApiLibraryKey' in entry);
-      if (path.startsWith('/gateway/') || usesKey) kept[method] = op;
+      if (path.startsWith('/gateway/') || usesKey) kept[method] = withExample(method, path, op);
     }
     if (Object.keys(kept).length > 0) paths[path] = kept;
   }

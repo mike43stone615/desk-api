@@ -43,6 +43,7 @@ export const GATEWAY_KEY_ALLOWED_ROUTES: ReadonlySet<string> = new Set([
 async function authenticateWithGatewayKey(request: FastifyRequest, apiKey: string): Promise<void> {
   const verified = await gatewayApiKeys.verify(apiKey);
   if (!verified) throw new HttpError(401, 'Invalid or revoked API key.', 'invalid_api_key');
+  if (verified.timeProblem) throw expiredKeyError(verified.timeProblem);
   if (verified.suspended) throw new HttpError(403, 'This API key is suspended.', 'api_key_suspended');
   if (!verified.services.has('desk_api')) {
     throw new HttpError(403, 'This API key is not enabled for the Desk API.', 'api_key_service_not_enabled');
@@ -55,6 +56,15 @@ async function authenticateWithGatewayKey(request: FastifyRequest, apiKey: strin
   if (!owner) throw new HttpError(401, 'Invalid or revoked API key.', 'invalid_api_key');
   request.currentUser = owner;
   request.gatewayKey = verified;
+  // Every line this request logs from now on says it was a key, and which one (never the key itself).
+  request.log = request.log.child({ auth: 'key', keyId: verified.id, userId: owner.id });
+}
+
+/** 401 for a key that is past its expiry date or has been idle for months. */
+export function expiredKeyError(problem: 'expired' | 'idle'): HttpError {
+  return problem === 'expired'
+    ? new HttpError(401, 'This API key has expired. Create a new one.', 'api_key_expired')
+    : new HttpError(401, 'This API key has not been used for a long time and was switched off. Create a new one.', 'api_key_idle');
 }
 
 export function extractBearerToken(request: FastifyRequest): string | null {
@@ -84,6 +94,7 @@ export async function requireAuth(request: FastifyRequest, reply: FastifyReply):
     // Suspending an account ends its sessions; this catches one created in the same instant.
     if (await isUserSuspended(user.id)) throw new HttpError(403, 'This account is suspended.', 'account_suspended');
     request.currentUser = user;
+    request.log = request.log.child({ auth: 'session', userId: user.id });
   }
   // The general limit per PERSON, on top of the one per address: a leaked session or key used from many addresses is
   // still one account with one allowance.

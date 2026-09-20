@@ -51,6 +51,7 @@ import {
   confirmPasswordResetHandler,
   updatePasswordHandler,
   deleteAccountHandler,
+  exportAccountHandler,
 } from './routes/auth';
 import {
   listDraftsHandler,
@@ -95,6 +96,7 @@ import { marketResearchAnalyzeHandler } from './routes/integrations/marketResear
 import {
   createGatewayKeyHandler,
   libraryOpenApiHandler,
+  keyUsageHandler,
   resumeGatewayKeyHandler,
   suspendGatewayKeyHandler,
   listGatewayKeysHandler,
@@ -103,10 +105,11 @@ import {
 } from './routes/gateway';
 import { gatewayMarketProxyHandler, gatewayRegistryProxyHandler } from './routes/gatewayProxy';
 import { registerLibraryUi } from './routes/libraryUi';
-import { adminListKeysHandler, adminResumeKeyHandler, adminSuspendKeyHandler, adminSuspendUserHandler, adminUnsuspendUserHandler } from './routes/adminAccounts';
+import { adminReconcileReportHandler, adminReconcileRunHandler, adminListKeysHandler, adminResumeKeyHandler, adminSuspendKeyHandler, adminSuspendUserHandler, adminUnsuspendUserHandler } from './routes/adminAccounts';
 import { registerSecurityTxt } from './routes/securityTxt';
 import { ERROR_CODES } from './middleware/error-codes';
 import { registerPathParamCheck } from './middleware/path-params';
+import { recordKeyUsage } from './domain/gateway/usage';
 import { sendWithEtag } from './middleware/etag';
 
 // Captured once at module load (= process start for all practical purposes)
@@ -372,6 +375,11 @@ export async function buildApp(options: { logStream?: { write: (line: string) =>
     const method = methodLabel(request.method);
     const status = String(reply.statusCode);
     httpRequestsTotal.inc({ method, route, status_code: status });
+    // Calls made with an API Library key are counted per key and day (what the developer sees) and per API (metrics).
+    if (request.gatewayKey) {
+      const proxied = /\/gateway\/(registry|market)\//.exec(request.url);
+      recordKeyUsage(request.gatewayKey.id, proxied ? (proxied[1] === 'registry' ? 'registry_api' : 'market_validation_api') : 'desk_api', reply.statusCode);
+    }
     if (start !== undefined) {
       httpRequestDurationMs.observe({ method, route }, Date.now() - start);
     }
@@ -399,6 +407,7 @@ async function registerLegacyAndVersionedRoutes(instance: FastifyInstance) {
   instance.post('/auth/password-reset/confirm', small, confirmPasswordResetHandler);
   instance.post('/auth/password', small, updatePasswordHandler);
   instance.post('/auth/account/delete', small, deleteAccountHandler);
+  instance.get('/auth/account/export', exportAccountHandler);
 
   // ── Business setup ───────────────────────────────────────────────────────
   instance.get('/setup/drafts', listDraftsHandler);
@@ -417,6 +426,8 @@ async function registerLegacyAndVersionedRoutes(instance: FastifyInstance) {
 
   // ── Admin table browser (+ upstream aggregation) ────────────────────────
   instance.get('/admin/gateway-keys', adminListKeysHandler);
+  instance.get('/admin/gateway-keys/reconcile', adminReconcileReportHandler);
+  instance.post('/admin/gateway-keys/reconcile', small, adminReconcileRunHandler);
   instance.post('/admin/users/:id/suspend', small, adminSuspendUserHandler);
   instance.post('/admin/users/:id/unsuspend', small, adminUnsuspendUserHandler);
   instance.post('/admin/gateway-keys/:id/suspend', small, adminSuspendKeyHandler);
@@ -453,6 +464,7 @@ async function registerLegacyAndVersionedRoutes(instance: FastifyInstance) {
   instance.get('/gateway/api-keys', listGatewayKeysHandler);
   instance.post('/gateway/api-keys', small, createGatewayKeyHandler);
   instance.delete('/gateway/api-keys/:id', revokeGatewayKeyHandler);
+  instance.get('/gateway/api-keys/:id/usage', keyUsageHandler);
   instance.post('/gateway/api-keys/:id/suspend', small, suspendGatewayKeyHandler);
   instance.post('/gateway/api-keys/:id/resume', small, resumeGatewayKeyHandler);
 

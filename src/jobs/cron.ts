@@ -16,12 +16,13 @@ import { randomUUID } from 'crypto';
 import type { FastifyBaseLogger } from 'fastify';
 import { authDb } from '../infrastructure/auth';
 import { backendKeySweepTotal, cronTicksTotal, gatewayKeyDrift } from '../modules/metrics';
-import { reconcileBackendKeys } from '../domain/gateway/reconcile';
+import { runReconcileAndRemember } from '../domain/gateway/reconcile';
 import { sweepBackendKeys } from '../domain/gateway/orphans';
 import { getRedis } from '../middleware/redis-client';
 import { deleteExpiredEmailInvites } from '../domain/setup/email-invites';
 import { deleteExpiredSecurityEvents } from '../modules/audit/security-events';
 import { deleteExpiredAuditRows } from '../modules/audit/mutation-audit';
+import { revokeExpiredKeys } from '../domain/gateway/expiry';
 import { config } from '../config';
 
 let task: cron.ScheduledTask | null = null;
@@ -62,7 +63,7 @@ export async function runKeyReconcile(log: FastifyBaseLogger): Promise<void> {
     }
   }
   try {
-    const report = await reconcileBackendKeys();
+    const report = await runReconcileAndRemember('schedule');
     gatewayKeyDrift.set({ kind: 'missing_backend_key' }, report.missing);
     gatewayKeyDrift.set({ kind: 'orphan_backend_key' }, report.orphansFailed);
     if (report.orphansRevoked) backendKeySweepTotal.inc({ outcome: 'orphan_revoked' }, report.orphansRevoked);
@@ -134,6 +135,7 @@ export async function runCleanup(log: FastifyBaseLogger): Promise<void> {
     await deleteExpiredEmailInvites();
     await deleteExpiredSecurityEvents();
     await deleteExpiredAuditRows();
+    await revokeExpiredKeys(log);
     cronTicksTotal.inc({ job: 'auth_cleanup', outcome: 'ok' });
     log.info({ event: 'cron_auth_cleanup' }, 'auth cleanup tick completed');
   } catch (err) {

@@ -7,6 +7,7 @@ import { HttpError, validationError } from '../middleware/http-error';
 import { guard } from './admin';
 import { logMutation, requestIp, requestUserAgent } from '../modules/audit/mutation-audit';
 import { resumeKey, suspendKey, suspendUser, unsuspendUser } from '../domain/suspension';
+import { lastReconcileReport, runReconcileAndRemember } from '../domain/gateway/reconcile';
 
 const ReasonSchema = z.object({ reason: z.string().trim().max(300, 'reason must be at most 300 characters').optional() });
 
@@ -44,6 +45,20 @@ export async function adminListKeysHandler(request: FastifyRequest, reply: Fasti
       ownerSuspended: Boolean(r.owner_suspended),
     })),
   });
+}
+
+/** What the last comparison of our keys with the backends' found (orphans revoked, keys missing upstream). */
+export async function adminReconcileReportHandler(request: FastifyRequest, reply: FastifyReply) {
+  await guard(request, reply);
+  return reply.send({ last: lastReconcileReport() });
+}
+
+/** Compares our keys with the backends' now (the same thing the hourly job does: orphans are revoked). */
+export async function adminReconcileRunHandler(request: FastifyRequest, reply: FastifyReply) {
+  await guard(request, reply);
+  const report = await runReconcileAndRemember(actor(request));
+  record(request, 'reconcile_keys', 'gateway_api_key', 'all', report);
+  return reply.send({ last: lastReconcileReport() });
 }
 
 export async function adminSuspendUserHandler(request: FastifyRequest, reply: FastifyReply) {

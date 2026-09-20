@@ -62,6 +62,8 @@ export const ERROR_CODES: Record<string, string> = {
   admin_recent_signin_required: 'Administrator routes need a sign-in from the last 24 hours; sign in again.',
   admin_key_ip_not_allowed: 'The administrator key is not accepted from this address.',
   account_suspended: 'This account has been suspended.',
+  api_key_expired: 'The API key is past its expiry date.',
+  api_key_idle: 'The API key was not used for six months and was switched off.',
   api_key_suspended: 'This API key is suspended (switched off without being revoked).',
   admin_not_available_for_keys: 'Administrator routes cannot be used with an API key.',
   // businesses and setup

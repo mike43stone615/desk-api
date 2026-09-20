@@ -12,6 +12,9 @@ import { sendWithEtag } from '../middleware/etag';
 import { requireAuth, requireConfirmedEmail } from '../middleware/auth';
 import { gatewayApiKeys, GatewayKeyError } from '../domain/gateway/keys';
 import { resumeKey, suspendKey } from '../domain/suspension';
+import { IDLE_DAYS, keyUsage, limitsFor } from '../domain/gateway/usage';
+import { config } from '../config';
+import { KEY_BUCKET_FACTOR } from '../middleware/api-protection';
 import { BrokerError } from '../domain/gateway/broker';
 import { getServiceCatalog } from '../domain/gateway/services';
 import { CreateGatewayKeySchema } from '../validators/gateway';
@@ -46,7 +49,7 @@ export async function createGatewayKeyHandler(request: FastifyRequest, reply: Fa
   const user = request.currentUser!;
 
   try {
-    const created = await gatewayApiKeys.create(user.id, parsed.data.label, parsed.data.services);
+    const created = await gatewayApiKeys.create(user.id, parsed.data.label, parsed.data.services, parsed.data.expiresInDays);
     auditKey(request, 'gateway_key_created', {
       userId: user.id,
       keyId: created.id,
@@ -64,6 +67,27 @@ export async function createGatewayKeyHandler(request: FastifyRequest, reply: Fa
     }
     throw err;
   }
+}
+
+/** How much one of the caller's own keys has been used (calls and errors per day), and the limits that apply to it. */
+export async function keyUsageHandler(request: FastifyRequest, reply: FastifyReply) {
+  await requireAuth(request, reply);
+  const { id } = request.params as { id: string };
+  const q = request.query as { days?: string };
+  const days = Math.min(90, Math.max(1, Number.parseInt(q.days ?? '30', 10) || 30));
+  const mine = (await gatewayApiKeys.list(request.currentUser!.id)).find((k) => k.id === id);
+  if (!mine) throw new HttpError(404, 'That key does not exist, is not yours, or was revoked.', 'api_key_not_found');
+  const daily = await keyUsage(id, days);
+  return reply.send({
+    keyId: id,
+    days,
+    lastUsedAt: mine.lastUsedAt,
+    expiresAt: mine.expiresAt ?? null,
+    idleExpiryDays: IDLE_DAYS,
+    totals: { calls: daily.reduce((n, d) => n + d.calls, 0), errors: daily.reduce((n, d) => n + d.errors, 0) },
+    daily,
+    limits: limitsFor(Math.ceil(config.rateLimitPerMinute * KEY_BUCKET_FACTOR)),
+  });
 }
 
 /** The owner switches one of their own keys off without revoking it (a leaked key under investigation, or a pause). */

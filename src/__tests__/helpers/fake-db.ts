@@ -32,6 +32,7 @@ export function createFakeDb() {
   const gatewayGrants: FakeRow[] = [];
   const appliedMigrations: string[] = readdirSync(join(__dirname, '..', '..', '..', 'migrations')).filter((f) => f.endsWith('.sql')).sort();
   const securityEvents: FakeRow[] = []; // migration 0014
+  const keyUsage: FakeRow[] = []; // migration 0017
   const accountSuspensions = new Map<string, FakeRow>(); // migration 0016, keyed by user id
   const keySuspensions = new Map<string, FakeRow>(); // migration 0016, keyed by key id
   const emailInvites = new Map<string, FakeRow>(); // keyed by id (migration 0013)
@@ -80,6 +81,20 @@ export function createFakeDb() {
         key_suspended_reason: (keySuspensions.get(k.id as string)?.reason as string) ?? null,
         key_suspended: keySuspensions.has(k.id as string), owner_suspended: accountSuspensions.has(k.owner_user_id as string),
       }));
+      return { rows, rowCount: rows.length };
+    }
+    if (s.startsWith('SELECT id, owner_user_id, created_at, last_used_at, expires_at FROM gateway_api_keys WHERE revoked_at IS NULL')) {
+      const rows = [...gatewayKeys.values()].filter((k) => !k.revoked_at);
+      return { rows, rowCount: rows.length };
+    }
+    if (s.startsWith('INSERT INTO gateway_key_usage')) {
+      const [key, day, errors] = p as unknown as [string, string, number];
+      const found = keyUsage.find((u) => u.api_key_id === key && u.day === day);
+      if (found) { found.calls = Number(found.calls) + 1; found.errors = Number(found.errors) + Number(errors); } else keyUsage.push({ api_key_id: key, day, calls: 1, errors: Number(errors) });
+      return { rows: [], rowCount: 1 };
+    }
+    if (s.startsWith('SELECT day, calls, errors FROM gateway_key_usage')) {
+      const rows = keyUsage.filter((u) => u.api_key_id === p[0] && String(u.day) >= p[1]).sort((a, b) => String(b.day).localeCompare(String(a.day)));
       return { rows, rowCount: rows.length };
     }
     if (s.startsWith('SELECT 1')) return { rows: [{ '?column?': 1 }], rowCount: 1 };
@@ -669,9 +684,9 @@ export function createFakeDb() {
       return { rows: [{ count: String(n) }], rowCount: 1 };
     }
     if (s.startsWith('INSERT INTO gateway_api_keys')) {
-      const [id, owner_user_id, label, key_hash, key_prefix] = p;
+      const [id, owner_user_id, label, key_hash, key_prefix, expires_at] = p;
       const row: FakeRow = {
-        id, owner_user_id, label, key_hash, key_prefix,
+        id, owner_user_id, label, key_hash, key_prefix, expires_at: expires_at ?? null,
         created_at: nowIso(), last_used_at: null, revoked_at: null,
       };
       gatewayKeys.set(id, row);
@@ -742,9 +757,9 @@ export function createFakeDb() {
       for (const g of gatewayGrants) if (g.api_key_id === p[0]) g.encrypted_backend_key = null;
       return { rows: [], rowCount: 1 };
     }
-    if (s.startsWith('SELECT id, owner_user_id, revoked_at FROM gateway_api_keys WHERE key_hash = $1')) {
+    if (s.startsWith('SELECT id, owner_user_id, revoked_at, created_at, last_used_at, expires_at FROM gateway_api_keys WHERE key_hash = $1')) {
       const k = [...gatewayKeys.values()].find((x) => x.key_hash === p[0]);
-      const rows = k ? [{ id: k.id, owner_user_id: k.owner_user_id, revoked_at: k.revoked_at }] : [];
+      const rows = k ? [{ id: k.id, owner_user_id: k.owner_user_id, revoked_at: k.revoked_at, created_at: k.created_at, last_used_at: k.last_used_at, expires_at: k.expires_at ?? null }] : [];
       return { rows, rowCount: rows.length };
     }
     if (s.startsWith('SELECT service FROM gateway_api_key_grants WHERE api_key_id = $1')) {
@@ -800,6 +815,7 @@ export function createFakeDb() {
     securityEvents,
     accountSuspensions,
     keySuspensions,
+    keyUsage,
     appliedMigrations,
   };
 }

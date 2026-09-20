@@ -33,6 +33,13 @@ export const cronTicksTotal = new Counter({
   registers: [metricsRegistry],
 });
 
+export const gatewayCallsTotal = new Counter({
+  name: 'desk_gateway_calls_total',
+  help: 'Calls made with an API Library key, by API and outcome (ok, client_error, server_error, rate_limited). Per-key numbers are in gateway_key_usage, never in labels.',
+  labelNames: ['service', 'outcome'] as const,
+  registers: [metricsRegistry],
+});
+
 export const upstreamCallsTotal = new Counter({
   name: 'desk_upstream_calls_total',
   help: 'Calls to backend services, by service and outcome (ok, error, retried, circuit_open, overloaded, caller_limited, too_large)',

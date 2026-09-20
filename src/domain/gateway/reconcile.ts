@@ -22,6 +22,19 @@ export interface DriftReport {
   unreachable: BrokeredService[];
 }
 
+/** The most recent report (from the hourly job or an administrator's run), kept for the admin report endpoint. */
+let lastReport: { at: string; by: string; report: DriftReport } | null = null;
+export function lastReconcileReport(): { at: string; by: string; report: DriftReport } | null {
+  return lastReport;
+}
+
+/** Runs the comparison and remembers its result: `by` says who asked ("schedule" or an administrator). */
+export async function runReconcileAndRemember(by: string): Promise<DriftReport> {
+  const report = await reconcileBackendKeys();
+  lastReport = { at: new Date().toISOString(), by, report };
+  return report;
+}
+
 export async function reconcileBackendKeys(now = Date.now()): Promise<DriftReport> {
   const report: DriftReport = { orphansRevoked: 0, orphansFailed: 0, missing: 0, unreachable: [] };
 
