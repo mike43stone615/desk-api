@@ -25,6 +25,7 @@ import { registerErrorHandler } from './middleware/http-error';
 import { registerNotFound } from './middleware/not-found';
 import { registerOriginCheck } from './middleware/origin-check';
 import { registerApiProtection } from './middleware/api-protection';
+import { registerRouteLimits } from './middleware/route-limits';
 import { registerIdempotency } from './middleware/idempotency';
 import { requireMetricsDocsKey } from './middleware/auth';
 import { OPENAPI_SPEC } from './openapi';
@@ -256,6 +257,7 @@ export async function buildApp(): Promise<FastifyInstance> {
   registerErrorHandler(app);
   registerOriginCheck(app);
   registerApiProtection(app);
+  registerRouteLimits(app);
   registerIdempotency(app);
 
   app.addHook('onRequest', async (request) => {

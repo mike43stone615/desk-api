@@ -9,6 +9,7 @@ import { authDb, authService } from '../infrastructure/auth';
 import { gatewayApiKeys, looksLikeGatewayKey, type VerifiedGatewayKey } from '../domain/gateway/keys';
 import { SESSION_COOKIE_NAME } from '../infrastructure/auth/session-cookie';
 import { config } from '../config';
+import { enforceUserRouteLimit, routeKey } from './route-limits';
 import type { User } from '../interfaces/database';
 
 declare module 'fastify' {
@@ -37,21 +38,14 @@ export const GATEWAY_KEY_ALLOWED_ROUTES: ReadonlySet<string> = new Set([
   'GET /setup/invites',
 ]);
 
-function gatewayRouteKey(request: FastifyRequest): string | null {
-  const pattern = request.routeOptions?.url;
-  if (!pattern) return null;
-  const unversioned = pattern === '/v1' ? '/' : pattern.startsWith('/v1/') ? pattern.slice(3) : pattern;
-  return `${request.method} ${unversioned}`;
-}
-
 async function authenticateWithGatewayKey(request: FastifyRequest, apiKey: string): Promise<void> {
   const verified = await gatewayApiKeys.verify(apiKey);
   if (!verified) throw new HttpError(401, 'Invalid or revoked API key.');
   if (!verified.services.has('desk_api')) {
     throw new HttpError(403, 'This API key is not enabled for the Desk API.');
   }
-  const routeKey = gatewayRouteKey(request);
-  if (!routeKey || !GATEWAY_KEY_ALLOWED_ROUTES.has(routeKey)) {
+  const matched = routeKey(request);
+  if (!matched || !GATEWAY_KEY_ALLOWED_ROUTES.has(matched)) {
     throw new HttpError(403, 'This API key cannot call this endpoint.');
   }
   const owner = await authDb.findUserById(verified.ownerUserId);
@@ -75,16 +69,18 @@ export function extractSessionToken(request: FastifyRequest): string | null {
 }
 
 /** Fastify preHandler — resolves the calling user onto request.currentUser, or throws 401. */
-export async function requireAuth(request: FastifyRequest, _reply: FastifyReply): Promise<void> {
+export async function requireAuth(request: FastifyRequest, reply: FastifyReply): Promise<void> {
   const token = extractSessionToken(request);
   if (!token) {
     const apiKey = request.headers['x-api-key'];
-    if (looksLikeGatewayKey(apiKey)) return authenticateWithGatewayKey(request, apiKey);
-    throw new HttpError(401, 'Authentication required.');
+    if (!looksLikeGatewayKey(apiKey)) throw new HttpError(401, 'Authentication required.');
+    await authenticateWithGatewayKey(request, apiKey);
+  } else {
+    const user = await authService.verifySession(token);
+    if (!user) throw new HttpError(401, 'Session expired or invalid.');
+    request.currentUser = user;
   }
-  const user = await authService.verifySession(token);
-  if (!user) throw new HttpError(401, 'Session expired or invalid.');
-  request.currentUser = user;
+  await enforceUserRouteLimit(request, reply);
 }
 
 /**
