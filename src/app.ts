@@ -31,7 +31,7 @@ import { applyHtmlCsp, docsCsp, docsInlineScript, SWAGGER_UI_CSS_SRI, SWAGGER_UI
 import { registerIdempotency } from './middleware/idempotency';
 import { requireMetricsDocsKey } from './middleware/auth';
 import { OPENAPI_SPEC } from './openapi';
-import { metricsRegistry, httpRequestsTotal, httpRequestDurationMs, normalizeRoute } from './modules/metrics';
+import { metricsRegistry, httpRequestsTotal, httpRequestDurationMs, routeLabel, methodLabel } from './modules/metrics';
 
 import {
   signUpHandler,
@@ -285,8 +285,8 @@ export async function buildApp(): Promise<FastifyInstance> {
   });
   app.addHook('onResponse', async (request, reply) => {
     const start = (request as { _startTime?: number })._startTime;
-    const route = normalizeRoute(request.url);
-    const method = request.method;
+    const route = routeLabel(request);
+    const method = methodLabel(request.method);
     const status = String(reply.statusCode);
     httpRequestsTotal.inc({ method, route, status_code: status });
     if (start !== undefined) {

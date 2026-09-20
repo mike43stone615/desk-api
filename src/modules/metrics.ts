@@ -47,7 +47,23 @@ export const backendKeySweepTotal = new Counter({
   registers: [metricsRegistry],
 });
 
-// Normalize URL patterns to avoid high-cardinality label explosion.
-export function normalizeRoute(url: string): string {
-  return url.split('?')[0];
+const KNOWN_METHODS = new Set(['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'HEAD', 'OPTIONS']);
+
+/**
+ * The `route` label of the request metrics: the route's PATTERN ("/setup/drafts/:id", "/gateway/registry/*"), never
+ * the URL that was called. Using the URL made one time series per draft id, per scanner probe and per random string
+ * anyone sent, growing the metrics (and this process's memory) without limit. The /v1 prefix is dropped so both
+ * spellings of a route share a series; anything that matched no route is one series, "unmatched".
+ */
+export function routeLabel(request: { routeOptions?: { url?: string }; is404?: boolean }): string {
+  if (request.is404) return 'unmatched';
+  const pattern = request.routeOptions?.url;
+  if (!pattern || pattern === '*') return 'unmatched';
+  if (pattern === '/v1') return '/';
+  return pattern.startsWith('/v1/') ? pattern.slice(3) : pattern;
+}
+
+/** The `method` label: a fixed set, so a made-up verb cannot create new series. */
+export function methodLabel(method: string): string {
+  return KNOWN_METHODS.has(method) ? method : 'OTHER';
 }
