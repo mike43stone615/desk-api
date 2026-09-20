@@ -80,3 +80,14 @@ describe('cron auth-cleanup coordination lock', () => {
     expect(deleteExpiredSessions).toHaveBeenCalledTimes(1);
   });
 });
+
+describe('development copies do not run the backend-key reconcile', () => {
+  it('recognises development and test databases by name only', async () => {
+    const { databaseNameIsDev } = await import('../../config');
+    expect(databaseNameIsDev('postgresql://u:p@127.0.0.1:5433/desk_api_dev')).toBe(true);
+    expect(databaseNameIsDev('postgresql://u:p@localhost:5432/desk_api_test')).toBe(true);
+    expect(databaseNameIsDev('postgresql://u:p@localhost:5432/desk_api')).toBe(false);
+    expect(databaseNameIsDev('postgresql://u:p@localhost:5432/devices')).toBe(false);
+    expect(databaseNameIsDev('not a url')).toBe(false);
+  });
+});

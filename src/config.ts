@@ -135,6 +135,8 @@ export interface AppConfig {
   environment: string;
   port: number;
   databaseUrl: string;
+  /** True when DATABASE_URL names a development/test database (its name ends in _dev or _test). */
+  usesDevDatabase: boolean;
   redisUrl: string | undefined;
   rateLimitPerMinute: number;
   rateLimitPerHour: number;
@@ -172,10 +174,20 @@ export interface AppConfig {
   metricsDocsApiKey: string | undefined;
 }
 
+/** A development copy of the service must never run jobs that act on the SHARED backends on behalf of its own (empty) database. */
+export function databaseNameIsDev(databaseUrl: string): boolean {
+  try {
+    return /_(dev|test)$/.test(new URL(databaseUrl).pathname.replace(/^\//, ''));
+  } catch {
+    return false;
+  }
+}
+
 export const config: AppConfig = {
   environment: env.ENVIRONMENT,
   port: env.PORT,
   databaseUrl: env.DATABASE_URL,
+  usesDevDatabase: databaseNameIsDev(env.DATABASE_URL),
   redisUrl: env.REDIS_URL,
   rateLimitPerMinute: env.RATE_LIMIT_PER_MINUTE,
   rateLimitPerHour: env.RATE_LIMIT_PER_HOUR,

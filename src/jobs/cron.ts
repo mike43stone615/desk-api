@@ -19,6 +19,7 @@ import { backendKeySweepTotal, cronTicksTotal, gatewayKeyDrift } from '../module
 import { reconcileBackendKeys } from '../domain/gateway/reconcile';
 import { sweepBackendKeys } from '../domain/gateway/orphans';
 import { getRedis } from '../middleware/redis-client';
+import { config } from '../config';
 
 let task: cron.ScheduledTask | null = null;
 let sweepTask: cron.ScheduledTask | null = null;
@@ -34,9 +35,15 @@ export function startCleanupCron(log: FastifyBaseLogger): void {
     void runBackendKeySweep(log);
   });
   void runBackendKeySweep(log);
-  reconcileTask = cron.schedule('17 * * * *', () => {
-    void runKeyReconcile(log);
-  });
+  // The reconcile job compares this service's database with the backends and REVOKES keys it does not know. A
+  // development copy (dev database, but possibly the same real backends) knows none of the real keys, so it must not run.
+  if (config.usesDevDatabase) {
+    log.info({ event: 'key_reconcile_skipped' }, 'development database: hourly backend-key reconcile is not scheduled');
+  } else {
+    reconcileTask = cron.schedule('17 * * * *', () => {
+      void runKeyReconcile(log);
+    });
+  }
 }
 
 const RECONCILE_LOCK_KEY = 'desk-api:cron:key-reconcile:lock';
