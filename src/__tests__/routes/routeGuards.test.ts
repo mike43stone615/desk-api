@@ -34,6 +34,7 @@ const PUBLIC: Record<string, string> = {
   'POST /auth/email-confirmation/confirm': 'pre-sign-in flow; authorised by the emailed token',
   'POST /auth/password-reset/request': 'pre-sign-in flow; answers identically for every address',
   'POST /auth/password-reset/confirm': 'pre-sign-in flow; authorised by the emailed token',
+  'GET /.well-known/security.txt': 'RFC 9116 contact file for security researchers (404 until a contact is chosen)',
   'GET /gateway/openapi.json': 'the published description of the API Library (documentation only)',
   // The API Library's own web pages: static files, no data.
   'GET /': 'API Library web page',

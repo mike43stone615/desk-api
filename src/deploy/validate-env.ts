@@ -3,6 +3,7 @@
 // scripts/validate-env.ts (run from the deploy workflow) so a bad DOTENV_CONTENT secret stops the deploy while the old
 // version is still serving, instead of taking the service down at boot.
 import { envSchema } from '../config';
+import { normalizeSecurityContact } from '../routes/securityTxt';
 
 /** Settings a production deploy must have. Everything else in the schema is optional or has a default. */
 export const REQUIRED_IN_PRODUCTION = [
@@ -52,6 +53,9 @@ export function validateProductionEnv(env: Record<string, string | undefined>): 
   }
   if (!blank('GATEWAY_KEY_ENCRYPTION_SECRET_PREVIOUS') && env.GATEWAY_KEY_ENCRYPTION_SECRET_PREVIOUS!.split(',').map((s) => s.trim()).includes(env.GATEWAY_KEY_ENCRYPTION_SECRET ?? '')) {
     problems.push({ name: 'GATEWAY_KEY_ENCRYPTION_SECRET_PREVIOUS', problem: 'contains the current secret (it should hold only the OLD one)' });
+  }
+  if (!blank('SECURITY_CONTACT') && !normalizeSecurityContact(env.SECURITY_CONTACT!)) {
+    problems.push({ name: 'SECURITY_CONTACT', problem: 'must be an email address or an https:// address' });
   }
   return problems;
 }

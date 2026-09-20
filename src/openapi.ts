@@ -172,6 +172,14 @@ const BASE_SPEC = {
         responses: { '200': { description: 'Prometheus text format', content: { 'text/plain': { schema: { type: 'string' } } } } },
       },
     },
+    '/.well-known/security.txt': {
+      get: {
+        tags: ['System'],
+        summary: 'Where to report a security problem (RFC 9116)',
+        description: 'Plain text. Answers 404 until the operator has published a security contact.',
+        responses: { '200': { description: 'The security contact file', content: { 'text/plain': { schema: { type: 'string' } } } }, '404': { description: 'No security contact published yet' } },
+      },
+    },
     '/auth/signup': {
       post: {
         tags: ['Auth'],

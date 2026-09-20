@@ -122,9 +122,12 @@ each key may call.
 
 ## Known limitations
 
-- desk-api's older unauthenticated proxy routes (`/functions/v1/check-*`,
-  `/integrations/market-research/analyze`) bypass this key system entirely.
-  Anyone can call them without a key; they are not metered per developer.
+- desk-api's older lookup routes (`/functions/v1/check-*`,
+  `/integrations/market-research/analyze`) are not part of this key system.
+  They used to be open to anyone; since the 2026-09 hardening they require a
+  signed-in session (route-guard test: `src/__tests__/routes/routeGuards.test.ts`),
+  so they are for the Desk app itself and are not metered per developer. Developers
+  use the `/v1/gateway/...` routes with a key instead.
 - A key's APIs are fixed at creation; to change them, create a new key.
 - Verified live on 2026-09-19 with a real key against the real registry-api and
   market-validation-api, then revoked (zero gateway-issued keys remained

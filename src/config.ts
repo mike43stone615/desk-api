@@ -107,6 +107,10 @@ export const envSchema = z.object({
   // public as they are today when this is left unset — see
   // middleware/auth.ts's requireMetricsDocsKey() and .env.example.
   METRICS_DOCS_API_KEY: z.string().optional(),
+
+  // Optional — where security researchers should report a problem: an email address or an https:// page. Served as
+  // /.well-known/security.txt (RFC 9116); the path answers 404 until this is set. See routes/securityTxt.ts.
+  SECURITY_CONTACT: z.string().optional(),
 });
 
 const parsed = envSchema.safeParse(process.env);
@@ -172,6 +176,7 @@ export interface AppConfig {
   emailFrom: string;
   appBaseUrl: string;
   metricsDocsApiKey: string | undefined;
+  securityContact: string | undefined;
 }
 
 /** A development copy of the service must never run jobs that act on the SHARED backends on behalf of its own (empty) database. */
@@ -223,4 +228,5 @@ export const config: AppConfig = {
   emailFrom: env.EMAIL_FROM,
   appBaseUrl: env.APP_BASE_URL,
   metricsDocsApiKey: env.METRICS_DOCS_API_KEY,
+  securityContact: env.SECURITY_CONTACT,
 };

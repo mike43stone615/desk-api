@@ -100,6 +100,7 @@ import {
 } from './routes/gateway';
 import { gatewayMarketProxyHandler, gatewayRegistryProxyHandler } from './routes/gatewayProxy';
 import { registerLibraryUi } from './routes/libraryUi';
+import { registerSecurityTxt } from './routes/securityTxt';
 
 // Captured once at module load (= process start for all practical purposes)
 // specifically so /health can answer "is this actually the process I think
@@ -223,6 +224,7 @@ export async function buildApp(options: { logStream?: { write: (line: string) =>
   // The API Library's own web pages (sign-in + key management), served from
   // this same origin. See routes/libraryUi.ts.
   registerLibraryUi(app);
+  registerSecurityTxt(app);
 
   // OpenAPI spec + Swagger UI — optionally gated behind METRICS_DOCS_API_KEY
   // (see middleware/auth.ts's requireMetricsDocsKey, a no-op unless that env var
