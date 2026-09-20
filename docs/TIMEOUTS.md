@@ -25,11 +25,13 @@ The database pool has its own limits (waiting for a connection 5 s, a statement 
 | --- | --- | --- | --- |
 | Ordinary desk-api call | 64 to 132 ms (medians) | not measured | none needed |
 | Name check, one-word common name in Florida | 3.3 to 3.7 s | 3.7 s | 15 s |
-| Market analysis of an idea | up to about a minute | close to the 75 s budget | 75 s |
+| Market analysis of an idea (two fresh ideas, live) | 2.3 to 3.9 s | 3.9 s (only two samples; see below) | 75 s |
 
 Rules of thumb used when choosing the budgets: a budget is at least 3x the slowest measured time for that call, but
-always under Cloudflare's 100 s. The market analysis is the one call that gets close, which is why it is the one that
-should become "start it, then poll for the answer" one day (it is the largest remaining reliability item).
+always under Cloudflare's 100 s. The market analysis budget (75 s) is far above what was measured; it is kept because a
+first analysis for an unusual state may have to fetch data that later ones find cached, and nobody has yet measured
+that worst case. If measurements ever show analyses regularly taking more than about 20 s, it should become "start it,
+then poll for the answer" (it costs money upstream, so it is never retried).
 
 Re-measure against the live service before changing a budget, and change this page in the same commit. Rows marked
 "not measured" have no written measurement behind them yet.

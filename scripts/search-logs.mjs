@@ -16,7 +16,7 @@ const text = args.join(' ').toLowerCase();
 if (!text && !request && !errorsOnly) { console.error('Give some text, --request <id> or --errors.'); process.exit(2); }
 
 const cutoff = Date.now() - days * 86_400_000;
-const files = readdirSync(dir).filter((n) => /^desk-api-\d{4}-\d{2}-\d{2}(\.err)?\.log$/.test(n)).filter((n) => Date.parse(n.slice(8, 18) + 'T23:59:59Z') >= cutoff).sort();
+const files = readdirSync(dir).filter((n) => /^desk-api-\d{4}-\d{2}-\d{2}(\.err)?\.log$/.test(n)).filter((n) => Date.parse(n.slice(9, 19) + 'T23:59:59Z') >= cutoff).sort();
 let matches = 0;
 for (const file of files) {
   for (const line of readFileSync(path.join(dir, file), 'utf8').split(/\r?\n/)) {

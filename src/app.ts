@@ -155,6 +155,9 @@ export async function buildApp(options: { logStream?: { write: (line: string) =>
     connectionTimeout: 0,
     keepAliveTimeout: 65_000,
     requestTimeout: 30_000,
+    // Node only looks for expired header/request timeouts every 30 s by default, which would make a 10 s limit
+    // really 10 to 40 s. Look every 2 s.
+    http: { connectionsCheckingInterval: 2_000 },
   });
   // Node's header timeout is not a Fastify option; it must stay below the request timeout.
   app.server.headersTimeout = 10_000;
