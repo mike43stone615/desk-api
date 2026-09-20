@@ -32,5 +32,6 @@ export interface AuthService {
   confirmPasswordReset(token: string, newPassword: string): Promise<boolean>;
   requestEmailConfirmation(email: string): Promise<string | null>;
   confirmEmail(token: string): Promise<boolean>;
-  updatePassword(userId: string, newPassword: string): Promise<void>;
+  /** Sets a new password and ends the user's other sessions (all of them when no current token is given). */
+  updatePassword(userId: string, newPassword: string, keepSessionToken?: string): Promise<void>;
 }

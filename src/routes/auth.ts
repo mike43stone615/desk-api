@@ -236,7 +236,7 @@ export async function updatePasswordHandler(request: FastifyRequest, reply: Fast
 
   const user = request.currentUser!;
   try {
-    await authService.updatePassword(user.id, parsed.data.password);
+    await authService.updatePassword(user.id, parsed.data.password, extractSessionToken(request) ?? undefined);
     audit(request, 'password_updated', 'ok', { userId: user.id });
     return reply.send({ ok: true });
   } catch (err) {

@@ -54,6 +54,8 @@ export interface DatabaseRepository {
   findSessionByToken(token: string): Promise<Session | null>;
   deleteSession(token: string): Promise<void>;
   deleteAllSessionsForUser(userId: string): Promise<void>;
+  /** Every session of the user except the one whose token is given (a password change keeps the caller signed in). */
+  deleteOtherSessionsForUser(userId: string, keepToken: string): Promise<void>;
   deleteExpiredSessions(): Promise<void>;
 
   // Password reset

@@ -102,6 +102,10 @@ export class PgDatabaseAdapter implements DatabaseRepository {
     await this.pool.query(`DELETE FROM sessions WHERE user_id = $1`, [userId]);
   }
 
+  async deleteOtherSessionsForUser(userId: string, keepToken: string): Promise<void> {
+    await this.pool.query(`DELETE FROM sessions WHERE user_id = $1 AND token <> $2`, [userId, keepToken]);
+  }
+
   async deleteExpiredSessions(): Promise<void> {
     await this.pool.query(`DELETE FROM sessions WHERE expires_at < $1`, [nowUtc()]);
   }

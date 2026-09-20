@@ -70,6 +70,9 @@ class InMemoryDatabaseRepository implements DatabaseRepository {
   async deleteAllSessionsForUser(userId: string) {
     for (const [token, s] of this.sessions) if (s.userId === userId) this.sessions.delete(token);
   }
+  async deleteOtherSessionsForUser(userId: string, keepToken: string) {
+    for (const [token, s] of this.sessions) if (s.userId === userId && token !== keepToken) this.sessions.delete(token);
+  }
   async deleteExpiredSessions() {
     for (const [token, s] of this.sessions)
       if (new Date(s.expiresAt) <= new Date()) this.sessions.delete(token);
@@ -344,3 +347,44 @@ describe('updatePassword', () => {
     expect(db.users.get(user.id)?.passwordHash).toBeDefined();
   });
 });
+
+describe('updatePassword ends other sessions', () => {
+  async function signedInTwice() {
+    const signup = await service.signUp('two@example.com', 'Str0ng!Pass', 'Two', 'Sessions');
+    await service.confirmEmail(signup!.confirmationToken);
+    const a = await service.signIn('two@example.com', 'Str0ng!Pass');
+    const b = await service.signIn('two@example.com', 'Str0ng!Pass');
+    return { userId: a!.user.id, a: a!.token, b: b!.token };
+  }
+
+  it('keeps the session that made the change and ends every other one', async () => {
+    const { userId, a, b } = await signedInTwice();
+    await service.updatePassword(userId, 'N3w!Password', a);
+    expect(await service.verifySession(a)).not.toBeNull();
+    expect(await service.verifySession(b)).toBeNull();
+  });
+
+  it('ends all sessions when no current session is given', async () => {
+    const { userId, a, b } = await signedInTwice();
+    await service.updatePassword(userId, 'N3w!Password');
+    expect(await service.verifySession(a)).toBeNull();
+    expect(await service.verifySession(b)).toBeNull();
+  });
+
+  it('does not touch another user\'s sessions', async () => {
+    const { userId, a } = await signedInTwice();
+    const other = await service.signUp('other@example.com', 'Str0ng!Pass', 'Other', 'User');
+    await service.confirmEmail(other!.confirmationToken);
+    const o = await service.signIn('other@example.com', 'Str0ng!Pass');
+    await service.updatePassword(userId, 'N3w!Password', a);
+    expect(await service.verifySession(o!.token)).not.toBeNull();
+  });
+
+  it('the new password works and the old one no longer does', async () => {
+    const { userId, a } = await signedInTwice();
+    await service.updatePassword(userId, 'N3w!Password', a);
+    expect(await service.signIn('two@example.com', 'Str0ng!Pass')).toBeNull();
+    expect(await service.signIn('two@example.com', 'N3w!Password')).not.toBeNull();
+  });
+});
+

@@ -175,10 +175,14 @@ export class DeskAuthService implements AuthService {
     return true;
   }
 
-  async updatePassword(userId: string, newPassword: string): Promise<void> {
+  async updatePassword(userId: string, newPassword: string, keepSessionToken?: string): Promise<void> {
     validatePassword(newPassword);
     const passwordHash = await hashPassword(newPassword);
     await this.db.updateUserPassword(userId, passwordHash);
+    // Anyone holding an older session (a stolen laptop, a hijacked cookie) must not stay signed in
+    // after the password changes. The session that made the change stays, so the user is not logged out.
+    if (keepSessionToken) await this.db.deleteOtherSessionsForUser(userId, keepSessionToken);
+    else await this.db.deleteAllSessionsForUser(userId);
   }
 
   private async createSessionToken(userId: string): Promise<string> {

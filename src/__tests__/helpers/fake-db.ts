@@ -123,6 +123,10 @@ export function createFakeDb() {
       sessions.set(token, row);
       return { rows: [row], rowCount: 1 };
     }
+    if (s.startsWith('DELETE FROM sessions WHERE user_id = $1 AND token <> $2')) {
+      for (const [token, row] of sessions) if (row.user_id === p[0] && token !== p[1]) sessions.delete(token);
+      return { rows: [], rowCount: 1 };
+    }
     if (s.startsWith('DELETE FROM sessions WHERE token = $1')) {
       const existed = sessions.delete(p[0]);
       return { rows: [], rowCount: existed ? 1 : 0 };

@@ -271,3 +271,33 @@ describe('/health and /metrics', () => {
     expect(res.headers['content-security-policy']).toBeUndefined();
   });
 });
+
+describe('POST /auth/password ends the user\'s other sessions', () => {
+  async function confirmedUser(email: string) {
+    await app.inject({ method: 'POST', url: '/auth/signup', payload: { email, password: 'Str0ng!Pass', firstName: 'P', lastName: 'W' } });
+    const user = [...fakeDb.users.values()].find((u) => u.email === email)!;
+    const token = [...fakeDb.emailConfirmationTokens.values()].find((t) => t.user_id === user.id)?.token as string;
+    await app.inject({ method: 'POST', url: '/auth/email-confirmation/confirm', payload: { token } });
+    const signIn = async () =>
+      JSON.parse((await app.inject({ method: 'POST', url: '/auth/signin', payload: { email, password: 'Str0ng!Pass' } })).body).token as string;
+    return { first: await signIn(), second: await signIn() };
+  }
+  const me = (token: string) => app.inject({ method: 'GET', url: '/auth/session', headers: { authorization: `Bearer ${token}` } });
+
+  it('the session that changes the password stays signed in; every other session is signed out', async () => {
+    const { first, second } = await confirmedUser('pwchange@example.com');
+    const res = await app.inject({ method: 'POST', url: '/auth/password', headers: { authorization: `Bearer ${first}` }, payload: { password: 'N3w!Password' } });
+    expect(res.statusCode).toBe(200);
+    expect((await me(first)).statusCode).toBe(200);
+    expect((await me(second)).statusCode).toBe(401);
+  });
+
+  it('works the same when the change is made with the browser cookie', async () => {
+    const { first, second } = await confirmedUser('pwcookie@example.com');
+    const res = await app.inject({ method: 'POST', url: '/auth/password', cookies: { desk_session: first }, payload: { password: 'N3w!Password' } });
+    expect(res.statusCode).toBe(200);
+    expect((await me(first)).statusCode).toBe(200);
+    expect((await me(second)).statusCode).toBe(401);
+  });
+});
+
