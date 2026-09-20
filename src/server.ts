@@ -39,6 +39,9 @@ async function main() {
     process.exitCode = 1;
     await app.close();
     await pool.end();
+    // A worker keeps its supervisor connection open, which would keep this process alive: leave, so the supervisor
+    // sees the failure at once instead of waiting for a timeout.
+    if (cluster.isWorker) process.exit(1);
     return;
   }
 
