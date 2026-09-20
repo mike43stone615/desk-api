@@ -33,6 +33,13 @@ export const cronTicksTotal = new Counter({
   registers: [metricsRegistry],
 });
 
+export const upstreamCallsTotal = new Counter({
+  name: 'desk_upstream_calls_total',
+  help: 'Calls to backend services, by service and outcome (ok, error, retried, circuit_open, overloaded, caller_limited, too_large)',
+  labelNames: ['service', 'outcome'] as const,
+  registers: [metricsRegistry],
+});
+
 export const dependencyUp = new Gauge({
   name: 'desk_dependency_up',
   help: '1 when a backend service desk-api relies on answered its health check the last time it was checked, else 0',

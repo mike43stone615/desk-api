@@ -84,6 +84,9 @@ export function registerErrorHandler(app: FastifyInstance) {
     reply.header('Content-Type', 'application/problem+json');
 
     if (error instanceof HttpError) {
+      // A refusal that says when to come back (rate limits, an open circuit breaker) carries a Retry-After header.
+      const retryAfter = (error as { retryAfterSeconds?: number }).retryAfterSeconds;
+      if (retryAfter && !reply.hasHeader('retry-after')) reply.header('Retry-After', String(retryAfter));
       return reply.status(error.status).send(problem(request, error.status, error.message));
     }
     if (error instanceof ZodError) {

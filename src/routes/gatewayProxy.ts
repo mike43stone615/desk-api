@@ -15,12 +15,16 @@ import { HttpError, problemBody } from '../middleware/http-error';
 import { config } from '../config';
 import { gatewayApiKeys, looksLikeGatewayKey } from '../domain/gateway/keys';
 import type { BrokeredService } from '../domain/gateway/services';
+import { callUpstream } from '../domain/upstream/client';
+import { MARKET_POLICY, REGISTRY_POLICY } from '../domain/upstream/policies';
 
 interface UpstreamRoute {
   method: 'GET' | 'POST';
   /** Exact upstream path, or a matcher returning the upstream path to call. */
   match: (path: string) => string | null;
   forwardQuery?: boolean;
+  /** A lookup that can safely be sent twice, so one quick retry is allowed on a network error / 502 / 503 / 504. */
+  idempotent?: boolean;
 }
 
 const exact = (p: string) => (path: string) => (path === p ? p : null);
@@ -41,15 +45,16 @@ const REGISTRY_NAME_CHECKS: Array<[publicPath: string, upstreamPath: string]> = 
 
 const REGISTRY_ROUTES: UpstreamRoute[] = [
   ...REGISTRY_NAME_CHECKS.flatMap(([publicPath, upstreamPath]): UpstreamRoute[] => [
-    { method: 'POST', match: alias(publicPath, upstreamPath) },
-    { method: 'POST', match: exact(upstreamPath) },
+    { method: 'POST', match: alias(publicPath, upstreamPath), idempotent: true },
+    { method: 'POST', match: exact(upstreamPath), idempotent: true },
   ]),
-  { method: 'GET', match: alias('/sync-status', '/functions/v1/registry-sync-status') },
-  { method: 'GET', match: exact('/functions/v1/registry-sync-status') },
-  { method: 'GET', match: exact('/business-structures'), forwardQuery: true },
-  { method: 'POST', match: exact('/business-structures/recommend') },
+  { method: 'GET', match: alias('/sync-status', '/functions/v1/registry-sync-status'), idempotent: true },
+  { method: 'GET', match: exact('/functions/v1/registry-sync-status'), idempotent: true },
+  { method: 'GET', match: exact('/business-structures'), forwardQuery: true, idempotent: true },
+  { method: 'POST', match: exact('/business-structures/recommend'), idempotent: true },
   {
     method: 'GET',
+    idempotent: true,
     match: (path) => {
       const m = /^\/business-structures\/([^/]+)$/.exec(path);
       return m && SLUG.test(m[1]) && m[1] !== 'recommend' ? `/business-structures/${m[1]}` : null;
@@ -59,15 +64,15 @@ const REGISTRY_ROUTES: UpstreamRoute[] = [
 
 const MARKET_ROUTES: UpstreamRoute[] = [
   { method: 'POST', match: exact('/research/analyze') },
-  { method: 'GET', match: exact('/scoring-methodology') },
+  { method: 'GET', match: exact('/scoring-methodology'), idempotent: true },
 ];
 
 const SERVICES: Record<
   BrokeredService,
-  { baseUrl: () => string | undefined; routes: UpstreamRoute[]; timeoutMs: number }
+  { baseUrl: () => string | undefined; routes: UpstreamRoute[]; policy: typeof REGISTRY_POLICY }
 > = {
-  registry_api: { baseUrl: () => config.registryApiUrl, routes: REGISTRY_ROUTES, timeoutMs: 30_000 },
-  market_validation_api: { baseUrl: () => config.marketApiUrl, routes: MARKET_ROUTES, timeoutMs: 80_000 },
+  registry_api: { baseUrl: () => config.registryApiUrl, routes: REGISTRY_ROUTES, policy: REGISTRY_POLICY },
+  market_validation_api: { baseUrl: () => config.marketApiUrl, routes: MARKET_ROUTES, policy: MARKET_POLICY },
 };
 
 const PASSTHROUGH_HEADERS = ['content-type', 'retry-after', 'x-ratelimit-limit', 'x-ratelimit-remaining', 'x-ratelimit-reset'];
@@ -100,9 +105,11 @@ async function forward(service: BrokeredService, request: FastifyRequest, reply:
 
   const queryIndex = request.url.indexOf('?');
   const query = route.forwardQuery && queryIndex >= 0 ? request.url.slice(queryIndex) : '';
-  let upstream: Response;
-  try {
-    upstream = await fetch(`${baseUrl.replace(/\/+$/, '')}${upstreamPath}${query}`, {
+  // Timeout, one retry for lookups, circuit breaker, in-flight limits (per API key too) and an answer-size ceiling
+  // all live in the shared upstream client. A refusal from it is an HttpError like any other.
+  const upstream = await callUpstream(
+    `${baseUrl.replace(/\/+$/, '')}${upstreamPath}${query}`,
+    {
       method: route.method,
       headers: {
         'x-api-key': backendKey,
@@ -111,11 +118,10 @@ async function forward(service: BrokeredService, request: FastifyRequest, reply:
         ...(route.method === 'POST' ? { 'content-type': 'application/json' } : {}),
       },
       body: route.method === 'POST' ? JSON.stringify(request.body ?? {}) : undefined,
-      signal: AbortSignal.timeout(spec.timeoutMs),
-    });
-  } catch {
-    throw new HttpError(502, 'The upstream API could not be reached.');
-  }
+    },
+    { ...spec.policy, retryable: route.idempotent === true },
+    verified.id,
+  );
 
   // A 401/403 from upstream means OUR brokered credential was refused — not
   // the developer's mistake — so it must not look like their key failing.
@@ -127,12 +133,12 @@ async function forward(service: BrokeredService, request: FastifyRequest, reply:
     const value = upstream.headers.get(name);
     if (value) reply.header(name, value);
   }
-  const text = await upstream.text();
-  if (upstream.ok) return reply.status(upstream.status).send(text);
+  const text = upstream.text;
+  if (upstream.status >= 200 && upstream.status < 300) return reply.status(upstream.status).send(text);
 
   // A failed call gets the same error body as any other desk-api error, whatever
   // shape the backend used (`{error}`, `{message}`, a validation list...).
-  let detail = upstream.statusText || 'The request failed.';
+  let detail = 'The request failed.';
   let errors: unknown;
   try {
     const parsed = JSON.parse(text) as Record<string, unknown>;
@@ -145,7 +151,7 @@ async function forward(service: BrokeredService, request: FastifyRequest, reply:
   return reply
     .status(upstream.status)
     .header('Content-Type', 'application/problem+json')
-    .send(problemBody(request.url, upstream.status, detail, errors !== undefined ? { errors } : undefined));
+    .send(problemBody(request.url, upstream.status, upstream.status === 500 ? 'The upstream API failed.' : detail, errors !== undefined ? { errors } : undefined));
 }
 
 export async function gatewayRegistryProxyHandler(request: FastifyRequest, reply: FastifyReply) {

@@ -14,6 +14,8 @@ import {
   type BusinessStructureRecommendationInput,
 } from '../../domain/registry/business-structures';
 import { checkNameManually, registrySyncStatus } from '../../domain/registry/availability';
+import { callUpstream } from '../../domain/upstream/client';
+import { REGISTRY_POLICY } from '../../domain/upstream/policies';
 
 async function proxyGet(reply: FastifyReply, path: string) {
   if (!config.registryApiUrl) throw new HttpError(503, 'Registry service is not configured.');
@@ -22,26 +24,21 @@ async function proxyGet(reply: FastifyReply, path: string) {
   // Matches marketResearch.ts's existing timeout - a hung registry-api instance
   // must not hang this desk-api request indefinitely (confirmed live: with no
   // timeout, this held open for as long as the sibling did, no bound at all).
-  const resp = await fetch(`${config.registryApiUrl.replace(/\/$/, '')}${path}`, {
-    headers,
-    signal: AbortSignal.timeout(15000),
-  });
-  const data = (await resp.json()) as unknown;
-  return reply.status(resp.status).send(data);
+  const resp = await callUpstream(`${config.registryApiUrl.replace(/\/$/, '')}${path}`, { method: 'GET', headers }, { ...REGISTRY_POLICY, timeoutMs: 15000, retryable: true });
+  return reply.status(resp.status).send(JSON.parse(resp.text) as unknown);
 }
 
 async function proxyPostWithBody(reply: FastifyReply, path: string, body: unknown) {
   if (!config.registryApiUrl) throw new HttpError(503, 'Registry service is not configured.');
   const headers: Record<string, string> = { 'Content-Type': 'application/json' };
   if (config.registryApiSecret) headers['x-api-key'] = config.registryApiSecret;
-  const resp = await fetch(`${config.registryApiUrl.replace(/\/$/, '')}${path}`, {
-    method: 'POST',
-    headers,
-    body: JSON.stringify(body),
-    signal: AbortSignal.timeout(15000),
-  });
-  const data = (await resp.json()) as unknown;
-  return reply.status(resp.status).send(data);
+  // These POSTs are name/structure lookups: repeating one is harmless.
+  const resp = await callUpstream(
+    `${config.registryApiUrl.replace(/\/$/, '')}${path}`,
+    { method: 'POST', headers, body: JSON.stringify(body) },
+    { ...REGISTRY_POLICY, timeoutMs: 15000, retryable: true },
+  );
+  return reply.status(resp.status).send(JSON.parse(resp.text) as unknown);
 }
 
 async function proxyPostOrFallback(request: FastifyRequest, reply: FastifyReply, path: string, fallback: (body: unknown) => unknown) {

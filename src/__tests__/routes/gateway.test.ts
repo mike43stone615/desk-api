@@ -10,6 +10,7 @@ vi.mock('../../middleware/redis-client', () => ({ getRedis: () => null, connectR
 import { pool } from '../../db';
 import { buildApp } from '../../app';
 import { config } from '../../config';
+import { resetUpstreamState } from '../../domain/upstream/client';
 import type { FastifyInstance } from 'fastify';
 
 const fakeDb = pool as unknown as ReturnType<typeof createFakeDb>;
@@ -114,6 +115,7 @@ afterAll(() => {
 });
 
 beforeEach(() => {
+  resetUpstreamState();
   fetchCalls = [];
   failMarketProvisioning = false;
   upstreamProxyStatus = 200;
@@ -793,5 +795,103 @@ describe('rotating GATEWAY_KEY_ENCRYPTION_SECRET', () => {
     expect(res.headers['content-type']).toMatch(/problem\+json/);
     expect(fetchCalls).toHaveLength(0);
     config.gatewayKeyEncryptionSecret = OLD;
+  });
+});
+
+describe('a struggling backend cannot hurt the gateway', () => {
+  const lookup = (key: string) =>
+    app.inject({ method: 'GET', url: '/gateway/registry/business-structures?state=FL', headers: { 'x-api-key': key } });
+
+  it('an answer bigger than the ceiling is refused (502), not buffered', async () => {
+    const user = seedUser('big@example.com');
+    const key = JSON.parse((await createKey(user, ['registry_api'])).body).apiKey.key;
+    upstreamProxyOverride = () => new Response('x'.repeat(6 * 1024 * 1024), { status: 200, headers: { 'content-type': 'application/json' } });
+    const res = await lookup(key);
+    expect(res.statusCode).toBe(502);
+    expect(JSON.parse(res.body).detail).toMatch(/too large/);
+    expect(res.body.length).toBeLessThan(2000);
+  });
+
+  it('a lookup that fails once is retried and the caller never sees the blip', async () => {
+    const user = seedUser('blip@example.com');
+    const key = JSON.parse((await createKey(user, ['registry_api'])).body).apiKey.key;
+    let n = 0;
+    upstreamProxyOverride = () => (++n === 1 ? new Response('{}', { status: 503 }) : new Response('{"ok":true}', { status: 200 }));
+    const res = await lookup(key);
+    expect(res.statusCode).toBe(200);
+    expect(n).toBe(2);
+  });
+
+  it('an analysis (which costs money) is never retried', async () => {
+    const user = seedUser('nore@example.com');
+    const key = JSON.parse((await createKey(user, ['market_validation_api'])).body).apiKey.key;
+    let n = 0;
+    upstreamProxyOverride = () => {
+      n += 1;
+      return new Response('{}', { status: 503 });
+    };
+    const res = await app.inject({ method: 'POST', url: '/gateway/market/research/analyze', headers: { 'x-api-key': key }, payload: { businessIdea: 'x' } });
+    expect(res.statusCode).toBe(503);
+    expect(n).toBe(1);
+  });
+
+  it('after repeated failures the gateway answers 503 with Retry-After without calling the backend at all', async () => {
+    const user = seedUser('breaker@example.com');
+    const key = JSON.parse((await createKey(user, ['registry_api'])).body).apiKey.key;
+    upstreamProxyOverride = () => {
+      throw new Error('ECONNREFUSED');
+    };
+    for (let i = 0; i < 5; i++) await lookup(key); // five failed calls in a row
+    fetchCalls = [];
+    const res = await lookup(key);
+    expect(res.statusCode).toBe(503);
+    expect(Number(res.headers['retry-after'])).toBeGreaterThan(0);
+    expect(fetchCalls).toHaveLength(0);
+    // ...and other backends are unaffected
+    const mkey = JSON.parse((await createKey(user, ['market_validation_api'])).body).apiKey.key;
+    upstreamProxyOverride = null;
+    expect((await app.inject({ method: 'GET', url: '/gateway/market/scoring-methodology', headers: { 'x-api-key': mkey } })).statusCode).toBe(200);
+  });
+
+  it('one key cannot occupy more than two analyses at once (429); another key is unaffected', async () => {
+    const user = seedUser('busy@example.com');
+    const key = JSON.parse((await createKey(user, ['market_validation_api'])).body).apiKey.key;
+    const other = JSON.parse((await createKey(user, ['market_validation_api'])).body).apiKey.key;
+    const gates: Array<() => void> = [];
+    upstreamProxyOverride = () => {
+      throw new Error('replaced below');
+    };
+    const slow = vi.fn(async (input: unknown, init?: RequestInit) => {
+      const url = String(input);
+      if (url.includes('/research/analyze')) {
+        await new Promise<void>((r) => gates.push(r));
+        return new Response('{"score":1}', { status: 200 });
+      }
+      return fetchMock(input, init);
+    });
+    vi.stubGlobal('fetch', slow);
+    try {
+      const post = (k: string) => app.inject({ method: 'POST', url: '/gateway/market/research/analyze', headers: { 'x-api-key': k }, payload: { businessIdea: 'x' } });
+      const p1 = post(key);
+      const p2 = post(key);
+      await vi.waitFor(() => expect(gates).toHaveLength(2));
+      const third = await post(key);
+      expect(third.statusCode).toBe(429);
+      expect(third.headers['retry-after']).toBe('1');
+      const fromOther = post(other);
+      await vi.waitFor(() => expect(gates).toHaveLength(3));
+      gates.forEach((g) => g());
+      expect((await p1).statusCode).toBe(200);
+      expect((await p2).statusCode).toBe(200);
+      expect((await fromOther).statusCode).toBe(200);
+      // slots are free again
+      const p4 = post(key);
+      await vi.waitFor(() => expect(gates).toHaveLength(4));
+      gates[3]();
+      expect((await p4).statusCode).toBe(200);
+    } finally {
+      vi.stubGlobal('fetch', fetchMock);
+      upstreamProxyOverride = null;
+    }
   });
 });
