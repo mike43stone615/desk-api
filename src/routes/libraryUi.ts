@@ -11,6 +11,7 @@
 import { readdirSync, readFileSync } from 'fs';
 import { join } from 'path';
 import type { FastifyInstance } from 'fastify';
+import { applyHtmlCsp, LIBRARY_UI_CSP } from '../middleware/csp';
 
 const UI_DIR = join(__dirname, '..', '..', 'library-ui');
 
@@ -39,8 +40,9 @@ export function registerLibraryUi(app: FastifyInstance): void {
     return;
   }
 
-  const send = (body: Buffer, type: string) => async (_req: unknown, reply: { header: (k: string, v: string) => unknown; send: (b: Buffer) => unknown }) => {
+  const send = (body: Buffer, type: string) => async (_req: unknown, reply: { header: (k: string, v: string) => unknown; removeHeader: (k: string) => unknown; send: (b: Buffer) => unknown }) => {
     reply.header('Content-Type', type);
+    applyHtmlCsp(reply, LIBRARY_UI_CSP);
     // Always revalidate, so a deploy is visible immediately.
     reply.header('Cache-Control', 'no-cache');
     return reply.send(body);

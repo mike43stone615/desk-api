@@ -265,12 +265,12 @@ describe('/health and /metrics', () => {
 
   it('sets baseline security headers on every response, including the 401 above', async () => {
     const res = await app.inject({ method: 'GET', url: '/docs' });
-    expect(res.headers['x-frame-options']).toBe('SAMEORIGIN');
+    expect(res.headers['x-frame-options']).toBe('DENY');
     expect(res.headers['x-content-type-options']).toBe('nosniff');
     expect(res.headers['strict-transport-security']).toBeDefined();
-    // Explicitly not set: /docs is the one HTML surface here and loads the
-    // Swagger UI bundle from unpkg.com by design - a default CSP would block it.
-    expect(res.headers['content-security-policy']).toBeUndefined();
+    // JSON answers get the strictest policy: nothing may load, nothing may frame them.
+    expect(res.headers['content-security-policy']).toMatch(/default-src 'none'/);
+    expect(res.headers['content-security-policy']).toMatch(/frame-ancestors 'none'/);
   });
 });
 

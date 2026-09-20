@@ -27,6 +27,7 @@ import { registerOriginCheck } from './middleware/origin-check';
 import { registerApiProtection } from './middleware/api-protection';
 import { requireAuth } from './middleware/auth';
 import { registerRouteLimits } from './middleware/route-limits';
+import { applyHtmlCsp, docsCsp, docsInlineScript, SWAGGER_UI_CSS_SRI, SWAGGER_UI_JS_SRI, SWAGGER_UI_VERSION } from './middleware/csp';
 import { registerIdempotency } from './middleware/idempotency';
 import { requireMetricsDocsKey } from './middleware/auth';
 import { OPENAPI_SPEC } from './openapi';
@@ -188,7 +189,12 @@ export async function buildApp(): Promise<FastifyInstance> {
   // Library pages, and /docs loads the Swagger UI bundle from unpkg.com by design - a default CSP
   // would block that. Every other route only ever returns JSON, where CSP
   // provides no protection anyway.
-  await app.register(helmet, { contentSecurityPolicy: false });
+  await app.register(helmet, {
+    // Every response starts with the strictest policy (nothing loads, nothing frames it). The few HTML responses
+    // (library-ui pages, /docs) replace it with their own, see middleware/csp.ts.
+    contentSecurityPolicy: { useDefaults: false, directives: { defaultSrc: ["'none'"], frameAncestors: ["'none'"], baseUri: ["'none'"], formAction: ["'none'"] } },
+    frameguard: { action: 'deny' },
+  });
 
   // The API Library's own web pages (sign-in + key management), served from
   // this same origin. See routes/libraryUi.ts.
@@ -203,14 +209,12 @@ export async function buildApp(): Promise<FastifyInstance> {
 <head>
   <meta charset="utf-8"/>
   <title>Desk API — Docs</title>
-  <link rel="stylesheet" href="https://unpkg.com/swagger-ui-dist@5/swagger-ui.css"/>
+  <link rel="stylesheet" href="https://unpkg.com/swagger-ui-dist@${SWAGGER_UI_VERSION}/swagger-ui.css" integrity="${SWAGGER_UI_CSS_SRI}" crossorigin="anonymous"/>
 </head>
 <body>
   <div id="swagger-ui"></div>
-  <script src="https://unpkg.com/swagger-ui-dist@5/swagger-ui-bundle.js"></script>
-  <script>
-    SwaggerUIBundle({ url: '${base}/docs/openapi.json', dom_id: '#swagger-ui', presets: [SwaggerUIBundle.presets.apis, SwaggerUIBundle.SwaggerUIStandalonePreset] });
-  </script>
+  <script src="https://unpkg.com/swagger-ui-dist@${SWAGGER_UI_VERSION}/swagger-ui-bundle.js" integrity="${SWAGGER_UI_JS_SRI}" crossorigin="anonymous"></script>
+  <script>${docsInlineScript(base)}</script>
 </body>
 </html>`;
 
@@ -241,6 +245,7 @@ export async function buildApp(): Promise<FastifyInstance> {
     app.get(`${base}/docs/openapi.json`, { preHandler: requireMetricsDocsKey }, async (_req, reply) => reply.send(OPENAPI_SPEC));
     app.get(`${base}/docs`, { preHandler: requireMetricsDocsKey }, async (_req, reply) => {
       reply.header('Content-Type', 'text/html; charset=utf-8');
+      applyHtmlCsp(reply, docsCsp(base));
       return reply.send(docsHtml(base));
     });
     app.get(`${base}/health/live`, async (_req, reply) => reply.status(200).send({ ok: true, service: 'desk-api', processStartedAt: PROCESS_STARTED_AT }));
