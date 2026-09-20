@@ -81,6 +81,31 @@ export async function sendBusinessInviteEmail(
   });
 }
 
+/** A heads-up about something that happened on the account (new sign-in, password change, new API key). */
+export async function sendSecurityNoticeEmail(
+  config: AppConfig,
+  to: string,
+  title: string,
+  body: string,
+  requestId: string,
+): Promise<void> {
+  await sendEmail(config, {
+    to,
+    subject: `Desk security notice: ${title}`,
+    html: themedEmailHtml({
+      title,
+      body,
+      actionLabel: 'Review your account activity',
+      actionUrl: `${config.appBaseUrl}/account/sessions`,
+      note: 'If this was not you, reset your password right away and sign out all devices from the page above. You cannot unsubscribe from security notices.',
+    }),
+    requestId,
+    skippedEvent: 'security_notice_email_skipped',
+    failedEvent: 'security_notice_email_failed',
+    sentEvent: 'security_notice_email_sent',
+  });
+}
+
 /** For an address with no Desk account yet: says who invited them and how to join. */
 export async function sendBusinessInviteSignupEmail(
   config: AppConfig,

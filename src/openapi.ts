@@ -266,6 +266,14 @@ export const OPENAPI_SPEC = {
         },
       },
     },
+    '/auth/activity': {
+      get: {
+        tags: ['Auth'],
+        summary: 'Your recent security activity (sign-ins, failed attempts, password changes, sessions and API keys), newest first',
+        security: [{ SessionToken: [] }],
+        responses: { '200': { description: 'OK — up to 50 events, kept for 180 days' }, '401': { description: 'Not signed in' } },
+      },
+    },
     '/auth/sessions/{id}': {
       delete: {
         tags: ['Auth'],

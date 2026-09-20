@@ -152,6 +152,11 @@ export class DeskAuthService implements AuthService {
     return token;
   }
 
+  async resetTokenOwner(token: string): Promise<User | null> {
+    const record = await this.db.findResetToken(token);
+    return record ? this.db.findUserById(record.userId) : null;
+  }
+
   async confirmPasswordReset(token: string, newPassword: string): Promise<boolean> {
     const record = await this.db.findResetToken(token);
     if (!record) return false;

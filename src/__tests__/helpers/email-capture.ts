@@ -5,6 +5,8 @@ export const emailed = {
   reset: new Map<string, string>(),
   /** Business invitation emails by recipient: which kind of email they got. */
   invite: new Map<string, 'existing-account' | 'sign-up'>(),
+  /** Security notices by recipient: the titles, in the order sent. */
+  security: new Map<string, string[]>(),
 };
 
 export function emailModuleMock() {
@@ -20,6 +22,9 @@ export function emailModuleMock() {
     },
     sendBusinessInviteSignupEmail: async (_config: unknown, email: string) => {
       emailed.invite.set(email, 'sign-up');
+    },
+    sendSecurityNoticeEmail: async (_config: unknown, email: string, title: string) => {
+      emailed.security.set(email, [...(emailed.security.get(email) ?? []), title]);
     },
     sendAccountAlreadyExistsEmail: async () => {},
   };

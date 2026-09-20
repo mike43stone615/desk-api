@@ -29,6 +29,8 @@ export interface AuthService {
   verifySession(token: string): Promise<User | null>;
   revokeSession(token: string): Promise<void>;
   requestPasswordReset(email: string): Promise<string | null>;
+  /** Who a reset token belongs to (null for an unknown token). Call before confirming, which uses the token up. */
+  resetTokenOwner(token: string): Promise<User | null>;
   confirmPasswordReset(token: string, newPassword: string): Promise<boolean>;
   requestEmailConfirmation(email: string): Promise<string | null>;
   confirmEmail(token: string): Promise<boolean>;

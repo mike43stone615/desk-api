@@ -6,7 +6,9 @@
 // Deliberately simple and fire-and-forget: a logging failure must never
 // break the actual mutation it's describing.
 import { randomUUID } from 'crypto';
+import type { FastifyRequest } from 'fastify';
 import { pool } from '../../db';
+import { getClientIp } from '../../middleware/api-protection';
 
 export interface MutationAuditEntry {
   userId?: string | null;
@@ -46,8 +48,9 @@ export function logMutation(entry: MutationAuditEntry): void {
   ).catch(() => {});
 }
 
-export function requestIp(request: { ip?: string }): string | null {
-  return request.ip ?? null;
+/** The real client address (behind the tunnel request.ip is always this machine). */
+export function requestIp(request: FastifyRequest): string | null {
+  return getClientIp(request);
 }
 
 export function requestUserAgent(request: { headers: Record<string, unknown> }): string | null {

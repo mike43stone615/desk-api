@@ -28,6 +28,7 @@ export function createFakeDb() {
   const idempotencyKeys = new Map<string, FakeRow>(); // keyed by key
   const gatewayKeys = new Map<string, FakeRow>(); // keyed by id
   const gatewayGrants: FakeRow[] = [];
+  const securityEvents: FakeRow[] = []; // migration 0014
   const emailInvites = new Map<string, FakeRow>(); // keyed by id (migration 0013)
   const backendRevocations = new Map<string, FakeRow>(); // the queue filled by the grant-delete trigger (migration 0010)
 
@@ -336,6 +337,26 @@ export function createFakeDb() {
     }
 
     // ── business_memberships ─────────────────────────────────────────────
+    // ── stored security events (src/modules/audit/security-events.ts) ──
+    if (s.startsWith('INSERT INTO security_events')) {
+      const [id, user_id, subject, event, outcome, ip_address, user_agent, detail] = p;
+      securityEvents.push({ id, user_id, subject, event, outcome, ip_address, user_agent, detail, created_at: nowIso() });
+      return { rows: [], rowCount: 1 };
+    }
+    if (s.startsWith("SELECT ip_address, user_agent FROM security_events WHERE user_id = $1 AND event = 'signin_success'")) {
+      const rows = securityEvents.filter((e) => e.user_id === p[0] && e.event === 'signin_success').reverse().map((e) => ({ ip_address: e.ip_address, user_agent: e.user_agent }));
+      return { rows, rowCount: rows.length };
+    }
+    if (s.startsWith('SELECT id, event, outcome, ip_address, user_agent, created_at FROM security_events')) {
+      const rows = securityEvents.filter((e) => e.user_id === p[0] || e.subject === p[1]).reverse().slice(0, Number(p[2]));
+      return { rows, rowCount: rows.length };
+    }
+    if (s.startsWith('DELETE FROM security_events WHERE created_at')) {
+      const cutoff = Date.now() - Number(p[0]) * 86_400_000;
+      for (let i = securityEvents.length - 1; i >= 0; i--) if (Date.parse(String(securityEvents[i].created_at)) < cutoff) securityEvents.splice(i, 1);
+      return { rows: [], rowCount: 1 };
+    }
+
     // ── invitations to addresses with no account yet (src/domain/setup/email-invites.ts) ──
     if (s.startsWith('SELECT COUNT(*)::text AS count FROM business_email_invites WHERE business_id = $1 AND email <> $2')) {
       const n = [...emailInvites.values()].filter((i) => i.business_id === p[0] && i.email !== p[1]).length;
@@ -711,5 +732,6 @@ export function createFakeDb() {
     gatewayGrants,
     backendRevocations,
     emailInvites,
+    securityEvents,
   };
 }

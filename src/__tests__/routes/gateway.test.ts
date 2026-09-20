@@ -7,6 +7,8 @@ vi.mock('../../db', async () => {
 });
 vi.mock('../../middleware/redis-client', () => ({ getRedis: () => null, connectRedis: vi.fn() }));
 
+vi.mock('../../infrastructure/email/resend', async () => (await import('../helpers/email-capture')).emailModuleMock());
+
 import { pool } from '../../db';
 import { buildApp } from '../../app';
 import { config } from '../../config';

@@ -15,6 +15,8 @@ import { requireAuth, extractSessionToken } from '../middleware/auth';
 import { setSessionCookie, clearSessionCookie } from '../infrastructure/auth/session-cookie';
 import { getClientIp } from '../middleware/api-protection';
 import { emailFingerprint } from '../middleware/log-redaction';
+import { isNewSignInDevice, notifySecurityEvent } from '../domain/auth/security-notices';
+import { listSecurityEvents, recordSecurityEvent } from '../modules/audit/security-events';
 import { checkSignupRateLimit } from '../middleware/signup-limiter';
 import { signinLockedSeconds, recordSigninFailure, clearSigninFailures } from '../middleware/signin-throttle';
 import {
@@ -78,6 +80,7 @@ function safeMessage(code: string): string {
 
 function audit(request: FastifyRequest, event: string, outcome: 'ok' | 'error', meta?: Record<string, string>) {
   authEventsTotal.inc({ event, outcome });
+  recordSecurityEvent(request, event, outcome, meta);
   // request.log (Fastify's pino instance) instead of console.log — keeps
   // audit entries structured/leveled consistently with the rest of the
   // scaffold's logging and avoids this repo's no-console lint rule.
@@ -113,7 +116,11 @@ export async function signInHandler(request: FastifyRequest, reply: FastifyReply
   }
   await clearSigninFailures(ip, email);
 
+  // Decided before this sign-in is recorded, or it would always look familiar.
+  const uaHeader = request.headers['user-agent'];
+  const newDevice = await isNewSignInDevice(result.user.id, ip, typeof uaHeader === 'string' && uaHeader ? uaHeader.slice(0, 255) : null);
   audit(request, 'signin_success', 'ok', { userId: result.user.id });
+  if (newDevice) notifySecurityEvent(request, result.user.email, 'new_sign_in');
   setSessionCookie(reply, result.token);
   // The web app lives on the httpOnly cookie and asks not to be handed the token
   // (nothing in its JavaScript should ever hold it). Native clients don't send
@@ -186,6 +193,41 @@ export async function confirmEmailHandler(request: FastifyRequest, reply: Fastif
 
   audit(request, 'email_confirmed', 'ok');
   return reply.send({ ok: true });
+}
+
+const EVENT_LABELS: Record<string, string> = {
+  signin_success: 'Signed in',
+  signin_failed: 'Failed sign-in attempt',
+  signin_locked: 'Sign-in blocked after too many failed attempts',
+  signup_success: 'Account created',
+  email_confirmed: 'Email address confirmed',
+  password_updated: 'Password changed',
+  password_reset_requested: 'Password reset requested',
+  password_reset_confirmed: 'Password reset completed',
+  email_confirmation_requested: 'Confirmation email requested',
+  signout: 'Signed out',
+  signout_everywhere: 'Signed out of all devices',
+  session_revoked: 'A device was signed out',
+  gateway_key_created: 'API key created',
+  gateway_key_revoked: 'API key revoked',
+};
+
+/** The caller's own recent security activity, newest first, so activity that is not theirs is easy to spot. */
+export async function activityHandler(request: FastifyRequest, reply: FastifyReply) {
+  await requireAuth(request, reply);
+  const user = request.currentUser!;
+  const rows = await listSecurityEvents(user.id, emailFingerprint(user.email));
+  return reply.send({
+    events: rows.map((r) => ({
+      id: r.id,
+      event: r.event,
+      label: EVENT_LABELS[r.event] ?? r.event.replace(/_/g, ' '),
+      outcome: r.outcome,
+      at: new Date(r.created_at).toISOString(),
+      ip: r.ip_address,
+      userAgent: r.user_agent,
+    })),
+  });
 }
 
 /** What is kept about a new session so its owner can recognise it later: the browser/app and where it signed in from. */
@@ -287,9 +329,11 @@ export async function confirmPasswordResetHandler(request: FastifyRequest, reply
   if (!parsed.success) throw new HttpError(400, parsed.error.issues.map((i) => i.message).join('; '));
 
   try {
+    const owner = await authService.resetTokenOwner(parsed.data.token);
     const ok = await authService.confirmPasswordReset(parsed.data.token, parsed.data.password);
     if (!ok) throw new HttpError(400, 'Reset link is invalid or has expired.');
-    audit(request, 'password_reset_confirmed', 'ok');
+    audit(request, 'password_reset_confirmed', 'ok', owner ? { userId: owner.id } : {});
+    if (owner) notifySecurityEvent(request, owner.email, 'password_reset');
     return reply.send({ ok: true });
   } catch (err) {
     if (err instanceof AuthError) throw authErrorToHttpError(err);
@@ -306,6 +350,7 @@ export async function updatePasswordHandler(request: FastifyRequest, reply: Fast
   try {
     await authService.updatePassword(user.id, parsed.data.password, extractSessionToken(request) ?? undefined);
     audit(request, 'password_updated', 'ok', { userId: user.id });
+    notifySecurityEvent(request, user.email, 'password_changed');
     return reply.send({ ok: true });
   } catch (err) {
     if (err instanceof AuthError) throw authErrorToHttpError(err);

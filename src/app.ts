@@ -40,6 +40,7 @@ import {
   signInHandler,
   signOutHandler,
   listSessionsHandler,
+  activityHandler,
   revokeSessionHandler,
   signOutEverywhereHandler,
   sessionHandler,
@@ -310,6 +311,7 @@ async function registerLegacyAndVersionedRoutes(instance: FastifyInstance) {
   instance.post('/auth/signin', small, signInHandler);
   instance.post('/auth/signout', signOutHandler);
   instance.get('/auth/sessions', listSessionsHandler);
+  instance.get('/auth/activity', activityHandler);
   instance.delete('/auth/sessions/:id', revokeSessionHandler);
   instance.post('/auth/signout-all', small, signOutEverywhereHandler);
   instance.get('/auth/session', sessionHandler);

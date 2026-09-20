@@ -4,6 +4,8 @@
 // middleware/auth.ts), so a leaked key can never mint more keys or revoke
 // its siblings. Ownership is enforced inside gatewayApiKeys (WHERE
 // owner_user_id = $n), never by trusting an id from the URL.
+import { recordSecurityEvent } from '../modules/audit/security-events';
+import { notifySecurityEvent } from '../domain/auth/security-notices';
 import type { FastifyReply, FastifyRequest } from 'fastify';
 import { HttpError } from '../middleware/http-error';
 import { requireAuth, requireConfirmedEmail } from '../middleware/auth';
@@ -15,6 +17,7 @@ import { LIBRARY_OPENAPI_SPEC } from '../openapi';
 
 function auditKey(request: FastifyRequest, event: string, meta: Record<string, unknown>) {
   request.log.info({ level: 'audit', event, requestId: request.id, ts: new Date().toISOString(), ...meta });
+  recordSecurityEvent(request, event, 'ok', Object.fromEntries(Object.entries(meta).map(([k, v]) => [k, String(v)])));
 }
 
 /** The developer-facing API description. Public: it documents only what a key can do. */
@@ -47,6 +50,7 @@ export async function createGatewayKeyHandler(request: FastifyRequest, reply: Fa
       keyId: created.id,
       services: created.services.join(','),
     });
+    notifySecurityEvent(request, user.email, 'api_key_created', parsed.data.label);
     return reply.status(201).send({ apiKey: created });
   } catch (err) {
     if (err instanceof GatewayKeyError) {
