@@ -349,7 +349,7 @@ export const OPENAPI_SPEC = {
       get: { tags: ['Setup'], summary: 'List a business\'s members', security: [{ SessionToken: [] }, { ApiLibraryKey: [] }], parameters: pageParameters, responses: { '200': { description: 'OK — `hasMore` says whether another page exists' } } },
       post: {
         tags: ['Setup'],
-        summary: 'Invite a member — pending until they accept (owner/admin only)',
+        summary: 'Invite a member by email — pending until they accept (owner/admin only). Never reveals whether the address has an account.',
         security: [{ SessionToken: [] }],
         requestBody: {
           required: true,
@@ -367,10 +367,10 @@ export const OPENAPI_SPEC = {
           },
         },
         responses: {
-          '200': { description: 'OK — invite created or updated, pending acceptance' },
+          '200': { description: 'OK — the invitation was made. The answer is identical whether or not the address has a Desk account: an address with no account is emailed a link to sign up and the invitation waits (30 days) until that address is confirmed. It is pending until the person accepts.' },
           '403': { description: 'Forbidden' },
-          '404': { description: 'No user exists with that email' },
-          '409': { description: 'That person is already a member of this business' },
+          '409': { description: 'That person is already a member of this business, or too many invitations are waiting' },
+          '429': { description: 'Too many invitations (per account, or to that address)' },
         },
       },
     },

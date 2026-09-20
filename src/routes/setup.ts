@@ -18,7 +18,8 @@ import { pool } from '../db';
 import { DraftPatchSchema, MemberInviteSchema, MAX_BUSINESS_NAME_LENGTH, MAX_INDUSTRY_LENGTH } from '../validators/setup';
 import { parsePage, slicePage } from '../validators/pagination';
 import { config } from '../config';
-import { sendBusinessInviteEmail } from '../infrastructure/email/resend';
+import { sendBusinessInviteEmail, sendBusinessInviteSignupEmail } from '../infrastructure/email/resend';
+import { MAX_EMAIL_INVITES_PER_BUSINESS } from '../domain/setup/email-invites';
 
 const MAX_INCOMPLETE_DRAFTS = 5;
 const MAX_DRAFT_BYTES = 262_144;
@@ -276,7 +277,7 @@ export async function listBusinessMembersHandler(request: FastifyRequest, reply:
   await requireConfirmedEmail(request, reply);
   const user = request.currentUser!;
   const { id: businessId } = request.params as { id: string };
-  await requireBusinessMembership(businessId, user.id);
+  const requester = await requireBusinessMembership(businessId, user.id);
   const page = parsePage(request.query);
 
   const { rows: fetched } = await pool.query<Record<string, unknown>>(
@@ -291,7 +292,18 @@ export async function listBusinessMembersHandler(request: FastifyRequest, reply:
     [businessId, page.limit + 1, page.offset],
   );
   const { rows, hasMore } = slicePage(fetched, page);
-  return reply.send({ hasMore, members: rows.map(formatMemberRow) });
+
+  // Invitations to addresses that have no account yet are shown to the people who can manage access, so a mistyped
+  // address can be removed (with DELETE .../members/:id, the same as any other member).
+  let emailInvites: Array<{ id: string; email: string; role: string; invitedAt: string }> = [];
+  if (canManageMembers(requester.role)) {
+    const { rows: waiting } = await pool.query<{ id: string; email: string; role: BusinessMemberRole; invited_at: string }>(
+      `SELECT id, email, role, invited_at FROM business_email_invites WHERE business_id = $1 ORDER BY invited_at DESC, id`,
+      [businessId],
+    );
+    emailInvites = waiting.map((w) => ({ id: w.id, email: w.email, role: formatRole(parseMemberRole(w.role)), invitedAt: w.invited_at }));
+  }
+  return reply.send({ hasMore, members: rows.map(formatMemberRow), emailInvites });
 }
 
 export async function inviteBusinessMemberHandler(request: FastifyRequest, reply: FastifyReply) {
@@ -317,7 +329,6 @@ export async function inviteBusinessMemberHandler(request: FastifyRequest, reply
 
   const { rows: invitedRows } = await pool.query<{ id: string }>(`SELECT id FROM users WHERE email = $1`, [email]);
   const invitedUser = invitedRows[0];
-  if (!invitedUser) throw new HttpError(404, 'User not found.');
 
   const { rows: businessRows } = await pool.query<{ name: string }>(`SELECT name FROM businesses WHERE id = $1`, [
     businessId,
@@ -325,6 +336,29 @@ export async function inviteBusinessMemberHandler(request: FastifyRequest, reply
   const businessName = businessRows[0]?.name ?? 'a business';
 
   const now = nowUtc();
+
+  // No account with that address: the answer must be the same as when there is one (otherwise this route tells any
+  // business owner which addresses are registered). The invitation is kept, the address is emailed a link to sign up,
+  // and it becomes a pending membership once that address is confirmed. See domain/setup/email-invites.ts.
+  if (!invitedUser) {
+    const { rows: waiting } = await pool.query<{ count: string }>(
+      `SELECT COUNT(*)::text AS count FROM business_email_invites WHERE business_id = $1 AND email <> $2`,
+      [businessId, email],
+    );
+    if (Number(waiting[0]?.count ?? 0) >= MAX_EMAIL_INVITES_PER_BUSINESS) {
+      throw new HttpError(409, 'This business has too many invitations waiting. Remove some before inviting more people.');
+    }
+    await pool.query(
+      `INSERT INTO business_email_invites (id, business_id, email, role, invited_by_user_id, invited_at)
+       VALUES ($1, $2, $3, $4, $5, $6)
+       ON CONFLICT (business_id, email) DO UPDATE SET
+         role = excluded.role, invited_by_user_id = excluded.invited_by_user_id, invited_at = excluded.invited_at`,
+      [generateId(), businessId, email, role, user.id, now],
+    );
+    await sendBusinessInviteSignupEmail(config, email, businessName, user.email, request.id);
+    return reply.send({ ok: true });
+  }
+
   // Pending until the invited user accepts — see acceptBusinessInviteHandler.
   // The WHERE guard on the update means a currently-accepted member can't be
   // silently reset to pending by a re-invite; rowCount 0 signals that case.
@@ -435,7 +469,12 @@ export async function removeBusinessMemberHandler(request: FastifyRequest, reply
     [membershipId, businessId],
   );
   const target = targetRows[0];
-  if (!target) throw new HttpError(404, 'Membership not found.');
+  if (!target) {
+    // Not a member: it may be an invitation to an address with no account yet.
+    const removedInvite = await pool.query(`DELETE FROM business_email_invites WHERE id = $1 AND business_id = $2`, [membershipId, businessId]);
+    if ((removedInvite.rowCount ?? 0) > 0) return reply.send({ ok: true });
+    throw new HttpError(404, 'Membership not found.');
+  }
   if (target.role === 'owner' && requester.role !== 'owner') {
     throw new HttpError(403, 'Only owners can remove another owner.');
   }

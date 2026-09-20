@@ -81,6 +81,32 @@ export async function sendBusinessInviteEmail(
   });
 }
 
+/** For an address with no Desk account yet: says who invited them and how to join. */
+export async function sendBusinessInviteSignupEmail(
+  config: AppConfig,
+  to: string,
+  businessName: string,
+  inviterEmail: string,
+  requestId: string,
+): Promise<void> {
+  const signUpUrl = `${config.appBaseUrl}/login`;
+  await sendEmail(config, {
+    to,
+    subject: `You've been invited to ${businessName} on Desk`,
+    html: themedEmailHtml({
+      title: `You've been invited to ${businessName}`,
+      body: `${inviterEmail} invited you to ${businessName} on Desk. Create an account with this email address and confirm it, then open your pending invites to accept or decline.`,
+      actionLabel: 'Create your account',
+      actionUrl: signUpUrl,
+      note: 'If you were not expecting this, you can ignore this email — nothing happens unless you sign up with this address.',
+    }),
+    requestId,
+    skippedEvent: 'business_invite_email_skipped',
+    failedEvent: 'business_invite_email_failed',
+    sentEvent: 'business_invite_email_sent',
+  });
+}
+
 export async function sendAccountAlreadyExistsEmail(
   config: AppConfig,
   to: string,

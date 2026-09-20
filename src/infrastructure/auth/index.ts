@@ -7,6 +7,7 @@ import { pool } from '../../db';
 import { config } from '../../config';
 import { PgDatabaseAdapter } from '../database/pg/adapter';
 import { DeskAuthService } from './auth-service';
+import { claimEmailInvites } from '../../domain/setup/email-invites';
 
 const db = new PgDatabaseAdapter(pool);
 
@@ -16,6 +17,7 @@ export const authService = new DeskAuthService(
   config.resetTokenDurationMinutes,
   config.confirmationTokenDurationMinutes,
   config.resendCooldownSeconds,
+  claimEmailInvites,
 );
 
 export { db as authDb };

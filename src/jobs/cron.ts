@@ -19,6 +19,7 @@ import { backendKeySweepTotal, cronTicksTotal, gatewayKeyDrift } from '../module
 import { reconcileBackendKeys } from '../domain/gateway/reconcile';
 import { sweepBackendKeys } from '../domain/gateway/orphans';
 import { getRedis } from '../middleware/redis-client';
+import { deleteExpiredEmailInvites } from '../domain/setup/email-invites';
 import { config } from '../config';
 
 let task: cron.ScheduledTask | null = null;
@@ -128,6 +129,7 @@ export async function runCleanup(log: FastifyBaseLogger): Promise<void> {
     await authDb.deleteExpiredSessions();
     await authDb.deleteExpiredPasswordResetTokens();
     await authDb.deleteExpiredEmailConfirmationTokens();
+    await deleteExpiredEmailInvites();
     cronTicksTotal.inc({ job: 'auth_cleanup', outcome: 'ok' });
     log.info({ event: 'cron_auth_cleanup' }, 'auth cleanup tick completed');
   } catch (err) {

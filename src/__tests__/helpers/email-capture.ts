@@ -3,6 +3,8 @@
 export const emailed = {
   confirm: new Map<string, string>(),
   reset: new Map<string, string>(),
+  /** Business invitation emails by recipient: which kind of email they got. */
+  invite: new Map<string, 'existing-account' | 'sign-up'>(),
 };
 
 export function emailModuleMock() {
@@ -13,7 +15,12 @@ export function emailModuleMock() {
     sendPasswordResetEmail: async (_config: unknown, email: string, token: string) => {
       emailed.reset.set(email, token);
     },
-    sendBusinessInviteEmail: async () => {},
+    sendBusinessInviteEmail: async (_config: unknown, email: string) => {
+      emailed.invite.set(email, 'existing-account');
+    },
+    sendBusinessInviteSignupEmail: async (_config: unknown, email: string) => {
+      emailed.invite.set(email, 'sign-up');
+    },
     sendAccountAlreadyExistsEmail: async () => {},
   };
 }

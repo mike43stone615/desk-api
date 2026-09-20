@@ -28,6 +28,7 @@ export function createFakeDb() {
   const idempotencyKeys = new Map<string, FakeRow>(); // keyed by key
   const gatewayKeys = new Map<string, FakeRow>(); // keyed by id
   const gatewayGrants: FakeRow[] = [];
+  const emailInvites = new Map<string, FakeRow>(); // keyed by id (migration 0013)
   const backendRevocations = new Map<string, FakeRow>(); // the queue filled by the grant-delete trigger (migration 0010)
 
   function findUserByEmail(email: string): FakeRow | undefined {
@@ -335,6 +336,46 @@ export function createFakeDb() {
     }
 
     // ── business_memberships ─────────────────────────────────────────────
+    // ── invitations to addresses with no account yet (src/domain/setup/email-invites.ts) ──
+    if (s.startsWith('SELECT COUNT(*)::text AS count FROM business_email_invites WHERE business_id = $1 AND email <> $2')) {
+      const n = [...emailInvites.values()].filter((i) => i.business_id === p[0] && i.email !== p[1]).length;
+      return { rows: [{ count: String(n) }], rowCount: 1 };
+    }
+    if (s.startsWith('INSERT INTO business_email_invites')) {
+      const [id, business_id, email, role, invited_by_user_id, invited_at] = p;
+      const existing = [...emailInvites.values()].find((i) => i.business_id === business_id && i.email === email);
+      if (existing) Object.assign(existing, { role, invited_by_user_id, invited_at });
+      else emailInvites.set(id, { id, business_id, email, role, invited_by_user_id, invited_at });
+      return { rows: [], rowCount: 1 };
+    }
+    if (s.startsWith('SELECT id, email, role, invited_at FROM business_email_invites WHERE business_id = $1')) {
+      const rows = [...emailInvites.values()].filter((i) => i.business_id === p[0]).sort((a, b) => String(b.invited_at).localeCompare(String(a.invited_at)));
+      return { rows, rowCount: rows.length };
+    }
+    if (s.startsWith('DELETE FROM business_email_invites WHERE id = $1 AND business_id = $2')) {
+      const inv = emailInvites.get(p[0]);
+      if (inv && inv.business_id === p[1]) { emailInvites.delete(p[0]); return { rows: [], rowCount: 1 }; }
+      return { rows: [], rowCount: 0 };
+    }
+    if (s.startsWith('SELECT business_id, role, invited_by_user_id, invited_at FROM business_email_invites WHERE email = $1')) {
+      const rows = [...emailInvites.values()].filter((i) => i.email === p[0] && String(i.invited_at) > p[1]);
+      return { rows, rowCount: rows.length };
+    }
+    if (s.startsWith('DELETE FROM business_email_invites WHERE email = $1')) {
+      for (const [id, i] of emailInvites) if (i.email === p[0]) emailInvites.delete(id);
+      return { rows: [], rowCount: 1 };
+    }
+    if (s.startsWith('DELETE FROM business_email_invites WHERE invited_at <= $1')) {
+      for (const [id, i] of emailInvites) if (String(i.invited_at) <= p[0]) emailInvites.delete(id);
+      return { rows: [], rowCount: 1 };
+    }
+    if (s.startsWith('INSERT INTO business_memberships') && s.includes('DO NOTHING')) {
+      const [id, business_id, user_id, role, invited_by_user_id, invited_at, now] = p;
+      if (![...memberships.values()].some((m) => m.business_id === business_id && m.user_id === user_id)) {
+        memberships.set(id, { id, business_id, user_id, role, invited_by_user_id, invited_at, accepted_at: null, created_at: now, updated_at: now });
+      }
+      return { rows: [], rowCount: 1 };
+    }
     if (s.startsWith('INSERT INTO business_memberships')) {
       if (s.includes('ON CONFLICT')) {
         const [id, business_id, user_id, role, invited_by_user_id, now] = p;
@@ -669,5 +710,6 @@ export function createFakeDb() {
     gatewayKeys,
     gatewayGrants,
     backendRevocations,
+    emailInvites,
   };
 }

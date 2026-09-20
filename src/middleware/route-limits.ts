@@ -35,6 +35,11 @@ export const CALLER_RULES: Record<string, { ip: Limit; email?: Limit }> = {
   },
   'POST /auth/password-reset/confirm': { ip: perHour('pwreset-confirm-ip', 20, 'password-reset attempts') },
   'POST /auth/email-confirmation/confirm': { ip: perHour('emailconf-confirm-ip', 20, 'confirmation attempts') },
+  // Invitations send email to an address of the inviter's choosing, and (for an unregistered address) store it.
+  'POST /setup/businesses/:id/members': {
+    ip: perHour('invite-ip', 60, 'invitations sent'),
+    email: perHour('invite-email', 5, 'invitations to this address'),
+  },
   'POST /integrations/market-research/analyze': { ip: perHour('market-analyze-ip', 30, 'market analyses') },
 };
 

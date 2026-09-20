@@ -34,6 +34,8 @@ export class DeskAuthService implements AuthService {
     private readonly resetTokenDurationMinutes: number,
     private readonly confirmationTokenDurationMinutes = 60 * 24,
     private readonly resendCooldownSeconds = 60,
+    /** Runs once an address has been confirmed (used to attach invitations that were waiting for it). Never blocks confirmation. */
+    private readonly onEmailConfirmed?: (user: { id: string; email: string }) => Promise<unknown>,
   ) {}
 
   async hashPassword(password: string): Promise<string> {
@@ -198,6 +200,14 @@ export class DeskAuthService implements AuthService {
     const confirmedAt = nowUtc();
     await this.db.markUserEmailConfirmed(record.userId, confirmedAt);
     await this.db.markEmailConfirmationTokenUsed(token, confirmedAt);
+    if (this.onEmailConfirmed) {
+      try {
+        const user = await this.db.findUserById(record.userId);
+        if (user) await this.onEmailConfirmed({ id: user.id, email: user.email });
+      } catch {
+        // The address IS confirmed; a failure attaching invitations must not turn that into an error.
+      }
+    }
     return true;
   }
 
