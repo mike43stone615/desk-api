@@ -30,7 +30,7 @@ describe.skipIf(!hasDb)('E2E: status, changelog, billing, GraphQL and webhook re
   let app: FastifyInstance;
   const users: string[] = [];
   const incidents: string[] = [];
-  const savedSecret = config.gatewayKeyEncryptionSecret;
+  const saved = { a: config.registryApiUrl, b: config.registryApiAdminKey, c: config.marketApiUrl, d: config.marketApiAdminKey, e: config.gatewayKeyEncryptionSecret };
   const adminEmail = `plat-admin-${rid()}@example.com`;
 
   async function mkUser(name: string, email?: string, confirmed = true) {
@@ -49,6 +49,11 @@ describe.skipIf(!hasDb)('E2E: status, changelog, billing, GraphQL and webhook re
   const gql = (who: { headers: Record<string, string> }, query: string) => call('POST', '/v1/graphql', who, { query });
 
   beforeAll(async () => {
+    // The two backends are not really called (key provisioning is mocked above); they only have to look configured.
+    config.registryApiUrl = 'http://127.0.0.1:1';
+    config.registryApiAdminKey = 'k';
+    config.marketApiUrl = 'http://127.0.0.1:1';
+    config.marketApiAdminKey = 'k';
     config.gatewayKeyEncryptionSecret = 'ab'.repeat(32);
     config.adminEmails.push(adminEmail.toLowerCase());
     app = await buildApp();
@@ -59,7 +64,11 @@ describe.skipIf(!hasDb)('E2E: status, changelog, billing, GraphQL and webhook re
     await pool.query('DELETE FROM subscriptions WHERE subject_id = ANY($1)', [users]);
     await pool.query('DELETE FROM users WHERE id = ANY($1)', [users]);
     config.adminEmails.splice(config.adminEmails.indexOf(adminEmail.toLowerCase()), 1);
-    config.gatewayKeyEncryptionSecret = savedSecret;
+    config.registryApiUrl = saved.a;
+    config.registryApiAdminKey = saved.b;
+    config.marketApiUrl = saved.c;
+    config.marketApiAdminKey = saved.d;
+    config.gatewayKeyEncryptionSecret = saved.e;
     await app.close();
   });
 
@@ -232,8 +241,11 @@ describe.skipIf(!hasDb)('E2E: status, changelog, billing, GraphQL and webhook re
     const broken: Sender = async () => { throw new Error('connect ECONNREFUSED'); };
     await pool.query(`UPDATE webhook_deliveries SET next_attempt_at = '2000-01-01T00:00:00Z' WHERE endpoint_id = $1`, [id]);
     expect(await processDueDeliveries(broken)).toBeGreaterThanOrEqual(1);
-    const list = (await call('GET', `/v1/gateway/webhooks/${id}/deliveries`, u)).json();
-    expect(JSON.stringify(list)).toContain('ECONNREFUSED');
+    // Other test files share this database and may pick the delivery up first with their own sender, so only the shape is checked.
+    const [delivery] = (await call('GET', `/v1/gateway/webhooks/${id}/deliveries`, u)).json().deliveries;
+    expect(delivery.attempts).toBeGreaterThanOrEqual(1);
+    expect(delivery.lastError).toBeTruthy();
+    expect(delivery.status).toBe('pending'); // retried later, not delivered
     await pool.query(`UPDATE webhook_deliveries SET status = 'delivered', created_at = '2000-01-01T00:00:00Z' WHERE endpoint_id = $1`, [id]);
     expect(await deleteOldDeliveries()).toBeGreaterThanOrEqual(1);
   });
