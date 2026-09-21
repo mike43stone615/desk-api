@@ -183,3 +183,16 @@ describe('in the test suite the sign-up throttles are off', () => {
     for (let i = 0; i < 20; i++) expect(await checkSignupDomainLimit(`p${i}@one-domain.example`)).toBe(true);
   });
 });
+
+describe('idempotency record cleanup', () => {
+  it('deletes records that expired more than a day ago and reports how many', async () => {
+    const { deleteExpiredIdempotencyKeys } = await import('../middleware/idempotency');
+    queryMock.mockResolvedValueOnce({ rows: [], rowCount: 3 });
+    expect(await deleteExpiredIdempotencyKeys()).toBe(3);
+    const [sql, params] = queryMock.mock.calls[0] as [string, string[]];
+    expect(sql).toMatch(/DELETE FROM idempotency_keys WHERE expires_at < \$1/);
+    const cutoffAge = Date.now() - Date.parse(params[0]);
+    expect(cutoffAge).toBeGreaterThan(24 * 3_600_000 - 5_000);
+    expect(cutoffAge).toBeLessThan(24 * 3_600_000 + 5_000);
+  });
+});

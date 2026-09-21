@@ -206,3 +206,13 @@ export function registerIdempotency(app: FastifyInstance) {
     return payload;
   });
 }
+
+/**
+ * Removes idempotency records whose 24-hour life is over (a day of grace beyond that). Until this existed they were only
+ * cleared when the same key was used again, so the table grew forever (129 rows after one day of testing, none ever removed).
+ */
+export async function deleteExpiredIdempotencyKeys(): Promise<number> {
+  const cutoff = new Date(Date.now() - IDEMPOTENCY_TTL_MS).toISOString();
+  const res = await pool.query(`DELETE FROM idempotency_keys WHERE expires_at < $1`, [cutoff]);
+  return res.rowCount ?? 0;
+}

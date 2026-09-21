@@ -137,7 +137,7 @@ function rememberReturnPath(url) {
 export function takeReturnPath() {
   const path = state.returnTo;
   state.returnTo = null;
-  return typeof path === 'string' && path.startsWith('/') && !path.startsWith('//') ? path : null;
+  return typeof path === 'string' && path.startsWith('/') && !path.startsWith('//') && !path.includes(String.fromCharCode(92)) ? path : null;
 }
 
 export function isAdminEmail(email) {

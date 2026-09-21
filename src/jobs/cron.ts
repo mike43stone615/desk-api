@@ -20,6 +20,7 @@ import { runReconcileAndRemember } from '../domain/gateway/reconcile';
 import { sweepBackendKeys } from '../domain/gateway/orphans';
 import { getRedis } from '../middleware/redis-client';
 import { deleteExpiredEmailInvites } from '../domain/setup/email-invites';
+import { deleteExpiredIdempotencyKeys } from '../middleware/idempotency';
 import { deleteExpiredSecurityEvents } from '../modules/audit/security-events';
 import { deleteExpiredAuditRows } from '../modules/audit/mutation-audit';
 import { revokeExpiredKeys } from '../domain/gateway/expiry';
@@ -143,6 +144,7 @@ export async function runCleanup(log: FastifyBaseLogger): Promise<void> {
     await authDb.deleteExpiredEmailConfirmationTokens();
     await deleteExpiredEmailInvites();
     await deleteExpiredSecurityEvents();
+    await deleteExpiredIdempotencyKeys();
     await deleteExpiredAuditRows();
     await revokeExpiredKeys(log);
     cronTicksTotal.inc({ job: 'auth_cleanup', outcome: 'ok' });
