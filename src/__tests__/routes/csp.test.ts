@@ -35,7 +35,7 @@ describe('JSON API responses', () => {
 
 describe('the library web pages', () => {
   it('send the library policy instead, under the configured header name, and no other policy', async () => {
-    for (const url of ['/', '/login', '/developer', '/app.js', '/style.css', '/pages/auth.js', '/pages/developer.js', '/developer/teams', '/pages/teams.js']) {
+    for (const url of ['/', '/login', '/developer', '/app.js', '/style.css', '/pages/auth.js', '/pages/developer.js', '/developer/teams', '/pages/teams.js', '/developer/webhooks', '/developer/apps', '/developer/billing', '/pages/webhooks.js', '/pages/apps.js', '/pages/billing.js']) {
       const res = await app.inject({ method: 'GET', url });
       expect(res.statusCode, url).toBe(200);
       expect(res.headers[CSP_HEADER], url).toBe(LIBRARY_UI_CSP);

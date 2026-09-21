@@ -6,6 +6,7 @@ import {
   registerRoute, api, esc, icon, spinnerBtn, statusMsg, friendlyError, toast,
   reportHandledException, currentEpoch, submitOnEnter, navigate,
 } from '../app.js';
+import { tabsHtml } from '../tabs.js';
 
 const MAX_LABEL_LENGTH = 64;
 
@@ -255,10 +256,7 @@ registerRoute('/developer', async (app) => {
             <p>Create keys and choose which Desk APIs each one can call.</p>
           </div>
         </div>
-        <div class="page-tabs" role="navigation" aria-label="API Library sections">
-          <a href="/developer" class="page-tab active" aria-current="page">API keys</a>
-          <a href="/developer/teams" class="page-tab" id="teams-tab">Teams</a>
-        </div>
+        ${tabsHtml('/developer')}
         ${body}
       </div>
       ${s.confirmRevoke ? `
@@ -276,8 +274,7 @@ registerRoute('/developer', async (app) => {
     `;
     s.animateReveal = false;
 
-    const teamsTab = document.getElementById('teams-tab');
-    if (teamsTab) teamsTab.addEventListener('click', (e) => { e.preventDefault(); navigate('/developer/teams'); });
+    app.querySelectorAll('[data-nav]').forEach((a) => a.addEventListener('click', (e) => { e.preventDefault(); navigate(a.dataset.nav); }));
 
     const retry = document.getElementById('retry-load-btn');
     if (retry) retry.addEventListener('click', load);

@@ -606,3 +606,21 @@ table.admin-table td.admin-actions-cell { white-space: nowrap; }
 /* The consent screen's list of what an app asks for. */
 .consent-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--sp-sm); }
 .consent-list li { display: flex; gap: var(--sp-sm); align-items: center; }
+
+/* Plans & billing, webhooks, apps */
+.page-tabs { overflow-x: auto; white-space: nowrap; }
+.plan-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: var(--sp-md); }
+.plan-card.current { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+.plan-head { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-sm); }
+.plan-head h3 { margin: 0; }
+.plan-price { font-size: 1.5rem; font-weight: 600; margin: var(--sp-sm) 0; }
+.plan-price span { font-size: 0.9rem; font-weight: 400; opacity: 0.7; }
+.plan-list { margin: var(--sp-sm) 0 0; padding-left: 1.1rem; font-size: 0.9rem; }
+.usage-row { display: flex; justify-content: space-between; gap: var(--sp-md); font-size: 0.9rem; margin-top: var(--sp-md); }
+.usage-bar { height: 10px; border-radius: 6px; background: var(--line); overflow: hidden; margin: var(--sp-xs, 4px) 0 var(--sp-sm); }
+.usage-fill { height: 100%; background: var(--accent); border-radius: 6px; }
+.usage-fill.over { background: #b3261e; }
+.table-wrap { overflow-x: auto; padding: 0; }
+.plain-table { width: 100%; border-collapse: collapse; font-size: 0.9rem; }
+.plain-table th, .plain-table td { text-align: left; padding: var(--sp-sm) var(--sp-md); border-bottom: 1px solid var(--line); vertical-align: top; }
+.plain-table .num { text-align: right; white-space: nowrap; }

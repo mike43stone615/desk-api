@@ -5,6 +5,7 @@ import {
   registerRoute, api, esc, icon, spinnerBtn, statusMsg, friendlyError, toast,
   reportHandledException, currentEpoch, submitOnEnter, navigate, state,
 } from '../app.js';
+import { tabsHtml } from '../tabs.js';
 import {
   ROLES, ROLE_LABELS, ROLE_HELP, grantableRoles, canManageMember, canCreateKeys, canDeleteTeam, teamKeyServices,
 } from '../team-rules.js';
@@ -238,11 +239,7 @@ registerRoute('/developer/teams', async (app) => {
   document.addEventListener('keydown', onKeydown);
 
   // ---------- views ----------
-  const tabs = `
-    <div class="page-tabs" role="navigation" aria-label="API Library sections">
-      <a href="/developer" data-nav="/developer" class="page-tab">API keys</a>
-      <a href="/developer/teams" data-nav="/developer/teams" class="page-tab active" aria-current="page">Teams</a>
-    </div>`;
+  const tabs = tabsHtml('/developer/teams');
 
   function teamCardHtml(t) {
     return `
