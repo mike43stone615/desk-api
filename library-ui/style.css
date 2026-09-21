@@ -608,8 +608,9 @@ table.admin-table td.admin-actions-cell { white-space: nowrap; }
 .consent-list li { display: flex; gap: var(--sp-sm); align-items: center; }
 
 /* Plans & billing, webhooks, apps */
-.page-tabs { overflow-x: auto; white-space: nowrap; }
-.page-tabs .page-tab { flex-shrink: 0; white-space: nowrap; }
+.page-tabs { flex-wrap: wrap; row-gap: 0; }
+.page-tabs .page-tab { white-space: nowrap; }
+@media (max-width: 520px) { .page-tab { padding: var(--sp-sm) var(--sp-md); } }
 .plan-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: var(--sp-md); }
 .plan-card.current { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
 .plan-head { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-sm); }
@@ -617,6 +618,7 @@ table.admin-table td.admin-actions-cell { white-space: nowrap; }
 .plan-price { font-size: 1.5rem; font-weight: 600; margin: var(--sp-sm) 0; }
 .plan-price span { font-size: 0.9rem; font-weight: 400; opacity: 0.7; }
 .plan-list { margin: var(--sp-sm) 0 0; padding-left: 1.1rem; font-size: 0.9rem; }
+.usage-row span:last-child { white-space: nowrap; }
 .usage-row { display: flex; justify-content: space-between; gap: var(--sp-md); font-size: 0.9rem; margin-top: var(--sp-md); }
 .usage-bar { height: 10px; border-radius: 6px; background: var(--line); overflow: hidden; margin: var(--sp-xs, 4px) 0 var(--sp-sm); }
 .usage-fill { height: 100%; background: var(--accent); border-radius: 6px; }
