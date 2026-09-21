@@ -276,7 +276,7 @@ registerRoute('/developer/teams', async (app) => {
     const accepted = m.acceptedAt !== null;
     const manageable = canManageMember(role, { role: m.role, accepted });
     const roleOptions = grantableRoles(role);
-    const roleCell = manageable && accepted && roleOptions.length
+    const roleCell = !me && manageable && accepted && roleOptions.length
       ? `<select class="team-select" data-role-for="${esc(m.id)}" aria-label="Role of ${esc(m.user.email)}">${ROLES.filter((r) => roleOptions.includes(r) || r === m.role).map((r) => `<option value="${r}" ${r === m.role ? 'selected' : ''} ${roleOptions.includes(r) ? '' : 'disabled'}>${esc(ROLE_LABELS[r])}</option>`).join('')}</select>`
       : `<span class="meta-chip">${esc(ROLE_LABELS[m.role] || m.role)}</span>`;
     const action = me

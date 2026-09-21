@@ -428,6 +428,10 @@ input[type="password"]::-ms-reveal { display: none; }
 .state-card .biz-chips { display: flex; gap: var(--sp-sm); flex-wrap: wrap; margin-top: var(--sp-xs); }
 .key-card { margin-bottom: var(--sp-md); align-items: center; }
 .key-card > .btn { margin-left: auto; flex-shrink: 0; }
+/* On a narrow screen the text keeps a readable width and the buttons drop to their own line instead of squeezing it. */
+.key-card { flex-wrap: wrap; }
+.key-card > .biz-body { flex: 1 1 200px; min-width: 0; overflow-wrap: anywhere; }
+.key-card > .team-select { flex-shrink: 0; }
 .library-list { display: flex; flex-direction: column; gap: var(--sp-sm); margin-bottom: var(--sp-sm); }
 .library-row {
   display: flex; align-items: flex-start; gap: var(--sp-md); padding: var(--sp-md) var(--sp-lg);
