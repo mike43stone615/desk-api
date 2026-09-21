@@ -3,6 +3,17 @@
 What changed in the Desk API, newest first. Breaking changes are never made inside `v1` (see docs/API-VERSIONING.md);
 everything below is additive unless it says "safer".
 
+## 2026-09-21: end-to-end check fixes
+
+- **OAuth:** presenting an already-used refresh token again now ends the whole grant (a stolen copy can no longer keep working
+  alongside the real app), and refreshing is one atomic step, so two simultaneous refreshes cannot both succeed.
+- **Website:** the API Library pages, scripts and fonts are no longer counted by the per-address rate limit (a handful of page views
+  used to lock a person, or an office sharing one address, out of the site for a minute). Browsers now get `304 Not Modified` for
+  unchanged files even through Cloudflare (which rewrites the ETag as a weak one).
+- **Webhooks:** deliveries are made three at a time, so one receiver that never answers cannot hold up everyone else's events.
+- **Docs:** the reference now lists the answers the API really gives: 201 for creates and 204 for deletes under `/v1`, 412 for a stale
+  draft save, and 403 wherever a credential can be refused.
+
 ## 2026-09-21: administration page
 
 - **Administration tab** in the API Library (administrators only): flip between the Desk, Registry and Market APIs, and view and edit their
