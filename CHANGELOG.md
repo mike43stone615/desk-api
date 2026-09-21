@@ -3,6 +3,19 @@
 What changed in the Desk API, newest first. Breaking changes are never made inside `v1` (see docs/API-VERSIONING.md);
 everything below is additive unless it says "safer".
 
+## 2026-09-21: platform features
+
+- **Sandbox keys** (`sandbox: true`): fixed sample answers, no backend, nothing metered or billed.
+- **Plans and billing:** Free, Developer and Business plans (draft prices), exact metering of market analyses, monthly draft
+  invoices; no payment provider yet, so nobody is charged. `GET /billing/plans`, `/billing/subscription`, `/billing/invoices`.
+- **Outbound webhooks:** signed (`Desk-Signature`), retried, replay-protected, safe against private addresses; `/gateway/webhooks`.
+- **OAuth 2.0 for third-party apps:** authorization code with PKCE, one-hour access tokens, rotating refresh tokens, a consent
+  screen, and a list of authorized apps a person can revoke.
+- **GraphQL:** a read-only `POST /graphql` with depth, size and cost limits, scoped by who is asking.
+- **Status page incidents** and the **changelog as JSON and an Atom feed**; the JavaScript client `desk-api-library` 0.1.0.
+- **Regions:** `REGION` and a read-only standby mode (`READ_ONLY=true`); a second region itself is not set up (docs/MULTI-REGION.md).
+- **Migration 0022.**
+
 ## 2026-09-21: round 4
 
 - **Requests:** a body over the size limit now gets a clean `413` (through Cloudflare it used to surface as a 502); a text

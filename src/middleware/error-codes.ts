@@ -77,6 +77,7 @@ export const ERROR_CODES: Record<string, string> = {
   oauth_invalid_request: 'The authorization request was not valid.',
   oauth_limit_reached: 'The account already has the maximum number of registered apps.',
   oauth_not_found: 'No such app, or it has no access to the account.',
+  region_read_only: 'This copy of the service is a read-only standby; the change was not made. Try again shortly.',
   team_not_found: 'That team, member or invitation does not exist, or you are not part of it.',
   team_forbidden: 'Your role in the team does not allow that.',
   team_limit_reached: 'A team limit was reached (teams per person, members, or keys).',

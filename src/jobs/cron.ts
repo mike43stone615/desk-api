@@ -37,6 +37,11 @@ let reconcileTask: cron.ScheduledTask | null = null;
 let mailTask: cron.ScheduledTask | null = null;
 
 export function startCleanupCron(log: FastifyBaseLogger): void {
+  // A read-only standby must not run the jobs that write (clean-up, mail and webhook delivery, invoices): the live copy does.
+  if (config.readOnly) {
+    log.info({ event: 'read_only_no_jobs' }, 'read-only region: background jobs are not started');
+    return;
+  }
   task = cron.schedule('0 2 * * *', () => {
     void runCleanup(log);
   });

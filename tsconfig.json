@@ -9,5 +9,7 @@
     "esModuleInterop": true,
     "skipLibCheck": true
   },
-  "include": ["src/**/*"]
+  "include": ["src/**/*"],
+  // The JavaScript client has its own project (sdk/typescript/tsconfig.json); its test imports it from outside src.
+  "exclude": ["src/__tests__/sdk.test.ts"]
 }

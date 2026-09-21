@@ -770,6 +770,7 @@ export function createFakeDb() {
       for (const g of gatewayGrants) if (g.api_key_id === p[0]) g.encrypted_backend_key = null;
       return { rows: [], rowCount: 1 };
     }
+    if (s.includes('FROM incidents WHERE started_at')) return { rows: [], rowCount: 0 };
     if (s.includes('FROM plans WHERE active')) return { rows: [], rowCount: 0 };
     if (s.startsWith('SELECT team_id FROM gateway_api_keys WHERE id = $1')) { const k = gatewayKeys.get(p[0]); return { rows: k ? [{ team_id: k.team_id ?? null }] : [], rowCount: k ? 1 : 0 }; }
     if (s.startsWith('SELECT id FROM webhook_endpoints WHERE active')) return { rows: [], rowCount: 0 };

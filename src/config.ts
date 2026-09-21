@@ -39,6 +39,9 @@ export const envSchema = z.object({
   OTEL_EXPORTER_OTLP_ENDPOINT: z.string().url().optional(),
 
   ENVIRONMENT: z.string().default('production'),
+  // Which region this copy runs in (shown in the X-Region header and /health), and whether it is a standby that only reads.
+  REGION: z.string().trim().min(1).max(32).default('primary'),
+  READ_ONLY: z.enum(['true', 'false']).default('false'),
   SESSION_DURATION_HOURS: z.coerce.number().int().positive().default(720),
   RESET_TOKEN_DURATION_MINUTES: z.coerce.number().int().positive().default(60),
   CONFIRMATION_TOKEN_DURATION_MINUTES: z.coerce.number().int().positive().default(1440),
@@ -188,6 +191,9 @@ export interface AppConfig {
   securityContact: string | undefined;
   resendWebhookSecret: string | undefined;
   supportUrl: string;
+  region: string;
+  /** A standby copy: answers reads, refuses writes with 503, and runs none of the background jobs. */
+  readOnly: boolean;
 }
 
 /** A development copy of the service must never run jobs that act on the SHARED backends on behalf of its own (empty) database. */
@@ -243,4 +249,6 @@ export const config: AppConfig = {
   securityContact: env.SECURITY_CONTACT,
   resendWebhookSecret: env.RESEND_WEBHOOK_SECRET,
   supportUrl: env.SUPPORT_URL,
+  region: env.REGION,
+  readOnly: env.READ_ONLY === 'true',
 };

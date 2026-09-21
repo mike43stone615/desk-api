@@ -201,6 +201,16 @@ export async function buildApp(options: { logStream?: { write: (line: string) =>
   // Must come before any route is registered: it records them for 405 answers.
   registerNotFound(app);
 
+  // Which region answered; and in a read-only standby every change is refused (GraphQL is a POST but only reads).
+  const READ_ONLY_ALLOWED = /^\/(v1\/)?graphql(\?|$)/;
+  app.addHook('onRequest', async (request, reply) => {
+    reply.header('x-region', config.region);
+    if (config.readOnly && !['GET', 'HEAD', 'OPTIONS'].includes(request.method) && !READ_ONLY_ALLOWED.test(request.url)) {
+      reply.header('Retry-After', '30');
+      throw new HttpError(503, 'This copy of the service is read-only. Try again in a moment: the writing copy takes changes.', 'region_read_only');
+    }
+  });
+
   app.addHook('onRequest', async (request, reply) => {
     reply.header('x-request-id', request.id);
     // A body that announces itself as too big is answered 413 only after the rest of it has been read and thrown away.
@@ -404,7 +414,7 @@ export async function buildApp(options: { logStream?: { write: (line: string) =>
     // Same members as the other two services' health answers (responseId, servedAt, ok), plus the older ones.
     app.get(`${base}/health`, async (req, reply) => {
       const now = new Date().toISOString();
-      return reply.send({ ok: true, service: 'desk-api', responseId: req.id, servedAt: now, ts: now, processStartedAt: PROCESS_STARTED_AT });
+      return reply.send({ ok: true, service: 'desk-api', region: config.region, readOnly: config.readOnly, responseId: req.id, servedAt: now, ts: now, processStartedAt: PROCESS_STARTED_AT });
     });
     // The public status page: operational, degraded or down for each part, for anyone (a person, a developer, a monitor).
     const statusView = async () => {
