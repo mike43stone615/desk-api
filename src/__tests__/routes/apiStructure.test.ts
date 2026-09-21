@@ -134,7 +134,7 @@ describe('caching', () => {
 
   it('the web pages keep their own revalidation rule', async () => {
     const page = await app.inject({ method: 'GET', url: '/login' });
-    expect(page.headers['cache-control']).toBe('no-cache');
+    expect(page.headers['cache-control']).toBe('private, no-cache');
   });
 });
 

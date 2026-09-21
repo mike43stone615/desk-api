@@ -8,6 +8,7 @@
 // involved. Every route is registered from a fixed scan of library-ui/ at
 // startup -- nothing is ever built from the request path, so there is no path
 // to traverse. Anything not listed falls through to the API's normal 404.
+import { createHash } from 'crypto';
 import { readdirSync, readFileSync } from 'fs';
 import { join } from 'path';
 import type { FastifyInstance } from 'fastify';
@@ -61,12 +62,21 @@ export function registerLibraryUi(app: FastifyInstance): void {
     return;
   }
 
-  const send = (body: Buffer, type: string) => async (_req: unknown, reply: { header: (k: string, v: string) => unknown; removeHeader: (k: string) => unknown; send: (b: Buffer) => unknown }) => {
-    reply.header('Content-Type', type);
-    applyHtmlCsp(reply, LIBRARY_UI_CSP);
-    // Always revalidate, so a deploy is visible immediately.
-    reply.header('Cache-Control', 'no-cache');
-    return reply.send(body);
+  const send = (body: Buffer, type: string) => {
+    const etag = `"${createHash('sha256').update(body).digest('hex').slice(0, 24)}"`;
+    return async (req: { headers: Record<string, string | string[] | undefined> }, reply: { header: (k: string, v: string) => unknown; removeHeader: (k: string) => unknown; code: (n: number) => unknown; send: (b?: Buffer) => unknown }) => {
+      reply.header('Content-Type', type);
+      applyHtmlCsp(reply, LIBRARY_UI_CSP);
+      // "private" keeps Cloudflare from storing these files (its default browser-cache time for .js/.css is four hours, which
+      // hid a deploy from returning visitors); "no-cache" makes the browser ask every time, and the ETag makes that ask cheap.
+      reply.header('Cache-Control', 'private, no-cache');
+      reply.header('ETag', etag);
+      if (req.headers['if-none-match'] === etag) {
+        reply.code(304);
+        return reply.send();
+      }
+      return reply.send(body);
+    };
   };
 
   for (const rel of files) {

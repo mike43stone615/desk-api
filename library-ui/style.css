@@ -609,6 +609,7 @@ table.admin-table td.admin-actions-cell { white-space: nowrap; }
 
 /* Plans & billing, webhooks, apps */
 .page-tabs { overflow-x: auto; white-space: nowrap; }
+.page-tabs .page-tab { flex-shrink: 0; white-space: nowrap; }
 .plan-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: var(--sp-md); }
 .plan-card.current { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
 .plan-head { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-sm); }

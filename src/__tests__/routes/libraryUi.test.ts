@@ -26,7 +26,18 @@ describe('API Library web pages (served from api.deskbusiness.co)', () => {
     expect(res.headers['content-type']).toMatch(/text\/html/);
     expect(res.body).toContain('<title>Desk API Library</title>');
     expect(res.body).not.toContain('Desk Business');
-    expect(res.headers['cache-control']).toBe('no-cache');
+    expect(res.headers['cache-control']).toBe('private, no-cache');
+    expect(res.headers.etag).toMatch(/^"[0-9a-f]{24}"$/);
+  });
+
+  it('answers 304 when the browser already has the current file, and the full file when it does not', async () => {
+    const first = await app.inject({ method: 'GET', url: '/style.css' });
+    const again = await app.inject({ method: 'GET', url: '/style.css', headers: { 'if-none-match': first.headers.etag as string } });
+    expect(again.statusCode).toBe(304);
+    expect(again.body).toBe('');
+    const stale = await app.inject({ method: 'GET', url: '/style.css', headers: { 'if-none-match': '"old"' } });
+    expect(stale.statusCode).toBe(200);
+    expect(stale.body.length).toBeGreaterThan(1000);
   });
 
   it('serves every script, the stylesheet and the logo with the right content type', async () => {
