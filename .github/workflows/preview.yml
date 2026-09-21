@@ -1,0 +1,55 @@
+name: Preview
+
+# A throwaway copy of the whole API for every pull request (and on demand): a fresh Postgres, every migration applied from
+# nothing, the production build started, and a short end-to-end check run against it over HTTP. Nothing here touches the real
+# service, the real database, or any secret; the copy is destroyed when the job ends.
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  preview:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_DB: desk_api_preview_test
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/desk_api_preview_test
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+          cache: 'npm'
+      - run: npm ci
+      - name: Build
+        run: npm run build:prod
+      - name: Apply every migration to the empty database
+        run: npm run migrate
+      - name: Start the built server
+        run: |
+          NODE_ENV=development PORT=3458 APP_BASE_URL=http://localhost:3458 node dist/server.js > preview-server.log 2>&1 &
+          echo $! > preview-server.pid
+      - name: Check it end to end
+        run: node scripts/preview-check.mjs http://localhost:3458
+      - name: Show the server log if something failed
+        if: failure()
+        run: tail -n 60 preview-server.log
+      - name: Stop it
+        if: always()
+        run: kill "$(cat preview-server.pid)" 2>/dev/null || true

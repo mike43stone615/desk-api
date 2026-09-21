@@ -177,3 +177,32 @@ describe('the counter itself', () => {
     expect(await hit(limit, 'm')).toBeGreaterThan(0);
   });
 });
+
+describe('details the mutation check found untested', () => {
+  it('a request with no e-mail address in its body is not counted against any e-mail limit', async () => {
+    for (let i = 0; i < 4; i++) {
+      const res = await app.inject({ method: 'POST', url: '/auth/password-reset/request', headers: { 'cf-connecting-ip': '198.51.100.77' }, payload: {} });
+      expect(res.statusCode).toBe(400); // refused for the missing address, never 429 from a shared "no address" counter
+    }
+  });
+
+  it('the per-account limit ignores a caller nobody has signed in, and does nothing when limits are off', async () => {
+    const { enforceUserRouteLimit } = await import('../../middleware/route-limits');
+    const request = { method: 'POST', routeOptions: { url: '/gateway/api-keys' }, currentUser: undefined } as never;
+    await expect(enforceUserRouteLimit(request, {} as never)).resolves.toBeUndefined();
+    setRouteLimitsEnabledForTests(false);
+    const signedIn = { method: 'POST', routeOptions: { url: '/gateway/api-keys' }, currentUser: { id: 'u-off' } } as never;
+    for (let i = 0; i < 40; i++) await expect(enforceUserRouteLimit(signedIn, {} as never)).resolves.toBeUndefined();
+  });
+
+  it('the shared counter is given its lifetime on the first hit only, not refreshed by later ones', async () => {
+    const calls: string[] = [];
+    let count = 0;
+    fakeRedis = { incr: async () => ++count, pexpire: async () => { calls.push('pexpire'); }, pttl: async () => 1500 };
+    const limit: Limit = { name: 'ttl-check', max: 1, windowMs: 60_000, what: 'things' };
+    expect(await hit(limit, 'subject')).toBe(0);
+    expect(calls).toEqual(['pexpire']);
+    expect(await hit(limit, 'subject')).toBe(2); // over the limit: told to wait ceil(1500 ms) = 2 s
+    expect(calls).toEqual(['pexpire']); // not extended again
+  });
+});

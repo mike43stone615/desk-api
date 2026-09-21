@@ -229,6 +229,20 @@
       "everyMinutes": 720
     },
     {
+      "name": "reference-percentiles-fresh",
+      "what": "the percentile breakpoints behind every market score are being recomputed (older than the recompute interval plus a grace period means the batch stopped)",
+      "url": "http://localhost:3457/reference-status",
+      "headers": {
+        "x-api-key": "env:MARKET_API_KEY"
+      },
+      "timeoutSec": 15,
+      "expectStatus": 200,
+      "expectJson": {
+        "fresh": true
+      },
+      "everyMinutes": 720
+    },
+    {
       "name": "provider-keys-and-quotas",
       "what": "OpenAI, Google Places or Resend refused our key or reported the quota used up",
       "kind": "counter",

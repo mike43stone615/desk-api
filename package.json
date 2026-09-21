@@ -31,7 +31,9 @@
     "format": "prettier --write src",
     "sdk:types": "tsx scripts/export-openapi.ts openapi-out && npx openapi-typescript openapi-out/library.json -o sdk/typescript/desk-api-library.d.ts",
     "scan:logs": "node scripts/scan-logs.mjs",
-    "traces": "node scripts/slow-traces.mjs"
+    "traces": "node scripts/slow-traces.mjs",
+    "mutation:lite": "node scripts/mutation-lite.mjs",
+    "preview:check": "node scripts/preview-check.mjs"
   },
   "dependencies": {
     "@fastify/cookie": "^11.1.2",

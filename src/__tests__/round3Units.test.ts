@@ -68,6 +68,24 @@ describe('the mail queue', () => {
     const sqls = queryMock.mock.calls.map((c) => String(c[0]));
     expect(sqls.filter((s) => s.startsWith('DELETE FROM email_outbox')).length).toBe(3); // sent, last, refused
     expect(sqls.filter((s) => s.startsWith('UPDATE email_outbox')).length).toBe(1); // again
+    expect(sqls.find((s) => s.startsWith('UPDATE email_outbox'))).toContain("($3 || ' minutes')::interval");
+    expect(sqls.find((s) => s.includes('FROM email_outbox WHERE next_attempt_at'))).toContain('next_attempt_at <= now()');
+  });
+
+  it('the third failed try is still retried once more; the fourth is the last', async () => {
+    for (const [attempts, deleted] of [[1, false], [2, false], [3, true]] as const) {
+      queryMock.mockReset();
+      queryMock.mockImplementation(async (sql: string) => {
+        if (sql.includes('FROM email_outbox WHERE next_attempt_at')) return { rows: [{ id: 'x', to_email: 'a@example.com', subject: 's', html: '<p>x</p>', attempts }], rowCount: 1 };
+        if (sql.includes('COUNT(*)')) return { rows: [{ n: '0' }], rowCount: 1 };
+        return { rows: [], rowCount: 1 };
+      });
+      vi.stubGlobal('fetch', vi.fn(async () => new Response('down', { status: 503 })));
+      await processOutbox(mail);
+      const sqls = queryMock.mock.calls.map((c) => String(c[0]));
+      expect(sqls.some((s) => s.startsWith('DELETE FROM email_outbox')), `attempts ${attempts}`).toBe(deleted);
+      expect(sqls.some((s) => s.startsWith('UPDATE email_outbox')), `attempts ${attempts}`).toBe(!deleted);
+    }
   });
 
   it('does nothing without a mail key', async () => {
@@ -130,6 +148,9 @@ describe('sign-up throttles', () => {
     for (let i = 0; i < 50; i++) expect(await checkSignupDomainLimit(`p${i}@gmail.com`)).toBe(true);
     expect(emailDomain('a@B.Example')).toBe('b.example');
     expect(emailDomain('nonsense')).toBeNull();
+    expect(emailDomain('a@')).toBeNull(); // nothing after the @
+    expect(emailDomain('@b.example')).toBeNull(); // nothing before the @
+    expect(await checkSignupDomainLimit('no-domain-at-all')).toBe(true); // nothing to count, so nothing to refuse
   });
 });
 
@@ -153,5 +174,12 @@ describe('a limit set for one key', () => {
     queryMock.mockRejectedValueOnce(new Error('db down'));
     expect(await keyRateFactor('deskgw_ccc', 120)).toBeNull();
     forgetKeyRateFactors();
+  });
+});
+
+describe('in the test suite the sign-up throttles are off', () => {
+  it('so suites that sign up many accounts are not refused', async () => {
+    for (let i = 0; i < 20; i++) expect(await checkSignupRateLimit('203.0.113.250')).toBe(true);
+    for (let i = 0; i < 20; i++) expect(await checkSignupDomainLimit(`p${i}@one-domain.example`)).toBe(true);
   });
 });
