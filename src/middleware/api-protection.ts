@@ -14,6 +14,7 @@ import { problemBody } from './http-error';
 import { config } from '../config';
 import { rateLimitFallbackTotal } from '../modules/metrics';
 import { GATEWAY_KEY_PREFIX, keyBucketInfo } from '../domain/gateway/keys';
+import { LIBRARY_UI_STATIC_PATHS } from './static-paths';
 
 interface RateLimitResult {
   allowed: boolean;
@@ -241,6 +242,8 @@ export function registerApiProtection(app: FastifyInstance) {
   app.addHook('preHandler', async (request: FastifyRequest, reply: FastifyReply) => {
     const path = normalizePath(request.url);
     if (path === '/health' || path === '/metrics') return;
+    // The website's own files are not API calls (see static-paths.ts).
+    if ((request.method === 'GET' || request.method === 'HEAD') && LIBRARY_UI_STATIC_PATHS.has(request.url.split('?')[0])) return; // the raw path: /v1 (an API root) is not the page at /
 
     // An API Library key gets its OWN bucket, checked FIRST and at half the size of an address's: one developer's key is
     // limited no matter how many addresses it is used from, and a key that is over its limit is refused without

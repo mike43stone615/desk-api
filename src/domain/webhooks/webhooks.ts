@@ -200,10 +200,31 @@ const realSender: Sender = async (url, init) => {
   return { status: res.status };
 };
 
-/** Delivers what is due. Returns how many attempts were made. Safe to run on several instances at once (rows are locked). */
+/**
+ * Delivers what is due. Returns how many attempts were made. Safe to run on several instances at once (rows are locked).
+ * A few deliveries are made at the same time, so one receiver that never answers (each try waits up to 5 seconds) cannot hold up
+ * everyone else's events behind it.
+ */
 export async function processDueDeliveries(send: Sender = realSender, resolve?: (host: string) => Promise<string[]>): Promise<number> {
   let attempts = 0;
-  for (let i = 0; i < 25; i++) {
+  let budget = MAX_DELIVERIES_PER_RUN;
+  const worker = async () => {
+    while (budget > 0) {
+      budget--;
+      if (!(await deliverOne(send, resolve))) return;
+      attempts++;
+    }
+  };
+  await Promise.all(Array.from({ length: DELIVERY_WORKERS }, worker));
+  return attempts;
+}
+
+const MAX_DELIVERIES_PER_RUN = 50;
+const DELIVERY_WORKERS = 3; // each holds a database connection while it waits for the receiver, so not more than a third of the pool (10)
+
+/** Claims one due delivery (locking its row), makes the attempt and records the result. False when nothing is due. */
+async function deliverOne(send: Sender, resolve?: (host: string) => Promise<string[]>): Promise<boolean> {
+  {
     const client = await pool.connect();
     let row: { id: string; endpoint_id: string; event_type: string; payload: string; attempts: number; secret_enc: string; url: string; active: boolean } | undefined;
     try {
@@ -216,8 +237,7 @@ export async function processDueDeliveries(send: Sender = realSender, resolve?: 
         [new Date().toISOString()],
       );
       row = rows[0];
-      if (!row) { await client.query('COMMIT'); return attempts; }
-      attempts++;
+      if (!row) { await client.query('COMMIT'); return false; }
       let status = 0;
       let error: string | null = null;
       if (!row.active) error = 'endpoint disabled';
@@ -260,7 +280,7 @@ export async function processDueDeliveries(send: Sender = realSender, resolve?: 
       client.release();
     }
   }
-  return attempts;
+  return true;
 }
 
 /** Old delivery records are removed after 30 days. */

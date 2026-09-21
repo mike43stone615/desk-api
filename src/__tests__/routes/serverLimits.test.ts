@@ -36,6 +36,22 @@ describe('a 429 carries the limit headers too', () => {
   });
 });
 
+describe('the website own files are not counted by the address limit', () => {
+  beforeEach(() => { config.rateLimitPerMinute = 3; });
+  it('pages, scripts, styles and the logo keep loading while an API call from the same address is refused', async () => {
+    const headers = { 'cf-connecting-ip': '198.51.100.88' };
+    for (const url of ['/', '/login', '/developer', '/app.js', '/style.css', '/pages/teams.js', '/desk_logo.png']) {
+      for (let i = 0; i < 6; i++) expect((await app.inject({ method: 'GET', url, headers })).statusCode, `${url} #${i}`).toBe(200);
+    }
+    // ...and the API calls from that same address are the ones limited
+    let last;
+    for (let i = 0; i < 6; i++) last = await app.inject({ method: 'GET', url: '/auth/session', headers });
+    expect(last!.statusCode).toBe(429);
+    // the files stay reachable even now that the address is over its API limit
+    expect((await app.inject({ method: 'GET', url: '/app.js', headers })).statusCode).toBe(200);
+  });
+});
+
 describe('fairness: a busy key or person cannot use up someone else\'s allowance', () => {
   it('a key over its own limit is refused WITHOUT costing its address anything', async () => {
     config.rateLimitPerMinute = 10; // one key gets 5 a minute, an address 10

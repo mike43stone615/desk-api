@@ -13,6 +13,7 @@ import { readdirSync, readFileSync } from 'fs';
 import { join } from 'path';
 import type { FastifyInstance } from 'fastify';
 import { applyHtmlCsp, LIBRARY_UI_CSP } from '../middleware/csp';
+import { LIBRARY_UI_STATIC_PATHS } from '../middleware/static-paths';
 
 const UI_DIR = join(__dirname, '..', '..', 'library-ui');
 
@@ -84,9 +85,10 @@ export function registerLibraryUi(app: FastifyInstance): void {
     if (!type) continue;
     const body = readFileSync(join(UI_DIR, rel));
     if (rel === 'index.html') {
-      for (const page of LIBRARY_UI_PAGES) app.get(page, send(body, type));
+      for (const page of LIBRARY_UI_PAGES) { app.get(page, send(body, type)); LIBRARY_UI_STATIC_PATHS.add(page); }
     } else {
       app.get(`/${rel}`, send(body, type));
+      LIBRARY_UI_STATIC_PATHS.add(`/${rel}`);
     }
   }
 }
