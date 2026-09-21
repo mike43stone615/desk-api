@@ -19,7 +19,9 @@ jobs:
       - run: npx tsc -p sdk/typescript/tsconfig.json
       - name: Pack
         working-directory: sdk/typescript
-        run: npm pack
+        run: |
+          cp ../README.md ./README.md   # the package README lives one folder up, beside the samples
+          npm pack
       - uses: actions/upload-artifact@v4
         with:
           name: desk-api-library-package

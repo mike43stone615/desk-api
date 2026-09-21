@@ -6,8 +6,8 @@
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "exports": { ".": { "types": "./dist/index.d.ts", "import": "./dist/index.js" } },
-  "files": ["dist", "README.md", "CHANGELOG.md"],
+  "files": ["dist", "README.md", "CHANGELOG.md", "LICENSE"],
   "engines": { "node": ">=18" },
-  "license": "UNLICENSED",
+  "license": "MIT",
   "scripts": { "build": "tsc -p tsconfig.json" }
 }

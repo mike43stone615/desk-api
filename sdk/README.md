@@ -38,3 +38,8 @@ Set `DESK_API_KEY` to a key from the API Library page, then:
 | `samples/03-list-my-drafts.mjs` | Reading your own data with a key, and following `Retry-After` when limited. |
 
 Every error comes back as `application/problem+json`; the `code` field is stable and listed at `/v1/errors`.
+
+## License
+
+The client library is released under the MIT License (see `LICENSE`). The Desk API service it talks to is not covered by it: its use
+is governed by the terms you agree to when you create an API Library account.
