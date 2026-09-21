@@ -27,6 +27,17 @@ if (-not $supervisor) {
   if ($owner) { Write-Output "Stopping PID $owner"; Stop-Process -Id $owner -Force; Start-Sleep -Seconds 1 }
 }
 Swap 'dist'; Swap 'library-ui'
+# The dependencies go back too: node_modules is a link to the set the release used (deploy-service.ps1), so swap the link with
+# the one before it. (Only when a previous set is recorded; the files themselves are never copied or deleted here.)
+$nm = Join-Path $LivePath 'node_modules'; $prevFile = Join-Path $LivePath 'node_modules.prevtarget'
+if ((Test-Path $prevFile) -and (Test-Path $nm) -and (((Get-Item $nm -Force).Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0)) {
+  $prevTarget = (Get-Content $prevFile -Raw).Trim(); $curTarget = ((Get-Item $nm -Force).Target | Select-Object -First 1)
+  if ($prevTarget -and (Test-Path $prevTarget) -and $prevTarget -ne $curTarget) {
+    cmd /c rmdir "`"$nm`"" | Out-Null
+    New-Item -ItemType Junction -Path $nm -Target $prevTarget | Out-Null
+    Set-Content -Path $prevFile -Value $curTarget
+  }
+}
 # The start command and settings go back with the code (see deploy-service.ps1).
 foreach ($file in @('package.json', 'package-lock.json', '.env')) {
   $cur = Join-Path $LivePath $file; $prev = "$cur.prev"

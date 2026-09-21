@@ -86,6 +86,26 @@ function Copy-Tree([string]$from, [string]$to) {
   $global:LASTEXITCODE = 0
 }
 
+# node_modules lives in modules\<lockfile hash>\node_modules and the live folder's node_modules is a JUNCTION to it. A new set of
+# dependencies is copied into its own folder while the old version keeps serving (nothing there is locked), and the release
+# is one repoint of the junction, so a dependency change no longer needs the service stopped (it took 57 seconds before).
+function Test-Junction([string]$path) {
+  return (Test-Path $path) -and (((Get-Item $path -Force).Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0)
+}
+function Get-JunctionTarget([string]$path) {
+  if (-not (Test-Junction $path)) { return $null }
+  return (Get-Item $path -Force).Target | Select-Object -First 1
+}
+function Remove-Junction([string]$path) {
+  # cmd's rmdir removes only the link; PowerShell's Remove-Item could delete the folder it points at.
+  cmd /c rmdir "`"$path`"" | Out-Null
+  if (Test-Path $path) { throw "Could not remove the link $path" }
+}
+function Set-Junction([string]$path, [string]$target) {
+  if (Test-Junction $path) { Remove-Junction $path }
+  New-Item -ItemType Junction -Path $path -Target $target | Out-Null
+}
+
 # Can this release be swapped in without stopping anything? Yes when a supervisor is running, is the same supervisor
 # code this release ships, and no dependencies changed (those are replaced with the service stopped).
 $hot = $false
@@ -105,13 +125,45 @@ if ($LivePath) {
   $lockNow = (Get-FileHash (Join-Path $RepoPath 'package-lock.json')).Hash
   $liveLock = Join-Path $LivePath 'package-lock.json'
   $lockThen = if (Test-Path $liveLock) { (Get-FileHash $liveLock).Hash } else { '' }
-  $depsChanged = ($lockNow -ne $lockThen) -or -not (Test-Path (Join-Path $LivePath 'node_modules'))
-  if ($depsChanged) { $hot = $false }
-  if ($depsChanged) {
-    Write-Output "Dependencies changed: stopping the service before replacing node_modules"
-    Stop-CurrentService
-    Copy-Tree (Join-Path $RepoPath 'node_modules') (Join-Path $LivePath 'node_modules')
+  $liveNm = Join-Path $LivePath 'node_modules'
+  $modulesRoot = Join-Path $LivePath 'modules'
+  $modDir = Join-Path $modulesRoot ($lockNow.Substring(0, 16))
+  $modTarget = Join-Path $modDir 'node_modules'
+  $prevTargetFile = Join-Path $LivePath 'node_modules.prevtarget'
+  # 1. The dependencies of this release go into their own folder. The running service does not use it, so nothing is locked
+  #    and nothing stops. (Skipped when this exact set is already there.)
+  if (-not (Test-Path $modTarget)) {
+    Write-Output "Dependencies changed (or first run of this layout): copying them beside the running service"
+    New-Item -ItemType Directory -Force -Path $modDir | Out-Null
+    Copy-Tree (Join-Path $RepoPath 'node_modules') $modTarget
   }
+  # 2. Point the live folder at them.
+  if (Test-Junction $liveNm) {
+    $current = Get-JunctionTarget $liveNm
+    if ($current -ne $modTarget) {
+      Set-Content -Path $prevTargetFile -Value $current
+      Set-Junction $liveNm $modTarget
+      Write-Output "Dependencies switched (no restart needed)"
+    }
+  } else {
+    # The old layout: a real folder that the running service has open. Converting it once needs the service stopped for a
+    # moment (a rename, not a copy); every later dependency change is the no-stop switch above.
+    Write-Output "Converting node_modules to the switchable layout (one-time, a few seconds)"
+    $hot = $false
+    Stop-CurrentService
+    if (Test-Path $liveNm) {
+      $legacy = Join-Path $modulesRoot 'legacy'
+      New-Item -ItemType Directory -Force -Path $legacy | Out-Null
+      if (Test-Path (Join-Path $legacy 'node_modules')) { Remove-Item -Recurse -Force (Join-Path $legacy 'node_modules') }
+      Move-Item -Path $liveNm -Destination (Join-Path $legacy 'node_modules')
+      Set-Content -Path $prevTargetFile -Value (Join-Path $legacy 'node_modules')
+    }
+    New-Item -ItemType Junction -Path $liveNm -Target $modTarget | Out-Null
+  }
+  # Keep this release's set and the one before it; older sets are removed.
+  $keep = @($lockNow.Substring(0, 16), 'legacy')
+  if (Test-Path $prevTargetFile) { $keep += (Split-Path -Leaf (Split-Path -Parent (Get-Content $prevTargetFile -Raw).Trim())) }
+  Get-ChildItem $modulesRoot -Directory -ErrorAction SilentlyContinue | Where-Object { $keep -notcontains $_.Name } | ForEach-Object { Remove-Item -Recurse -Force $_.FullName -ErrorAction SilentlyContinue }
   # Keep the version that is running now, so a bad release can be undone in seconds (see rollback below and
   # scripts/rollback.ps1).
   foreach ($dir in @('dist', 'library-ui')) {
@@ -180,6 +232,12 @@ function Wait-Healthy([int]$seconds) {
 }
 
 function Restore-PreviousFiles {
+  # The dependencies go back with the code: point node_modules at the set the previous release used.
+  $prevTargetFile = Join-Path $LivePath 'node_modules.prevtarget'
+  if ($LivePath -and (Test-Path $prevTargetFile)) {
+    $prevTarget = (Get-Content $prevTargetFile -Raw).Trim()
+    if ($prevTarget -and (Test-Path $prevTarget) -and (Test-Junction (Join-Path $LivePath 'node_modules'))) { Set-Junction (Join-Path $LivePath 'node_modules') $prevTarget }
+  }
   foreach ($dir in @('dist', 'library-ui')) {
     if (Test-Path (Join-Path $LivePath "$dir.prev")) { Copy-Tree (Join-Path $LivePath "$dir.prev") (Join-Path $LivePath $dir) }
   }
@@ -222,6 +280,7 @@ if (Wait-Healthy $patience) { exit 0 }
 if ($LivePath -and (Test-Path (Join-Path $LivePath 'dist.prev'))) {
   Write-Output "The new version did not become healthy within ${patience}s. Rolling back to the previous version."
   Stop-CurrentService
+  Restore-PreviousFiles
   foreach ($dir in @('dist', 'library-ui')) {
     if (Test-Path (Join-Path $LivePath "$dir.prev")) { Copy-Tree (Join-Path $LivePath "$dir.prev") (Join-Path $LivePath $dir) }
   }
