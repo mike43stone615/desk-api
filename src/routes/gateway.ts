@@ -13,6 +13,7 @@ import { requireAuth, requireConfirmedEmail } from '../middleware/auth';
 import { gatewayApiKeys, GatewayKeyError } from '../domain/gateway/keys';
 import { keyManagerOwner, keyViewerOwner, teams as teamsDomain, TeamError } from '../domain/teams/teams';
 import { pool } from '../db';
+import { emitWebhookEvent } from '../domain/webhooks/webhooks';
 import { resumeKey, suspendKey } from '../domain/suspension';
 import { IDLE_DAYS, keyUsage, limitsFor } from '../domain/gateway/usage';
 import { config } from '../config';
@@ -65,7 +66,7 @@ export async function createGatewayKeyHandler(request: FastifyRequest, reply: Fa
   try {
     // A team key needs the developer role or higher in that team.
     if (parsed.data.teamId) await teamsDomain.requireMember(parsed.data.teamId, user.id, 'developer');
-    const created = await gatewayApiKeys.create(user.id, parsed.data.label, parsed.data.services, parsed.data.expiresInDays, [...new Set(parsed.data.deskScopes)], parsed.data.teamId);
+    const created = await gatewayApiKeys.create(user.id, parsed.data.label, parsed.data.services, parsed.data.expiresInDays, [...new Set(parsed.data.deskScopes)], parsed.data.teamId, parsed.data.sandbox === true);
     auditKey(request, 'gateway_key_created', {
       userId: user.id,
       keyId: created.id,
@@ -74,11 +75,12 @@ export async function createGatewayKeyHandler(request: FastifyRequest, reply: Fa
       teamId: created.teamId ?? '',
     });
     notifySecurityEvent(request, user.email, 'api_key_created', parsed.data.label);
+    emitWebhookEvent({ userId: user.id, teamId: created.teamId ?? undefined }, 'key.created', { keyId: created.id, label: created.label, services: created.services, teamId: created.teamId ?? null, sandbox: created.sandbox ?? false });
     return reply.status(201).send({ apiKey: created });
   } catch (err) {
     if (err instanceof TeamError) throw new HttpError(err.code === 'not_found' ? 404 : 403, err.message, `team_${err.code}`);
     if (err instanceof GatewayKeyError) {
-      throw new HttpError(err.code === 'limit_reached' ? 409 : err.code === 'team_desk_api' ? 400 : 503, err.message, `api_key_${err.code}`);
+      throw new HttpError(err.code === 'limit_reached' ? 409 : err.code === 'team_desk_api' || err.code === 'sandbox_desk_api' ? 400 : 503, err.message, `api_key_${err.code}`);
     }
     if (err instanceof BrokerError) {
       request.log.error({ err }, 'gateway key provisioning failed');
@@ -90,7 +92,7 @@ export async function createGatewayKeyHandler(request: FastifyRequest, reply: Fa
 
 function keyServiceError(err: unknown): never {
   if (err instanceof GatewayKeyError) {
-    const status = err.code === 'not_found' ? 404 : err.code === 'service_unavailable' ? 503 : err.code === 'team_desk_api' ? 400 : 409;
+    const status = err.code === 'not_found' ? 404 : err.code === 'service_unavailable' ? 503 : err.code === 'team_desk_api' || err.code === 'sandbox_desk_api' ? 400 : 409;
     throw new HttpError(status, err.message, `api_key_${err.code}`);
   }
   if (err instanceof BrokerError) throw new HttpError(502, 'Could not set up access to that API. Nothing was changed; please try again.', 'upstream_provisioning_failed');
@@ -131,6 +133,11 @@ export async function removeKeyServiceHandler(request: FastifyRequest, reply: Fa
   } catch (err) {
     return keyServiceError(err);
   }
+}
+
+async function teamOfKey(keyId: string): Promise<string | null> {
+  const { rows } = await pool.query<{ team_id: string | null }>(`SELECT team_id FROM gateway_api_keys WHERE id = $1`, [keyId]);
+  return rows[0]?.team_id ?? null;
 }
 
 /** The calls a minute a key may make: a personal key gets half an address's worth; a team key draws on its team's shared allowance. */
@@ -193,6 +200,7 @@ export async function revokeGatewayKeyHandler(request: FastifyRequest, reply: Fa
     if (!owner) throw new GatewayKeyError('not_found', 'API key not found.');
     const { upstreamFailures } = await gatewayApiKeys.revoke(owner, id);
     auditKey(request, 'gateway_key_revoked', { userId: user.id, keyId: id });
+    emitWebhookEvent({ userId: user.id, teamId: (await teamOfKey(id)) ?? undefined }, 'key.revoked', { keyId: id });
     if (upstreamFailures.length > 0) {
       request.log.warn(
         { keyId: id, services: upstreamFailures },

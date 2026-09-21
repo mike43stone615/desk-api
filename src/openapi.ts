@@ -128,6 +128,8 @@ const BASE_SPEC = {
         'Developer API keys. Sign in, create a key, and choose which APIs it can call. Send the key as an x-api-key header. Key management itself requires a signed-in session.',
     },
     { name: 'Teams', description: 'People sharing API keys and one allowance. Roles: owner, admin, developer, viewer. Team keys carry the Registry and Market APIs only. Session-only.' },
+    { name: 'Billing', description: 'Plans, your subscription, metered usage and invoices. Nobody is charged yet: there is no payment provider.' },
+    { name: 'Webhooks', description: 'Signed, retried events sent to your server when something happens (Desk-Signature header, five-minute replay window).' },
     { name: 'System', description: 'Health and metrics' },
   ],
   components: {
@@ -408,6 +410,43 @@ const BASE_SPEC = {
     },
     '/admin/teams/{id}/limit': {
       post: { tags: ['Admin'], summary: 'Give a whole team its own per-minute limit, shared by all its keys (null clears it)', security: [{ SessionToken: [] }], parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }], responses: { '200': { description: 'OK' }, '404': { description: 'No such team' } } },
+    },
+    '/billing/plans': {
+      get: { tags: ['Billing'], summary: 'The plans and what each includes (public). Prices are draft figures until billing is switched on', responses: { '200': { description: 'The plans' } } },
+    },
+    '/billing/subscription': {
+      get: { tags: ['Billing'], summary: 'Your plan (or a team\'s, with ?teamId=) and this month\'s metered usage', security: [{ SessionToken: [] }], parameters: [{ name: 'teamId', in: 'query', required: false, schema: { type: 'string' } }], responses: { '200': { description: 'The subscription and usage' }, '404': { description: 'Not a member of that team' } } },
+    },
+    '/billing/invoices': {
+      get: { tags: ['Billing'], summary: 'Your invoices (a team\'s, with ?teamId=, for admins and owners)', security: [{ SessionToken: [] }], parameters: [{ name: 'teamId', in: 'query', required: false, schema: { type: 'string' } }], responses: { '200': { description: 'The invoices, newest first' }, '403': { description: 'Team invoices need the admin role' }, '404': { description: 'Not a member of that team' } } },
+    },
+    '/admin/billing/{type}/{id}/plan': {
+      post: { tags: ['Admin'], summary: 'Put a user or a team on a plan (there is no payment provider yet)', security: [{ SessionToken: [] }], parameters: [{ name: 'type', in: 'path', required: true, schema: { type: 'string', enum: ['user', 'team'] } }, { name: 'id', in: 'path', required: true, schema: { type: 'string' } }], responses: { '200': { description: 'The new subscription' }, '400': { description: 'No such plan (code unknown_plan)' }, '404': { description: 'No such user or team' } } },
+    },
+    '/admin/billing/invoices/generate': {
+      post: { tags: ['Admin'], summary: 'Make the draft invoices for a month (default: last month); safe to repeat', security: [{ SessionToken: [] }], responses: { '200': { description: 'How many were created' } } },
+    },
+    '/admin/billing/invoices/{id}/status': {
+      post: { tags: ['Admin'], summary: 'Mark an invoice draft, open, paid or void', security: [{ SessionToken: [] }], parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }], responses: { '200': { description: 'OK' }, '404': { description: 'No such invoice' } } },
+    },
+    '/gateway/webhook-events': {
+      get: { tags: ['Webhooks'], summary: 'The events a webhook can listen for', security: [{ SessionToken: [] }], responses: { '200': { description: 'The event names' } } },
+    },
+    '/gateway/webhooks': {
+      get: { tags: ['Webhooks'], summary: 'Your webhook endpoints (a team\'s, with ?teamId=)', security: [{ SessionToken: [] }], parameters: [{ name: 'teamId', in: 'query', required: false, schema: { type: 'string' } }], responses: { '200': { description: 'The endpoints' }, '404': { description: 'Not a member of that team' } } },
+      post: { tags: ['Webhooks'], summary: 'Add a webhook endpoint. https only, public addresses only. The signing secret is shown once', security: [{ SessionToken: [] }], requestBody: { required: true, content: { 'application/json': { schema: { type: 'object', required: ['url', 'events'], properties: { url: { type: 'string' }, events: { type: 'array', items: { type: 'string' } }, teamId: { type: 'string' } } } } } }, responses: { '201': { description: 'Created (Location header); includes the secret once' }, '400': { description: 'The address or events were not acceptable (code webhook_invalid_url)' }, '409': { description: 'The plan allows no more endpoints (code webhook_limit_reached)' } } },
+    },
+    '/gateway/webhooks/{id}': {
+      delete: { tags: ['Webhooks'], summary: 'Remove a webhook endpoint', security: [{ SessionToken: [] }], parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }], responses: { '204': { description: 'Removed' }, '404': { description: 'Not your endpoint' } } },
+    },
+    '/gateway/webhooks/{id}/rotate-secret': {
+      post: { tags: ['Webhooks'], summary: 'Make a new signing secret (shown once) and switch the endpoint back on', security: [{ SessionToken: [] }], parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }], responses: { '200': { description: 'The new secret' }, '404': { description: 'Not your endpoint' } } },
+    },
+    '/gateway/webhooks/{id}/test': {
+      post: { tags: ['Webhooks'], summary: 'Send a test event to one endpoint', security: [{ SessionToken: [] }], parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }], responses: { '202': { description: 'Queued' }, '404': { description: 'Not your endpoint' } } },
+    },
+    '/gateway/webhooks/{id}/deliveries': {
+      get: { tags: ['Webhooks'], summary: 'The last 50 deliveries to an endpoint, with their results', security: [{ SessionToken: [] }], parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }], responses: { '200': { description: 'The deliveries' }, '404': { description: 'Not your endpoint' } } },
     },
     '/admin/gateway-keys': {
       get: { tags: ['Admin'], summary: 'Every live API key: owner, services, last use, and whether it is suspended', security: [{ SessionToken: [] }], responses: { '200': { description: 'OK' }, '403': { description: 'Not an administrator, or the sign-in is older than 24 hours' } } },
@@ -820,6 +859,7 @@ function buildLibrarySpec() {
     servers: [{ url: '/v1', description: 'Versioned base path' }],
     tags: [
       { name: 'API Library', description: 'Keys, and the Registry and Market Validation APIs they unlock' },
+      { name: 'Webhooks', description: 'Signed, retried events sent to your server when something happens' },
       { name: 'Setup', description: 'Read-only access to your own businesses and drafts (Desk API)' },
     ],
     // Only what the published paths actually use (a description with unused parts trips linters and confuses readers).

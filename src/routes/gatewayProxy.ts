@@ -10,6 +10,8 @@
 // concatenated into an upstream path: it's matched against the allowlist and,
 // for the one parameterised endpoint, a strict slug pattern, so traversal
 // (`..`, encoded slashes) can't reach /admin or anything else.
+import { emitWebhookEvent } from '../domain/webhooks/webhooks';
+import { meterAnalysis } from '../domain/billing/plans';
 import type { FastifyReply, FastifyRequest } from 'fastify';
 import { hit, type Limit } from '../middleware/route-limits';
 import { HttpError, problemBody } from '../middleware/http-error';
@@ -17,6 +19,7 @@ import { config } from '../config';
 import { gatewayApiKeys, looksLikeGatewayKey } from '../domain/gateway/keys';
 import { bindAuthToLog, expiredKeyError } from '../middleware/auth';
 import type { BrokeredService } from '../domain/gateway/services';
+import { sandboxAnswer, SANDBOX_HEADER } from '../domain/gateway/sandbox';
 import { abortWhenClientLeaves, callUpstream } from '../domain/upstream/client';
 import { MARKET_POLICY, REGISTRY_POLICY } from '../domain/upstream/policies';
 import { trimTrailingSlashes } from '../utils/strings';
@@ -134,12 +137,22 @@ async function forward(service: BrokeredService, request: FastifyRequest, reply:
     reply.header('Link', `<${successor}>; rel="successor-version"`);
   }
 
+  // A sandbox key never leaves this server: it gets a fixed sample answer, and nothing is counted, capped or billed.
+  if (verified.sandbox) {
+    const publicPath = REGISTRY_NAME_CHECKS.find(([, up]) => up === upstreamPath)?.[0] ?? upstreamPath;
+    const sample = sandboxAnswer(service, request.method, publicPath, request.body);
+    if (!sample) throw new HttpError(404, 'The sandbox has no sample answer for this endpoint. Use a live key to call it.', 'sandbox_no_sample');
+    reply.header(SANDBOX_HEADER, 'true');
+    return reply.status(sample.status).send(sample.body);
+  }
+
   // A market analysis costs real money upstream (outside data and AI): each key may make a limited number a day.
   if (service === 'market_validation_api' && route.method === 'POST' && upstreamPath === '/research/analyze') {
     const cap = verified.teamId ? MARKET_ANALYSIS_TEAM_DAILY : MARKET_ANALYSIS_DAILY;
     const wait = await hit(cap, verified.teamId ?? verified.id);
     if (wait > 0) {
       reply.header('Retry-After', String(wait));
+      emitWebhookEvent({ userId: verified.ownerUserId, teamId: verified.teamId ?? undefined }, 'usage.cap_reached', { keyId: verified.id, cap: cap.max, what: 'market analyses per day' });
       throw new HttpError(429, `${verified.teamId ? 'This team has' : 'This key has'} used its ${cap.max} market analyses for today. Try again in ${Math.ceil(wait / 3600)} hours, or ask for a higher limit.`, 'market_analysis_daily_cap');
     }
   }
@@ -177,6 +190,11 @@ async function forward(service: BrokeredService, request: FastifyRequest, reply:
     { ...spec.policy, retryable: route.idempotent === true },
     verified.id,
   );
+
+  // Every successful market analysis is counted exactly for billing: against the team when the key is a team's.
+  if (service === 'market_validation_api' && route.method === 'POST' && upstreamPath === '/research/analyze' && upstream.status < 400) {
+    meterAnalysis(verified.teamId ? 'team' : 'user', verified.teamId ?? verified.ownerUserId);
+  }
 
   // A 401/403 from upstream means OUR brokered credential was refused — not
   // the developer's mistake — so it must not look like their key failing.

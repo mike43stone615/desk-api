@@ -14,6 +14,8 @@ export const CreateGatewayKeySchema = z.object({
   expiresInDays: z.number().int('expiresInDays must be a whole number of days.').min(1, 'expiresInDays must be at least 1.').max(730, 'expiresInDays must be at most 730.').optional(),
   // Optional: make the key a TEAM key (shared with the team, drawing on the team's allowance). Registry and Market APIs only.
   teamId: z.string().trim().min(1).max(64).optional(),
+  // Optional: a sandbox key answers with fixed sample data and calls nothing real (Registry and Market APIs only).
+  sandbox: z.boolean().optional(),
 });
 export type CreateGatewayKeyRequest = z.infer<typeof CreateGatewayKeySchema>;
 

@@ -1,5 +1,7 @@
 // Administrator tools for accounts and API keys: see every key, and switch an account or a key off (and back on)
 // without deleting anything. Same guard as the rest of /admin (an allowlisted admin session, or the admin key).
+import { assignPlan, BillingError, generateInvoices, setInvoiceStatus } from '../domain/billing/plans';
+import { emitWebhookEvent } from '../domain/webhooks/webhooks';
 import type { FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import { pool } from '../db';
@@ -117,6 +119,48 @@ export async function adminSetTeamLimitHandler(request: FastifyRequest, reply: F
   forgetKeyRateFactors();
   record(request, 'set_team_limit', 'team', id, { perMinute: parsed.data.perMinute });
   return reply.send({ ok: true, perMinute: parsed.data.perMinute });
+}
+
+const AssignPlanSchema = z.object({ planId: z.string().trim().min(1).max(40) });
+const InvoiceStatusSchema = z.object({ status: z.enum(['draft', 'open', 'paid', 'void']) });
+const GenerateInvoicesSchema = z.object({ month: z.string().regex(/^\d{4}-(0[1-9]|1[0-2])$/, 'month must look like 2026-09').optional() });
+
+/** Puts a person or a team on a plan. There is no payment provider yet, so this is how a plan is granted. */
+export async function adminAssignPlanHandler(request: FastifyRequest, reply: FastifyReply) {
+  await guard(request, reply);
+  const { type, id } = request.params as { type: string; id: string };
+  if (type !== 'user' && type !== 'team') throw new HttpError(404, 'Plans belong to a user or a team.', 'not_found');
+  const parsed = AssignPlanSchema.safeParse(request.body ?? {});
+  if (!parsed.success) throw validationError(parsed.error);
+  try {
+    const sub = await assignPlan(type, id, parsed.data.planId);
+    forgetKeyRateFactors();
+    record(request, 'assign_plan', type, id, { planId: parsed.data.planId });
+    emitWebhookEvent(type === 'user' ? { userId: id } : { teamId: id }, 'plan.changed', { subjectType: type, subjectId: id, plan: sub.plan.id });
+    return reply.send({ subscription: sub });
+  } catch (err) {
+    if (err instanceof BillingError) throw new HttpError(err.code === 'not_found' ? 404 : 400, err.message, err.code === 'not_found' ? 'not_found' : 'unknown_plan');
+    throw err;
+  }
+}
+
+export async function adminGenerateInvoicesHandler(request: FastifyRequest, reply: FastifyReply) {
+  await guard(request, reply);
+  const parsed = GenerateInvoicesSchema.safeParse(request.body ?? {});
+  if (!parsed.success) throw validationError(parsed.error);
+  const made = await generateInvoices(parsed.data.month);
+  record(request, 'generate_invoices', 'invoice', parsed.data.month ?? 'last-month', { made });
+  return reply.send({ created: made });
+}
+
+export async function adminInvoiceStatusHandler(request: FastifyRequest, reply: FastifyReply) {
+  await guard(request, reply);
+  const { id } = request.params as { id: string };
+  const parsed = InvoiceStatusSchema.safeParse(request.body ?? {});
+  if (!parsed.success) throw validationError(parsed.error);
+  if (!(await setInvoiceStatus(id, parsed.data.status))) throw new HttpError(404, 'No such invoice.', 'not_found');
+  record(request, 'set_invoice_status', 'invoice', id, { status: parsed.data.status });
+  return reply.send({ ok: true });
 }
 
 export async function adminResumeKeyHandler(request: FastifyRequest, reply: FastifyReply) {

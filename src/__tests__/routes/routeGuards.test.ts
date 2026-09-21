@@ -40,6 +40,7 @@ const PUBLIC: Record<string, string> = {
   'GET /errors/:code': 'one error code explained (documentation only)',
   'GET /.well-known/security.txt': 'RFC 9116 contact file for security researchers (404 until a contact is chosen)',
   'GET /gateway/openapi.json': 'the published description of the API Library (documentation only)',
+  'GET /billing/plans': 'the plan catalogue (public information)',
   // The API Library's own web pages: static files, no data.
   'GET /': 'API Library web page',
   'GET /login': 'API Library web page',

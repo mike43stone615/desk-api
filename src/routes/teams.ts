@@ -6,6 +6,7 @@ import { requireAuth, requireConfirmedEmail } from '../middleware/auth';
 import { pool } from '../db';
 import { recordSecurityEvent } from '../modules/audit/security-events';
 import { gatewayApiKeys } from '../domain/gateway/keys';
+import { emitWebhookEvent } from '../domain/webhooks/webhooks';
 import { teams, TeamError } from '../domain/teams/teams';
 import { ChangeTeamRoleSchema, CreateTeamSchema, InviteTeamMemberSchema } from '../validators/gateway';
 
@@ -79,7 +80,8 @@ export async function acceptTeamInviteHandler(request: FastifyRequest, reply: Fa
   await requireConfirmedEmail(request, reply);
   const { membershipId } = request.params as { membershipId: string };
   try {
-    await teams.accept(membershipId, request.currentUser!.id);
+    const teamId = await teams.accept(membershipId, request.currentUser!.id);
+    emitWebhookEvent({ teamId }, 'team.member_joined', { teamId, userId: request.currentUser!.id });
     audit(request, 'team_invite_accepted', { userId: request.currentUser!.id, membershipId });
     return reply.send({ ok: true });
   } catch (err) {
@@ -117,6 +119,7 @@ export async function removeTeamMemberHandler(request: FastifyRequest, reply: Fa
   const { id, membershipId } = request.params as { id: string; membershipId: string };
   try {
     await teams.removeMember(id, request.currentUser!.id, membershipId);
+    emitWebhookEvent({ teamId: id }, 'team.member_removed', { teamId: id, membershipId });
     audit(request, 'team_member_removed', { userId: request.currentUser!.id, teamId: id, membershipId });
     return reply.status(204).send();
   } catch (err) {

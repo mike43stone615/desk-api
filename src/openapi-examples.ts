@@ -922,5 +922,110 @@ export const GATEWAY_EXAMPLES: Record<string, { status: number; request: unknown
       "ok": true,
       "suspended": false
     }
-  }
+  },
+  "GET /v1/gateway/webhook-events": {
+    "status": 200,
+    "request": null,
+    "response": {
+      "events": [
+        "key.created",
+        "key.revoked",
+        "team.member_joined",
+        "team.member_removed",
+        "plan.changed",
+        "oauth.app_authorized",
+        "usage.cap_reached"
+      ]
+    }
+  },
+  "GET /v1/gateway/webhooks": {
+    "status": 200,
+    "request": null,
+    "response": {
+      "hasMore": false,
+      "endpoints": [
+        {
+          "id": "6f1c2e34-9a5b-4d1e-8c7f-0a1b2c3d4e5f",
+          "url": "https://example.com/desk-webhook",
+          "events": [
+            "key.created",
+            "key.revoked"
+          ],
+          "teamId": null,
+          "active": true,
+          "disabledReason": null,
+          "createdAt": "2026-09-21T15:00:00Z",
+          "consecutiveFailures": 0
+        }
+      ]
+    }
+  },
+  "POST /v1/gateway/webhooks": {
+    "status": 201,
+    "request": {
+      "url": "https://example.com/desk-webhook",
+      "events": [
+        "key.created",
+        "key.revoked"
+      ]
+    },
+    "response": {
+      "endpoint": {
+        "id": "6f1c2e34-9a5b-4d1e-8c7f-0a1b2c3d4e5f",
+        "url": "https://example.com/desk-webhook",
+        "events": [
+          "key.created",
+          "key.revoked"
+        ],
+        "teamId": null,
+        "active": true,
+        "disabledReason": null,
+        "createdAt": "2026-09-21T15:00:00Z",
+        "consecutiveFailures": 0
+      },
+      "secret": "whsec_0123456789abcdef0123456789abcdef0123456789abcdef",
+      "note": "This is the only time the signing secret is shown."
+    }
+  },
+  "DELETE /v1/gateway/webhooks/{id}": {
+    "status": 204,
+    "request": null,
+    "response": {}
+  },
+  "POST /v1/gateway/webhooks/{id}/rotate-secret": {
+    "status": 200,
+    "request": null,
+    "response": {
+      "secret": "whsec_fedcba9876543210fedcba9876543210fedcba9876543210",
+      "note": "This is the only time the signing secret is shown. The endpoint is switched on again."
+    }
+  },
+  "POST /v1/gateway/webhooks/{id}/test": {
+    "status": 202,
+    "request": null,
+    "response": {
+      "ok": true,
+      "message": "A test event is queued; see the deliveries list for the result."
+    }
+  },
+  "GET /v1/gateway/webhooks/{id}/deliveries": {
+    "status": 200,
+    "request": null,
+    "response": {
+      "hasMore": false,
+      "deliveries": [
+        {
+          "id": "d1",
+          "eventId": "evt_0123456789abcdef01234567",
+          "eventType": "key.created",
+          "status": "delivered",
+          "attempts": 1,
+          "lastStatus": 200,
+          "lastError": null,
+          "createdAt": "2026-09-21T15:00:01Z",
+          "deliveredAt": "2026-09-21T15:00:02Z"
+        }
+      ]
+    }
+  },
 };

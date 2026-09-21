@@ -3,6 +3,7 @@
 // exactly once from create(), soft revocation, ownership enforced in the
 // WHERE clause so "not yours" is indistinguishable from "doesn't exist",
 // fail-closed verify()), extended with per-service grants.
+import { subscriptionFor } from '../billing/plans';
 import { createHash, randomBytes, randomUUID } from 'crypto';
 import { pool } from '../../db';
 import { suspendedKeyIds } from '../suspension';
@@ -30,7 +31,8 @@ export type GatewayKeyErrorCode =
   | 'service_unavailable'
   | 'not_found'
   | 'already_revoked'
-  | 'team_desk_api';
+  | 'team_desk_api'
+  | 'sandbox_desk_api';
 
 export class GatewayKeyError extends Error {
   constructor(
@@ -59,6 +61,8 @@ export interface GatewayKeySummary {
   rateLimitPerMinute?: number | null;
   /** The team the key belongs to, or null for a personal key. A team key shares the team's allowance. */
   teamId?: string | null;
+  /** A sandbox key answers with fixed sample data and calls no backend (see sandbox.ts). */
+  sandbox?: boolean;
 }
 
 export interface CreatedGatewayKey extends GatewayKeySummary {
@@ -78,6 +82,7 @@ export interface VerifiedGatewayKey {
   rateLimitPerMinute: number | null;
   /** The team the key belongs to (its allowance is the team's), or null. */
   teamId: string | null;
+  sandbox: boolean;
 }
 
 export function looksLikeGatewayKey(value: unknown): value is string {
@@ -100,6 +105,7 @@ interface KeyRow {
   desk_scopes?: DeskScope[];
   rate_limit_per_minute?: number | null;
   team_id?: string | null;
+  sandbox?: boolean;
 }
 
 /** How often a key's "last used" time is refreshed while it is in use. */
@@ -127,6 +133,7 @@ function toSummary(row: KeyRow, services: GatewayService[]): GatewayKeySummary {
     deskScopes: row.desk_scopes ?? [...DESK_SCOPES],
     rateLimitPerMinute: row.rate_limit_per_minute ?? null,
     teamId: row.team_id ?? null,
+    sandbox: row.sandbox ?? false,
   };
 }
 
@@ -145,7 +152,7 @@ export const gatewayApiKeys = {
     const scope = teamId ? `k.team_id = $1` : `k.owner_user_id = $1 AND k.team_id IS NULL`;
     const param = teamId ?? ownerUserId;
     const { rows } = await pool.query<KeyRow>(
-      `SELECT k.id, k.label, k.key_prefix, k.created_at, k.last_used_at, k.expires_at, k.desk_scopes, k.rate_limit_per_minute, k.team_id
+      `SELECT k.id, k.label, k.key_prefix, k.created_at, k.last_used_at, k.expires_at, k.desk_scopes, k.rate_limit_per_minute, k.team_id, k.sandbox
        FROM gateway_api_keys k
        WHERE k.revoked_at IS NULL AND ${scope}
        ORDER BY k.created_at DESC`,
@@ -192,7 +199,7 @@ export const gatewayApiKeys = {
    * services are minted first; if anything after that fails, whatever was
    * already minted is revoked again so no orphaned live credentials remain.
    */
-  async create(ownerUserId: string, label: string, requested: GatewayService[], expiresInDays?: number, deskScopes: DeskScope[] = [...DESK_SCOPES], teamId?: string): Promise<CreatedGatewayKey> {
+  async create(ownerUserId: string, label: string, requested: GatewayService[], expiresInDays?: number, deskScopes: DeskScope[] = [...DESK_SCOPES], teamId?: string, sandbox = false): Promise<CreatedGatewayKey> {
     const services = orderServices(requested);
     if (services.length === 0) throw new GatewayKeyError('service_unavailable', 'Choose at least one API.');
 
@@ -202,18 +209,23 @@ export const gatewayApiKeys = {
         throw new GatewayKeyError('service_unavailable', `${catalog.get(service)?.name ?? service} is not available right now.`);
       }
     }
+    if (sandbox && services.includes('desk_api')) throw new GatewayKeyError('sandbox_desk_api', 'A sandbox key cannot carry the Desk API: it exists to give fixed sample answers, and the Desk API answers with your real data.');
     if (teamId) {
       // A team key would act as whoever made it on the Desk API, which would hand that person's data to the whole team.
       if (services.includes('desk_api')) throw new GatewayKeyError('team_desk_api', 'A team key cannot carry the Desk API (it would act as one person). Use a personal key for that.');
       if ((await this.countActive(ownerUserId, teamId)) >= MAX_ACTIVE_KEYS_PER_TEAM) {
         throw new GatewayKeyError('limit_reached', `A team can have at most ${MAX_ACTIVE_KEYS_PER_TEAM} active keys. Revoke one first.`);
       }
-    } else if ((await this.countActive(ownerUserId)) >= MAX_ACTIVE_KEYS_PER_USER) {
-      throw new GatewayKeyError('limit_reached', `You can have at most ${MAX_ACTIVE_KEYS_PER_USER} active keys. Revoke one first.`);
+    } else {
+      // The cap comes from the person's plan (the Free plan's is the same 10 there always was).
+      const cap = (await subscriptionFor('user', ownerUserId)).plan.maxKeys;
+      if ((await this.countActive(ownerUserId)) >= cap) {
+        throw new GatewayKeyError('limit_reached', `You can have at most ${cap} active keys on your plan. Revoke one first.`);
+      }
     }
 
     const id = randomUUID();
-    const plaintext = `${GATEWAY_KEY_PREFIX}${randomBytes(24).toString('hex')}`;
+    const plaintext = `${GATEWAY_KEY_PREFIX}${sandbox ? 'test_' : ''}${randomBytes(24).toString('hex')}`;
     const keyHash = hashGatewayKey(plaintext);
     const keyPrefix = plaintext.slice(0, 12);
 
@@ -228,7 +240,7 @@ export const gatewayApiKeys = {
 
     try {
       for (const service of services) {
-        if (!isBrokeredService(service)) continue;
+        if (!isBrokeredService(service) || sandbox) continue; // a sandbox key has no backend key to mint
         const secret = config.gatewayKeyEncryptionSecret;
         if (!secret) throw new GatewayKeyError('service_unavailable', 'Key storage is not configured.');
         const provisioned = await provisionBrokerKey(service, `gateway:${ownerUserId}:${id}`);
@@ -244,10 +256,10 @@ export const gatewayApiKeys = {
       try {
         await client.query('BEGIN');
         const inserted = await client.query<KeyRow>(
-          `INSERT INTO gateway_api_keys (id, owner_user_id, label, key_hash, key_prefix, expires_at, desk_scopes, team_id)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-           RETURNING id, label, key_prefix, created_at, last_used_at, expires_at, desk_scopes, rate_limit_per_minute, team_id`,
-          [id, ownerUserId, label, keyHash, keyPrefix, expiresInDays ? new Date(Date.now() + expiresInDays * 86_400_000).toISOString() : null, deskScopes, teamId ?? null],
+          `INSERT INTO gateway_api_keys (id, owner_user_id, label, key_hash, key_prefix, expires_at, desk_scopes, team_id, sandbox)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+           RETURNING id, label, key_prefix, created_at, last_used_at, expires_at, desk_scopes, rate_limit_per_minute, team_id, sandbox`,
+          [id, ownerUserId, label, keyHash, keyPrefix, expiresInDays ? new Date(Date.now() + expiresInDays * 86_400_000).toISOString() : null, deskScopes, teamId ?? null, sandbox],
         );
         row = inserted.rows[0];
         for (const service of services) {
@@ -343,15 +355,15 @@ export const gatewayApiKeys = {
   async verify(plaintext: string): Promise<VerifiedGatewayKey | null> {
     if (!looksLikeGatewayKey(plaintext)) return null;
     try {
-      const { rows } = await pool.query<{ id: string; owner_user_id: string; revoked_at: string | null; created_at: string; last_used_at: string | null; desk_scopes: DeskScope[]; rate_limit_per_minute: number | null; expires_at: string | null; team_id: string | null }>(
-        `SELECT id, owner_user_id, revoked_at, created_at, last_used_at, expires_at, desk_scopes, rate_limit_per_minute, team_id FROM gateway_api_keys WHERE key_hash = $1`,
+      const { rows } = await pool.query<{ id: string; owner_user_id: string; revoked_at: string | null; created_at: string; last_used_at: string | null; desk_scopes: DeskScope[]; rate_limit_per_minute: number | null; expires_at: string | null; team_id: string | null; sandbox: boolean }>(
+        `SELECT id, owner_user_id, revoked_at, created_at, last_used_at, expires_at, desk_scopes, rate_limit_per_minute, team_id, sandbox FROM gateway_api_keys WHERE key_hash = $1`,
         [hashGatewayKey(plaintext)],
       );
       const key = rows[0];
       if (!key || key.revoked_at) return null;
       // An expired or idle key is refused with its own reason (see verifyOrExplain in the routes).
       const timeProblem = keyTimeProblem(key);
-      if (timeProblem) return { id: key.id, ownerUserId: key.owner_user_id, services: new Set(), suspended: false, timeProblem, deskScopes: new Set(key.desk_scopes ?? DESK_SCOPES), rateLimitPerMinute: key.rate_limit_per_minute ?? null, teamId: key.team_id ?? null };
+      if (timeProblem) return { id: key.id, ownerUserId: key.owner_user_id, services: new Set(), suspended: false, timeProblem, deskScopes: new Set(key.desk_scopes ?? DESK_SCOPES), rateLimitPerMinute: key.rate_limit_per_minute ?? null, teamId: key.team_id ?? null, sandbox: key.sandbox === true };
       const { rows: grants } = await pool.query<{ service: GatewayService }>(
         `SELECT service FROM gateway_api_key_grants WHERE api_key_id = $1`,
         [key.id],
@@ -366,7 +378,7 @@ export const gatewayApiKeys = {
         `SELECT 1 FROM key_suspensions WHERE api_key_id = $1 UNION ALL SELECT 1 FROM account_suspensions WHERE user_id = $2`,
         [key.id, key.owner_user_id],
       );
-      return { id: key.id, ownerUserId: key.owner_user_id, services: new Set(grants.map((g) => g.service)), suspended: off.length > 0, deskScopes: new Set(key.desk_scopes ?? DESK_SCOPES), rateLimitPerMinute: key.rate_limit_per_minute ?? null, teamId: key.team_id ?? null };
+      return { id: key.id, ownerUserId: key.owner_user_id, services: new Set(grants.map((g) => g.service)), suspended: off.length > 0, deskScopes: new Set(key.desk_scopes ?? DESK_SCOPES), rateLimitPerMinute: key.rate_limit_per_minute ?? null, teamId: key.team_id ?? null, sandbox: key.sandbox === true };
     } catch {
       return null;
     }
@@ -377,20 +389,21 @@ export const gatewayApiKeys = {
    * everything already using it, is untouched.
    */
   async addService(ownerUserId: string, keyId: string, service: GatewayService): Promise<GatewayKeySummary> {
-    const { rows } = await pool.query<{ id: string; revoked_at: string | null; team_id: string | null }>(
-      `SELECT id, revoked_at, team_id FROM gateway_api_keys WHERE id = $1 AND owner_user_id = $2`,
+    const { rows } = await pool.query<{ id: string; revoked_at: string | null; team_id: string | null; sandbox: boolean }>(
+      `SELECT id, revoked_at, team_id, sandbox FROM gateway_api_keys WHERE id = $1 AND owner_user_id = $2`,
       [keyId, ownerUserId],
     );
     if (!rows[0]) throw new GatewayKeyError('not_found', 'API key not found.');
     if (rows[0].revoked_at) throw new GatewayKeyError('already_revoked', 'This API key has been revoked.');
     if (rows[0].team_id && service === 'desk_api') throw new GatewayKeyError('team_desk_api', 'A team key cannot carry the Desk API (it would act as one person). Use a personal key for that.');
+    if (rows[0].sandbox && service === 'desk_api') throw new GatewayKeyError('sandbox_desk_api', 'A sandbox key cannot carry the Desk API.');
     const catalog = new Map(getServiceCatalog().map((e) => [e.service, e]));
     if (!catalog.get(service)?.available) throw new GatewayKeyError('service_unavailable', `${catalog.get(service)?.name ?? service} is not available right now.`);
     const existing = await pool.query<{ service: GatewayService }>(`SELECT service FROM gateway_api_key_grants WHERE api_key_id = $1`, [keyId]);
     if (!existing.rows.some((g) => g.service === service)) {
       let backendKeyId: string | null = null;
       let encrypted: string | null = null;
-      if (isBrokeredService(service)) {
+      if (isBrokeredService(service) && !rows[0].sandbox) {
         const secret = config.gatewayKeyEncryptionSecret;
         if (!secret) throw new GatewayKeyError('service_unavailable', 'Key storage is not configured.');
         const provisioned = await provisionBrokerKey(service, `gateway:${ownerUserId}:${keyId}`);
@@ -473,14 +486,20 @@ export async function keyBucketInfo(plaintext: string, perMinuteOfAnAddress: num
   if (hit && now - hit.at < FACTOR_TTL_MS) return hit.info;
   let info: KeyBucketInfo;
   try {
-    const { rows } = await pool.query<{ rate_limit_per_minute: number | null; team_id: string | null; team_limit: number | null }>(
-      `SELECT k.rate_limit_per_minute, k.team_id, t.rate_limit_per_minute AS team_limit
-         FROM gateway_api_keys k LEFT JOIN teams t ON t.id = k.team_id WHERE k.key_hash = $1`,
+    const { rows } = await pool.query<{ rate_limit_per_minute: number | null; team_id: string | null; team_limit: number | null; plan_limit: number | null }>(
+      `SELECT k.rate_limit_per_minute, k.team_id, t.rate_limit_per_minute AS team_limit, p.per_minute_limit AS plan_limit
+         FROM gateway_api_keys k
+         LEFT JOIN teams t ON t.id = k.team_id
+         LEFT JOIN subscriptions s ON s.subject_type = CASE WHEN k.team_id IS NULL THEN 'user' ELSE 'team' END
+                                  AND s.subject_id = COALESCE(k.team_id, k.owner_user_id) AND s.status <> 'canceled'
+         LEFT JOIN plans p ON p.id = s.plan_id
+        WHERE k.key_hash = $1`,
       [hash],
     );
     const r = rows[0];
-    if (r?.team_id) info = { teamId: r.team_id, factor: r.team_limit ? r.team_limit / perMinuteOfAnAddress : null };
-    else info = { teamId: null, factor: r?.rate_limit_per_minute ? r.rate_limit_per_minute / perMinuteOfAnAddress : null };
+    // Precedence: an administrator's limit for the key or team, then the plan's, then the standard one.
+    if (r?.team_id) info = { teamId: r.team_id, factor: r.team_limit ? r.team_limit / perMinuteOfAnAddress : r.plan_limit ? r.plan_limit / perMinuteOfAnAddress : null };
+    else info = { teamId: null, factor: r?.rate_limit_per_minute ? r.rate_limit_per_minute / perMinuteOfAnAddress : r?.plan_limit ? r.plan_limit / perMinuteOfAnAddress : null };
   } catch {
     info = { factor: null, teamId: null };
   }

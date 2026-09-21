@@ -189,12 +189,14 @@ export const teams = {
     }));
   },
 
-  async accept(membershipId: string, userId: string): Promise<void> {
-    const res = await pool.query(
-      `UPDATE team_members SET accepted_at = ${NOW_SQL} WHERE id = $1 AND user_id = $2 AND accepted_at IS NULL`,
+  /** Accepts an invitation; returns the team's id. */
+  async accept(membershipId: string, userId: string): Promise<string> {
+    const res = await pool.query<{ team_id: string }>(
+      `UPDATE team_members SET accepted_at = ${NOW_SQL} WHERE id = $1 AND user_id = $2 AND accepted_at IS NULL RETURNING team_id`,
       [membershipId, userId],
     );
     if (!res.rowCount) throw new TeamError('not_found', 'Invitation not found.');
+    return res.rows[0].team_id;
   },
 
   /** Declines an invitation (or withdraws one, for an admin: see removeMember). */

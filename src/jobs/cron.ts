@@ -25,6 +25,8 @@ import { deleteExpiredSecurityEvents } from '../modules/audit/security-events';
 import { deleteExpiredAuditRows } from '../modules/audit/mutation-audit';
 import { revokeExpiredKeys } from '../domain/gateway/expiry';
 import { config } from '../config';
+import { deleteOldDeliveries, processDueDeliveries } from '../domain/webhooks/webhooks';
+import { generateInvoices } from '../domain/billing/plans';
 import { processOutbox } from '../domain/email/outbox';
 import { checkMailKeyIfChanged } from '../domain/email/key-check';
 
@@ -42,6 +44,17 @@ export function startCleanupCron(log: FastifyBaseLogger): void {
   sweepTask = cron.schedule('*/5 * * * *', () => {
     void runBackendKeySweep(log);
   // E-mails the provider could not take are tried again each minute; a changed mail key is proven once when it appears.
+  // Outbound webhooks: deliver what is due every minute, and forget old delivery records once a day.
+  cron.schedule('* * * * *', () => {
+    processDueDeliveries().catch((err) => log.error({ err }, 'webhook delivery run failed'));
+  });
+  cron.schedule('31 3 * * *', () => {
+    deleteOldDeliveries().catch((err) => log.error({ err }, 'webhook clean-up failed'));
+  });
+  // Draft invoices for last month, on the 1st (safe to repeat: one invoice per subject per month).
+  cron.schedule('20 4 1 * *', () => {
+    generateInvoices().catch((err) => log.error({ err }, 'invoice run failed'));
+  });
   mailTask = cron.schedule('* * * * *', () => {
     processOutbox(config).catch((err) => log.error({ err }, 'mail outbox run failed'));
   });
