@@ -1,8 +1,7 @@
-// Serves the API Library's web pages from api.deskbusiness.co itself: the
-// desk_business sign-in page (branded "Desk API Library") and the API Library
-// page it leads to. The files live in library-ui/ at the repo root and are a
-// copy of web_app/public in the desk_business repo, differing only in the brand
-// text and where sign-in leads (see docs/ADR-002-api-library.md).
+// Serves the API Library's web pages from api.deskbusiness.co itself: sign-in and the API Library pages (keys, teams, webhooks, apps,
+// plans and billing, and the administrator pages). The files live in library-ui/ at the repo root. They began as a copy of
+// web_app/public in the desk_business repo (see docs/ADR-002-api-library.md) and have since grown into their own app: nothing keeps
+// the two in step any more, so a fix to a shared piece (sign-in, the admin table editor) has to be made in both places by hand.
 //
 // Same origin as the API, so the session cookie is first-party and no CORS is
 // involved. Every route is registered from a fixed scan of library-ui/ at
