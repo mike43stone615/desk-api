@@ -24,6 +24,7 @@ export const ERROR_CODES: Record<string, string> = {
   // requests
   validation_error: 'A field is missing or invalid; detail says which.',
   invalid_json: 'The body is not valid JSON.',
+  invalid_characters: 'A text value contains the NUL character (U+0000), which cannot be stored.',
   invalid_request: 'The request was rejected by the service behind this API.',
   invalid_signature: 'The request is not signed correctly by the sender.',
   invalid_id: 'An identifier in the address is not in the expected format.',
