@@ -568,9 +568,16 @@ registerRoute('/developer/admin', async (app) => {
         const row = s.rows.rows.find((r) => String(r[s.rows.primaryKey]) === id);
         if (row) editCell(row, col, ta.value); else { s.editingCell = null; render(); }
       };
-      ta.addEventListener('blur', commit);
-      ta.addEventListener('keydown', (e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); ta.blur(); } });
+      let cancelled = false;
+      ta.addEventListener('blur', () => { if (!cancelled) commit(); });
+      ta.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); ta.blur(); }
+        else if (e.key === 'Escape') { e.preventDefault(); cancelled = true; s.editingCell = null; render(); } // leave without saving
+      });
     });
+    // A cell that has just been opened for editing takes the keyboard, with its text selected.
+    const openEditor = app.querySelector('[data-edit-input]');
+    if (openEditor) { openEditor.focus(); openEditor.select(); }
     app.querySelectorAll('[data-toggle-bool]').forEach((el) => el.addEventListener('click', () => {
       const [id, col] = el.dataset.toggleBool.split('::');
       const row = s.rows.rows.find((r) => String(r[s.rows.primaryKey]) === id);
