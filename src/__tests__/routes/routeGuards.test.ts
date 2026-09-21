@@ -41,6 +41,15 @@ const PUBLIC: Record<string, string> = {
   'GET /.well-known/security.txt': 'RFC 9116 contact file for security researchers (404 until a contact is chosen)',
   'GET /gateway/openapi.json': 'the published description of the API Library (documentation only)',
   'GET /billing/plans': 'the plan catalogue (public information)',
+  'GET /oauth/authorize': 'starts an OAuth flow: validates the request, then redirects to the consent page (which needs a sign-in)',
+  'POST /oauth/token': 'OAuth token endpoint: authenticated by the app\'s own client credentials and a one-time code',
+  'POST /oauth/revoke': 'OAuth token revocation: authenticated by the app\'s own client credentials',
+  'GET /.well-known/oauth-authorization-server': 'OAuth discovery document (documentation only)',
+  'GET /status/incidents': 'public status page incidents (no personal data)',
+  'GET /changelog': 'public changelog',
+  'GET /changelog.atom': 'public changelog feed',
+  'GET /developer/authorize': 'API Library web page (the OAuth consent screen)',
+  'GET /pages/authorize.js': 'API Library web asset',
   // The API Library's own web pages: static files, no data.
   'GET /': 'API Library web page',
   'GET /login': 'API Library web page',
@@ -98,14 +107,15 @@ describe('route guards', () => {
   it('every public route that changes data is one of the pre-sign-in account routes', () => {
     const mutating = Object.keys(PUBLIC).filter((k) => !k.startsWith('GET '));
     // ...plus the one signature-authorised webhook (404 until configured, 401 unless correctly signed).
-    expect(mutating.every((k) => k.startsWith('POST /auth/') || k === 'POST /webhooks/resend')).toBe(true);
+    expect(mutating.every((k) => k.startsWith('POST /auth/') || k === 'POST /webhooks/resend' || k === 'POST /oauth/token' || k === 'POST /oauth/revoke')).toBe(true);
   });
 
   it('the routes an API Library key may call all exist and are read-only', () => {
     const real = new Set(routes().map((r) => r.key));
     for (const allowed of GATEWAY_KEY_ALLOWED_ROUTES) {
       expect(real.has(allowed), allowed).toBe(true);
-      expect(allowed.startsWith('GET '), allowed).toBe(true);
+      // Read-only, with one exception: GraphQL is a POST by design, but it only accepts queries (tested in oauthGraphql.e2e).
+      expect(allowed.startsWith('GET ') || allowed === 'POST /graphql', allowed).toBe(true);
     }
   });
 

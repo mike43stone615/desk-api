@@ -130,6 +130,8 @@ const BASE_SPEC = {
     { name: 'Teams', description: 'People sharing API keys and one allowance. Roles: owner, admin, developer, viewer. Team keys carry the Registry and Market APIs only. Session-only.' },
     { name: 'Billing', description: 'Plans, your subscription, metered usage and invoices. Nobody is charged yet: there is no payment provider.' },
     { name: 'Webhooks', description: 'Signed, retried events sent to your server when something happens (Desk-Signature header, five-minute replay window).' },
+    { name: 'GraphQL', description: 'A read-only GraphQL view of your own data, with depth and cost limits.' },
+    { name: 'OAuth', description: 'Let third-party apps read part of an account with the person\'s consent: authorization code + PKCE, one-hour access tokens, rotating refresh tokens.' },
     { name: 'System', description: 'Health and metrics' },
   ],
   components: {
@@ -447,6 +449,55 @@ const BASE_SPEC = {
     },
     '/gateway/webhooks/{id}/deliveries': {
       get: { tags: ['Webhooks'], summary: 'The last 50 deliveries to an endpoint, with their results', security: [{ SessionToken: [] }], parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }], responses: { '200': { description: 'The deliveries' }, '404': { description: 'Not your endpoint' } } },
+    },
+    '/graphql': {
+      post: { tags: ['GraphQL'], summary: 'Read-only GraphQL over your own data: one request instead of several. Limits: 8,000 characters, depth 6, 150 fields, 10 aliases; no mutations', security: [{ SessionToken: [] }, { ApiLibraryKey: [] }], requestBody: { required: true, content: { 'application/json': { schema: { type: 'object', required: ['query'], properties: { query: { type: 'string' }, variables: { type: 'object' }, operationName: { type: 'string' } } } } } }, responses: { '200': { description: 'The GraphQL answer ({data, errors}); a resolver error is a normal answer with errors' }, '400': { description: 'A malformed, too large, too deep or too costly query, or a mutation (extensions.code says which)' } } },
+    },
+    '/oauth/authorize': {
+      get: { tags: ['OAuth'], summary: 'Start "sign in with Desk": an app sends the person here (response_type=code, client_id, redirect_uri, scope, state, PKCE S256 challenge). A valid request goes on to the consent page', parameters: [{ name: 'client_id', in: 'query', required: true, schema: { type: 'string' } }, { name: 'redirect_uri', in: 'query', required: true, schema: { type: 'string' } }, { name: 'response_type', in: 'query', required: true, schema: { type: 'string', enum: ['code'] } }, { name: 'scope', in: 'query', required: true, schema: { type: 'string' } }, { name: 'state', in: 'query', required: false, schema: { type: 'string' } }, { name: 'code_challenge', in: 'query', required: true, schema: { type: 'string' } }, { name: 'code_challenge_method', in: 'query', required: true, schema: { type: 'string', enum: ['S256'] } }], responses: { '302': { description: 'To the consent page' }, '400': { description: 'The request is not valid ({error, error_description}, as OAuth defines)' } } },
+    },
+    '/oauth/authorize/info': {
+      get: { tags: ['OAuth'], summary: 'What the consent page shows: the app and what it asks for', security: [{ SessionToken: [] }], parameters: [{ name: 'client_id', in: 'query', required: true, schema: { type: 'string' } }], responses: { '200': { description: 'The app name and scopes' } } },
+    },
+    '/oauth/authorize/decision': {
+      post: { tags: ['OAuth'], summary: 'The consent page\'s Approve or Deny; answers where to send the browser next', security: [{ SessionToken: [] }], requestBody: { required: true, content: { 'application/json': { schema: { type: 'object', required: ['clientId', 'redirectUri', 'scope', 'codeChallenge', 'codeChallengeMethod', 'responseType', 'approve'], properties: { clientId: { type: 'string' }, redirectUri: { type: 'string' }, scope: { type: 'string' }, state: { type: 'string' }, codeChallenge: { type: 'string' }, codeChallengeMethod: { type: 'string' }, responseType: { type: 'string' }, approve: { type: 'boolean' } } } } } }, responses: { '200': { description: 'redirectTo: the app\'s address with code (or error) and state' } } },
+    },
+    '/oauth/token': {
+      post: { tags: ['OAuth'], summary: 'Exchange a code (with the PKCE verifier) for tokens, or a refresh token for new ones. Form or JSON body; client secret in the body or as HTTP Basic', requestBody: { required: true, content: { 'application/x-www-form-urlencoded': { schema: { type: 'object', properties: { grant_type: { type: 'string', enum: ['authorization_code', 'refresh_token'] }, code: { type: 'string' }, redirect_uri: { type: 'string' }, code_verifier: { type: 'string' }, refresh_token: { type: 'string' }, client_id: { type: 'string' }, client_secret: { type: 'string' } } } } } }, responses: { '200': { description: 'access_token (1 hour), refresh_token (30 days, works once), scope' }, '401': { description: 'invalid_client' } } },
+    },
+    '/oauth/revoke': {
+      post: { tags: ['OAuth'], summary: 'An app revokes an access or refresh token it holds (RFC 7009)', requestBody: { required: true, content: { 'application/x-www-form-urlencoded': { schema: { type: 'object', properties: { token: { type: 'string' }, client_id: { type: 'string' }, client_secret: { type: 'string' } } } } } }, responses: { '200': { description: 'Revoked (or it was already not valid)' } } },
+    },
+    '/oauth/clients': {
+      get: { tags: ['OAuth'], summary: 'The apps you registered', security: [{ SessionToken: [] }], responses: { '200': { description: 'Your apps' } } },
+      post: { tags: ['OAuth'], summary: 'Register an app (redirect addresses: https, or http on localhost). A confidential app gets a client secret, shown once', security: [{ SessionToken: [] }], requestBody: { required: true, content: { 'application/json': { schema: { type: 'object', required: ['name', 'redirectUris', 'scopes'], properties: { name: { type: 'string' }, redirectUris: { type: 'array', items: { type: 'string' } }, scopes: { type: 'array', items: { type: 'string', enum: ['profile', 'drafts', 'businesses', 'teams'] } }, confidential: { type: 'boolean' } } } } } }, responses: { '201': { description: 'Created (Location header)' }, '409': { description: 'Too many apps (code oauth_limit_reached)' } } },
+    },
+    '/oauth/clients/{id}': {
+      delete: { tags: ['OAuth'], summary: 'Remove an app you registered: every token it holds stops working', security: [{ SessionToken: [] }], parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }], responses: { '204': { description: 'Removed' }, '404': { description: 'Not your app' } } },
+    },
+    '/oauth/authorizations': {
+      get: { tags: ['OAuth'], summary: 'The apps you have let into your account', security: [{ SessionToken: [] }], responses: { '200': { description: 'The apps and their scopes' } } },
+    },
+    '/oauth/authorizations/{clientId}': {
+      delete: { tags: ['OAuth'], summary: 'Take an app\'s access away', security: [{ SessionToken: [] }], parameters: [{ name: 'clientId', in: 'path', required: true, schema: { type: 'string' } }], responses: { '204': { description: 'Revoked' }, '404': { description: 'That app has no access' } } },
+    },
+    '/.well-known/oauth-authorization-server': {
+      get: { tags: ['OAuth'], summary: 'OAuth discovery document (RFC 8414)', responses: { '200': { description: 'Endpoints, grant types and scopes' } } },
+    },
+    '/status/incidents': {
+      get: { tags: ['System'], summary: 'Open incidents and the last 30 days of resolved ones (public)', responses: { '200': { description: 'active and recent incidents, each with its updates' } } },
+    },
+    '/changelog': {
+      get: { tags: ['System'], summary: 'What changed, newest first (public)', parameters: [{ name: 'limit', in: 'query', required: false, schema: { type: 'integer', minimum: 1, maximum: 100, default: 20 } }], responses: { '200': { description: 'The entries' } } },
+    },
+    '/changelog.atom': {
+      get: { tags: ['System'], summary: 'The changelog as an Atom feed (public)', responses: { '200': { description: 'Atom XML' } } },
+    },
+    '/admin/incidents': {
+      post: { tags: ['Admin'], summary: 'Open a status page incident', security: [{ SessionToken: [] }], requestBody: { required: true, content: { 'application/json': { schema: { type: 'object', required: ['title', 'severity', 'message'], properties: { title: { type: 'string' }, severity: { type: 'string', enum: ['minor', 'major', 'critical'] }, message: { type: 'string' } } } } } }, responses: { '201': { description: 'Opened' } } },
+    },
+    '/admin/incidents/{id}/updates': {
+      post: { tags: ['Admin'], summary: 'Post an update to an incident; "resolved" closes it', security: [{ SessionToken: [] }], parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }], requestBody: { required: true, content: { 'application/json': { schema: { type: 'object', required: ['status', 'message'], properties: { status: { type: 'string', enum: ['investigating', 'identified', 'monitoring', 'resolved'] }, message: { type: 'string' } } } } } }, responses: { '200': { description: 'The incident' }, '404': { description: 'No such incident' } } },
     },
     '/admin/gateway-keys': {
       get: { tags: ['Admin'], summary: 'Every live API key: owner, services, last use, and whether it is suspended', security: [{ SessionToken: [] }], responses: { '200': { description: 'OK' }, '403': { description: 'Not an administrator, or the sign-in is older than 24 hours' } } },

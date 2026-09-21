@@ -672,6 +672,7 @@ registerRoute('/loading', async (app) => {
     import('./pages/auth.js'),
     import('./pages/developer.js'),
     import('./pages/teams.js'),
+    import('./pages/authorize.js'),
   ]);
   await restoreSession();
   await route();

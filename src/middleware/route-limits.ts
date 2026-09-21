@@ -33,6 +33,8 @@ export const CALLER_RULES: Record<string, { ip: Limit; email?: Limit }> = {
     ip: perHour('emailconf-req-ip', 5, 'confirmation-email requests'),
     email: perHour('emailconf-req-email', 3, 'confirmation-email requests for this address'),
   },
+  'POST /oauth/token': { ip: perHour('oauth-token-ip', 300, 'token requests') },
+  'POST /oauth/revoke': { ip: perHour('oauth-revoke-ip', 300, 'token revocations') },
   'POST /auth/password-reset/confirm': { ip: perHour('pwreset-confirm-ip', 20, 'password-reset attempts') },
   'POST /auth/email-confirmation/confirm': { ip: perHour('emailconf-confirm-ip', 20, 'confirmation attempts') },
   // Invitations send email to an address of the inviter's choosing, and (for an unregistered address) store it.
@@ -45,6 +47,7 @@ export const CALLER_RULES: Record<string, { ip: Limit; email?: Limit }> = {
 
 /** "METHOD /pattern" (without /v1) -> limit per signed-in account. */
 export const USER_RULES: Record<string, Limit> = {
+  'POST /graphql': perHour('graphql', 1200, 'GraphQL requests'),
   'POST /gateway/api-keys': perHour('key-create', 10, 'API keys created'),
   'POST /gateway/api-keys/:id/services': perHour('key-service-add', 20, 'APIs added to keys'),
   'DELETE /gateway/api-keys/:id/services/:service': perHour('key-service-remove', 20, 'APIs removed from keys'),

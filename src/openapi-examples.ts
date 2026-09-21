@@ -1028,4 +1028,25 @@ export const GATEWAY_EXAMPLES: Record<string, { status: number; request: unknown
       ]
     }
   },
+  "POST /v1/graphql": {
+    "status": 200,
+    "request": {
+      "query": "{ viewer { id firstName } businesses(first: 5) { id name role } }"
+    },
+    "response": {
+      "data": {
+        "viewer": {
+          "id": "f4baaa6d940aef8395c51a1f9d0fe809",
+          "firstName": "Ada"
+        },
+        "businesses": [
+          {
+            "id": "c04e999158d8ca138f622d3d7dfc960a",
+            "name": "Analytical Engines LLC",
+            "role": "owner"
+          }
+        ]
+      }
+    }
+  },
 };

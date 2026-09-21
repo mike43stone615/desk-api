@@ -11,6 +11,7 @@ import { LEGACY_SESSION_COOKIE_NAME, sessionCookieName } from '../infrastructure
 import { config } from '../config';
 import { enforceUserRouteLimit, routeKey } from './route-limits';
 import { checkRateBucket, USER_BUCKET_FACTOR } from './api-protection';
+import { ACCESS_TOKEN_PREFIX, verifyAccessToken, type VerifiedOAuthToken } from '../domain/oauth/oauth';
 import { isUserSuspended } from '../domain/suspension';
 import type { User } from '../interfaces/database';
 
@@ -19,6 +20,8 @@ declare module 'fastify' {
     currentUser?: User;
     /** Set only when the request authenticated with an API Library key (not a session). */
     gatewayKey?: VerifiedGatewayKey;
+    /** Set only when the request authenticated with an OAuth access token issued to a third-party app. */
+    oauth?: VerifiedOAuthToken;
   }
 }
 
@@ -38,6 +41,7 @@ export const GATEWAY_KEY_ALLOWED_ROUTES: ReadonlySet<string> = new Set([
   'GET /setup/businesses',
   'GET /setup/businesses/:id/members',
   'GET /setup/invites',
+  'POST /graphql',
 ]);
 
 /** Which scope each allowed route needs (see DESK_SCOPES in domain/gateway/keys.ts). */
@@ -49,6 +53,27 @@ export const GATEWAY_ROUTE_SCOPES: Readonly<Record<string, DeskScope>> = {
   'GET /setup/businesses/:id/members': 'businesses',
   'GET /setup/invites': 'businesses',
 };
+
+/**
+ * An OAuth access token (issued to a third-party app the person authorized) may reach exactly what an API key may: the same
+ * short read-only list, limited further to the scopes the person approved. Everything else, including every route that
+ * manages the account, keys, teams, webhooks or apps, is refused whatever the scopes say.
+ */
+async function authenticateWithOAuthToken(request: FastifyRequest, raw: string): Promise<void> {
+  const verified = await verifyAccessToken(raw);
+  if (!verified) throw new HttpError(401, 'The access token is invalid, expired or revoked.', 'invalid_token');
+  const matched = routeKey(request);
+  if (!matched || !GATEWAY_KEY_ALLOWED_ROUTES.has(matched)) {
+    throw new HttpError(403, 'An app access token cannot call this endpoint.', 'oauth_endpoint_not_allowed');
+  }
+  const scope = GATEWAY_ROUTE_SCOPES[matched];
+  if (scope && !verified.scopes.has(scope)) throw new HttpError(403, `The app was not given the "${scope}" scope.`, 'oauth_insufficient_scope');
+  const owner = await authDb.findUserById(verified.userId);
+  if (!owner) throw new HttpError(401, 'The access token is invalid, expired or revoked.', 'invalid_token');
+  if (await isUserSuspended(owner.id)) throw new HttpError(403, 'This account is suspended.', 'account_suspended');
+  request.currentUser = owner;
+  request.oauth = verified;
+}
 
 async function authenticateWithGatewayKey(request: FastifyRequest, apiKey: string): Promise<void> {
   const verified = await gatewayApiKeys.verify(apiKey);
@@ -108,7 +133,9 @@ export function extractSessionToken(request: FastifyRequest): string | null {
 /** Fastify preHandler — resolves the calling user onto request.currentUser, or throws 401. */
 export async function requireAuth(request: FastifyRequest, reply: FastifyReply): Promise<void> {
   const token = extractSessionToken(request);
-  if (!token) {
+  if (token && token.startsWith(ACCESS_TOKEN_PREFIX)) {
+    await authenticateWithOAuthToken(request, token);
+  } else if (!token) {
     const apiKey = request.headers['x-api-key'];
     if (!looksLikeGatewayKey(apiKey)) throw new HttpError(401, 'Authentication required.', 'authentication_required');
     await authenticateWithGatewayKey(request, apiKey);
@@ -119,7 +146,7 @@ export async function requireAuth(request: FastifyRequest, reply: FastifyReply):
     if (await isUserSuspended(user.id)) throw new HttpError(403, 'This account is suspended.', 'account_suspended');
     request.currentUser = user;
   }
-  bindAuthToLog(request, reply, request.gatewayKey ? { auth: 'key', keyId: request.gatewayKey.id, userId: request.currentUser!.id } : { auth: 'session', userId: request.currentUser!.id });
+  bindAuthToLog(request, reply, request.gatewayKey ? { auth: 'key', keyId: request.gatewayKey.id, userId: request.currentUser!.id } : request.oauth ? { auth: 'oauth', clientId: request.oauth.clientId, userId: request.currentUser!.id } : { auth: 'session', userId: request.currentUser!.id });
   // The general limit per PERSON, on top of the one per address: a leaked session or key used from many addresses is
   // still one account with one allowance.
   const person = await checkRateBucket(`user:${request.currentUser!.id}`, USER_BUCKET_FACTOR);
@@ -157,7 +184,7 @@ export async function requireAdmin(request: FastifyRequest, _reply: FastifyReply
   if (!user) throw new HttpError(401, 'Authentication required.', 'authentication_required');
   // Belt and braces: GATEWAY_KEY_ALLOWED_ROUTES already keeps keys off /admin,
   // but admin access must never be reachable through an API key regardless.
-  if (request.gatewayKey) throw new HttpError(403, 'Admin access is not available with an API key.', 'admin_not_available_for_keys');
+  if (request.gatewayKey || request.oauth) throw new HttpError(403, 'Admin access is not available with an API key or an app token.', 'admin_not_available_for_keys');
   const email = user.email.trim().toLowerCase();
   if (!config.adminEmails.includes(email)) throw new HttpError(403, 'Admin access required.', 'admin_required');
   // A stolen or forgotten session must not stay an administrator for its whole 30 days: the admin tools need a
