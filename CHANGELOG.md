@@ -3,6 +3,16 @@
 What changed in the Desk API, newest first. Breaking changes are never made inside `v1` (see docs/API-VERSIONING.md);
 everything below is additive unless it says "safer".
 
+## 2026-09-21: round 4
+
+- **Requests:** a body over the size limit now gets a clean `413` (through Cloudflare it used to surface as a 502); a text
+  value containing the NUL character (U+0000) is a `400` with code `invalid_characters` (it used to be a 500).
+- **Housekeeping:** expired idempotency records are deleted daily (they were only cleared when the same key was reused).
+- **Checked live, no change needed:** odd and encoded paths, long URLs and headers, HEAD/OPTIONS, CORS look-alikes, unknown
+  and privileged fields in bodies, type mix-ups, duplicate keys, prototype-pollution keys, huge numbers, timestamp format,
+  empty lists, hidden fields, role checks per action, object-level access, admin separation, parallel key creation, key label
+  rules, compression, no-store on JSON.
+
 ## 2026-09-20/21: round 3
 
 - **Keys:** choose which parts of the Desk API a key may read (`deskScopes`); add or remove an API on an existing key
