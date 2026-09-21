@@ -24,10 +24,13 @@ import { deleteExpiredSecurityEvents } from '../modules/audit/security-events';
 import { deleteExpiredAuditRows } from '../modules/audit/mutation-audit';
 import { revokeExpiredKeys } from '../domain/gateway/expiry';
 import { config } from '../config';
+import { processOutbox } from '../domain/email/outbox';
+import { checkMailKeyIfChanged } from '../domain/email/key-check';
 
 let task: cron.ScheduledTask | null = null;
 let sweepTask: cron.ScheduledTask | null = null;
 let reconcileTask: cron.ScheduledTask | null = null;
+let mailTask: cron.ScheduledTask | null = null;
 
 export function startCleanupCron(log: FastifyBaseLogger): void {
   task = cron.schedule('0 2 * * *', () => {
@@ -37,6 +40,12 @@ export function startCleanupCron(log: FastifyBaseLogger): void {
   // queued while the service was down.
   sweepTask = cron.schedule('*/5 * * * *', () => {
     void runBackendKeySweep(log);
+  // E-mails the provider could not take are tried again each minute; a changed mail key is proven once when it appears.
+  mailTask = cron.schedule('* * * * *', () => {
+    processOutbox(config).catch((err) => log.error({ err }, 'mail outbox run failed'));
+  });
+  void checkMailKeyIfChanged(config);
+  cron.schedule('43 * * * *', () => void checkMailKeyIfChanged(config));
   });
   void runBackendKeySweep(log);
   // The reconcile job compares this service's database with the backends and REVOKES keys it does not know. A
@@ -151,4 +160,6 @@ export function stopCleanupCron(): void {
   sweepTask = null;
   reconcileTask?.stop();
   reconcileTask = null;
+  mailTask?.stop();
+  mailTask = null;
 }

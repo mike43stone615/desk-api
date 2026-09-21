@@ -11,6 +11,7 @@
 // for the one parameterised endpoint, a strict slug pattern, so traversal
 // (`..`, encoded slashes) can't reach /admin or anything else.
 import type { FastifyReply, FastifyRequest } from 'fastify';
+import { hit, type Limit } from '../middleware/route-limits';
 import { HttpError, problemBody } from '../middleware/http-error';
 import { config } from '../config';
 import { gatewayApiKeys, looksLikeGatewayKey } from '../domain/gateway/keys';
@@ -29,6 +30,18 @@ interface UpstreamRoute {
   idempotent?: boolean;
   /** This spelling still works but is superseded: the public path to use instead (answered with Deprecation + Link headers). */
   deprecatedFor?: string;
+  /** Reference data that changes rarely: the answer is kept this many seconds (keyed by path and query; only 200s). */
+  cacheSeconds?: number;
+}
+
+/** Reference lookups (business structures, the scoring methodology) change a few times a year. */
+const REFERENCE_CACHE_SECONDS = 600;
+// Off in the test suite (which calls the same lookups again and again expecting fresh answers) unless a test turns it on.
+const referenceCacheEnabled = () => process.env.NODE_ENV !== 'test' || process.env.REFERENCE_CACHE_IN_TESTS === '1';
+const referenceCache = new Map<string, { at: number; contentType: string; text: string }>();
+/** For tests. */
+export function clearReferenceCache(): void {
+  referenceCache.clear();
 }
 
 const exact = (p: string) => (path: string) => (path === p ? p : null);
@@ -54,11 +67,12 @@ const REGISTRY_ROUTES: UpstreamRoute[] = [
   ]),
   { method: 'GET', match: alias('/sync-status', '/functions/v1/registry-sync-status'), idempotent: true },
   { method: 'GET', match: exact('/functions/v1/registry-sync-status'), idempotent: true, deprecatedFor: '/sync-status' },
-  { method: 'GET', match: exact('/business-structures'), forwardQuery: true, idempotent: true },
+  { method: 'GET', match: exact('/business-structures'), forwardQuery: true, idempotent: true, cacheSeconds: REFERENCE_CACHE_SECONDS },
   { method: 'POST', match: exact('/business-structures/recommend'), idempotent: true },
   {
     method: 'GET',
     idempotent: true,
+    cacheSeconds: REFERENCE_CACHE_SECONDS,
     match: (path) => {
       const m = /^\/business-structures\/([^/]+)$/.exec(path);
       return m && SLUG.test(m[1]) && m[1] !== 'recommend' ? `/business-structures/${m[1]}` : null;
@@ -68,7 +82,7 @@ const REGISTRY_ROUTES: UpstreamRoute[] = [
 
 const MARKET_ROUTES: UpstreamRoute[] = [
   { method: 'POST', match: exact('/research/analyze') },
-  { method: 'GET', match: exact('/scoring-methodology'), idempotent: true },
+  { method: 'GET', match: exact('/scoring-methodology'), idempotent: true, cacheSeconds: REFERENCE_CACHE_SECONDS },
 ];
 
 const SERVICES: Record<
@@ -80,6 +94,8 @@ const SERVICES: Record<
 };
 
 const PASSTHROUGH_HEADERS = ['content-type', 'retry-after', 'x-ratelimit-limit', 'x-ratelimit-remaining', 'x-ratelimit-reset'];
+
+const MARKET_ANALYSIS_DAILY: Limit = { name: 'market-analysis-key-day', max: Number(process.env.MARKET_ANALYSES_PER_KEY_PER_DAY) || 200, windowMs: 24 * 60 * 60 * 1000, what: 'market analyses' };
 
 async function forward(service: BrokeredService, request: FastifyRequest, reply: FastifyReply) {
   const presented = request.headers['x-api-key'];
@@ -115,6 +131,24 @@ async function forward(service: BrokeredService, request: FastifyRequest, reply:
     reply.header('Link', `<${successor}>; rel="successor-version"`);
   }
 
+  // A market analysis costs real money upstream (outside data and AI): each key may make a limited number a day.
+  if (service === 'market_validation_api' && route.method === 'POST' && upstreamPath === '/research/analyze') {
+    const wait = await hit(MARKET_ANALYSIS_DAILY, verified.id);
+    if (wait > 0) {
+      reply.header('Retry-After', String(wait));
+      throw new HttpError(429, `This key has used its ${MARKET_ANALYSIS_DAILY.max} market analyses for today. Try again in ${Math.ceil(wait / 3600)} hours, or ask for a higher limit.`, 'market_analysis_daily_cap');
+    }
+  }
+
+  const cacheKey = route.cacheSeconds && referenceCacheEnabled() ? `${service}:${upstreamPath}${route.forwardQuery && request.url.includes('?') ? request.url.slice(request.url.indexOf('?')) : ''}` : null;
+  if (cacheKey) {
+    const cached = referenceCache.get(cacheKey);
+    if (cached && Date.now() - cached.at < (route.cacheSeconds ?? 0) * 1000) {
+      reply.header('X-Cache', 'HIT').header('Age', String(Math.floor((Date.now() - cached.at) / 1000)));
+      return reply.status(200).header('Content-Type', cached.contentType).send(cached.text);
+    }
+  }
+
   const baseUrl = spec.baseUrl();
   const backendKey = await gatewayApiKeys.getBackendKey(verified.id, service);
   if (!baseUrl || !backendKey) throw new HttpError(503, 'This API is temporarily unavailable for this key.', 'api_unavailable');
@@ -147,11 +181,20 @@ async function forward(service: BrokeredService, request: FastifyRequest, reply:
     throw new HttpError(502, `The upstream API rejected this request. Please report it: ${config.supportUrl}`, 'upstream_rejected');
   }
   for (const name of PASSTHROUGH_HEADERS) {
+    if (name.startsWith('x-ratelimit-')) continue; // merged below
     const value = upstream.headers.get(name);
     if (value) reply.header(name, value);
   }
+  mergeRateLimitHeaders(reply, upstream.headers);
   const text = upstream.text;
-  if (upstream.status >= 200 && upstream.status < 300) return reply.status(upstream.status).send(text);
+  if (upstream.status >= 200 && upstream.status < 300) {
+    if (cacheKey && upstream.status === 200) {
+      if (referenceCache.size > 500) referenceCache.clear();
+      referenceCache.set(cacheKey, { at: Date.now(), contentType: upstream.headers.get('content-type') ?? 'application/json', text });
+      reply.header('X-Cache', 'MISS');
+    }
+    return reply.status(upstream.status).send(text);
+  }
 
   // A failed call gets the same error body as any other desk-api error, whatever
   // shape the backend used (`{error}`, `{message}`, a validation list...).
@@ -169,6 +212,21 @@ async function forward(service: BrokeredService, request: FastifyRequest, reply:
     .status(upstream.status)
     .header('Content-Type', 'application/problem+json')
     .send(problemBody(request.url, upstream.status, upstream.status === 500 ? 'The upstream API failed.' : detail, errors !== undefined ? { errors } : undefined));
+}
+
+/**
+ * Two limits apply to a proxied call: ours (per key) and the backend's (per backend key). The answer reports the one
+ * that is closer to running out, so the numbers are the same kind of number on every route ("what you have left").
+ */
+export function mergeRateLimitHeaders(reply: FastifyReply, upstream: { get(name: string): string | null }): void {
+  const ours = { limit: Number(reply.getHeader('x-ratelimit-limit')), remaining: Number(reply.getHeader('x-ratelimit-remaining')), reset: reply.getHeader('x-ratelimit-reset') };
+  const theirs = { limit: Number(upstream.get('x-ratelimit-limit')), remaining: Number(upstream.get('x-ratelimit-remaining')), reset: upstream.get('x-ratelimit-reset') };
+  const usable = (l: { limit: number; remaining: number }) => Number.isFinite(l.limit) && Number.isFinite(l.remaining);
+  if (!usable(theirs)) return; // the backend said nothing: ours stays
+  if (!usable(ours) || theirs.remaining < ours.remaining) {
+    reply.header('X-RateLimit-Limit', String(theirs.limit)).header('X-RateLimit-Remaining', String(theirs.remaining));
+    if (theirs.reset) reply.header('X-RateLimit-Reset', theirs.reset);
+  }
 }
 
 export async function gatewayRegistryProxyHandler(request: FastifyRequest, reply: FastifyReply) {

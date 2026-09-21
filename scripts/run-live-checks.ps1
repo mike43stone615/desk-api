@@ -12,6 +12,9 @@ $out = & npx.cmd tsx scripts/live-checks/smoke.mts 2>&1 | Out-String
 $summary = ($out -split "`r?`n" | Where-Object { $_ -match '^live checks:' } | Select-Object -Last 1)
 $failures = @($out -split "`r?`n" | Where-Object { $_ -match '^\s+FAIL ' })
 if (-not $summary) { $summary = 'live checks: did not finish'; $failures = @($out.Trim().Split("`n") | Select-Object -Last 3) }
+# Also: the last week of logs must contain no personal data or secrets (scripts/scan-logs.mjs never prints what it finds).
+$scan = (& node (Join-Path $PSScriptRoot 'scan-logs.mjs') 2>&1 | Out-String)
+if ($LASTEXITCODE -ne 0) { $failures += ($scan -split "`r?`n" | Where-Object { $_ -match 'FOUND' } | ForEach-Object { "  FAIL logs contain: " + $_.Trim() }) }
 $stamp = (Get-Date).ToString('yyyy-MM-dd HH:mm:ss')
 Add-Content -Path $log -Value "$stamp $summary" -Encoding utf8
 foreach ($f in $failures) { Add-Content -Path $log -Value "$stamp   $($f.Trim())" -Encoding utf8 }

@@ -6,8 +6,11 @@
 // have no web frontend of their own — desk-api's Flutter app (moving to
 // Cloudflare Pages) DOES have a real frontend that serves /reset-password
 // and /confirm-email, so the link-based design stays.
-import { outcomeForStatus, recordProviderCall } from '../../modules/provider-metrics';
 import { isSuppressed } from '../../domain/email/suppressions';
+import { deliverViaProvider, queueForRetry } from '../../domain/email/outbox';
+import { htmlToText } from './text';
+
+export { htmlToText };
 import type { AppConfig } from '../../config';
 
 export async function sendPasswordResetEmail(
@@ -15,9 +18,10 @@ export async function sendPasswordResetEmail(
   to: string,
   token: string,
   requestId: string,
+  linkBase: string = config.appBaseUrl,
 ): Promise<void> {
   // The token is in the #fragment: browsers never send it to a server, so it stays out of every log and Referer.
-  const resetUrl = `${config.appBaseUrl}/reset-password#token=${encodeURIComponent(token)}`;
+  const resetUrl = `${linkBase}/reset-password#token=${encodeURIComponent(token)}`;
   await sendEmail(config, {
     to,
     subject: 'Reset your Desk password',
@@ -40,8 +44,9 @@ export async function sendEmailConfirmationEmail(
   to: string,
   token: string,
   requestId: string,
+  linkBase: string = config.appBaseUrl,
 ): Promise<void> {
-  const confirmationUrl = `${config.appBaseUrl}/confirm-email#token=${encodeURIComponent(token)}`;
+  const confirmationUrl = `${linkBase}/confirm-email#token=${encodeURIComponent(token)}`;
   await sendEmail(config, {
     to,
     subject: 'Confirm your Desk email',
@@ -195,34 +200,20 @@ async function sendEmail(config: AppConfig, request: EmailRequest): Promise<void
     return;
   }
 
-  const resp = await fetch('https://api.resend.com/emails', {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${config.resendApiKey}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
-      from: `Desk <${config.emailFrom}>`,
-      to: [request.to],
-      subject: request.subject,
-      html: request.html,
-      // A plain-text copy for mail programs that do not show HTML, and a better score with spam filters.
-      text: htmlToText(request.html),
-    }),
-  });
-
-  recordProviderCall('resend', outcomeForStatus(resp.status));
-  if (!resp.ok) {
-    const detail = await resp.text().catch(() => '');
+  const result = await deliverViaProvider(config, { to: request.to, subject: request.subject, html: request.html });
+  if (!result.ok) {
     console.error(
       JSON.stringify({
         level: 'error',
         event: request.failedEvent,
         requestId: request.requestId,
-        status: resp.status,
-        detail: detail.substring(0, 300),
+        status: result.status,
+        detail: result.detail,
       }),
     );
+    // A provider that is down or busy (or unreachable) is tried again a few times; a refusal that will not change
+    // (a rejected address, a bad request) is not.
+    if (result.transient) await queueForRetry({ to: request.to, subject: request.subject, html: request.html, kind: request.sentEvent, error: `${result.status} ${result.detail}` });
     return;
   }
 
@@ -236,33 +227,6 @@ async function sendEmail(config: AppConfig, request: EmailRequest): Promise<void
       requestId: request.requestId,
     }),
   );
-}
-
-/** Removes anything that looks like an HTML tag in one pass (a loop, so a long run of "<" cannot make it quadratic). */
-function stripTags(html: string): string {
-  let out = '';
-  let i = 0;
-  while (i < html.length) {
-    const open = html.indexOf('<', i);
-    const close = open === -1 ? -1 : html.indexOf('>', open + 1);
-    if (close === -1) { out += html.slice(i); break; } // no tag left to strip
-    out += html.slice(i, open);
-    i = close + 1;
-  }
-  return out;
-}
-
-/** A readable plain-text version of an email's HTML: links become "label: address", block ends become line breaks. */
-export function htmlToText(html: string): string {
-  return stripTags(
-    html
-      .replace(/<(style|head|script)[\s\S]{0,20000}?<\/\1>/gi, '')
-      .replace(/<a\b[^>]{0,500}?href="([^"]{1,2000})"[^>]{0,500}>([\s\S]{0,2000}?)<\/a>/gi, (_m, href: string, label: string) => `${stripTags(label).trim()}: ${href}`)
-      .replace(/<\/?(?:br|p|div|h[1-6]|tr|li|table)\b[^>]*>/gi, '\n'),
-  )
-    .replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&nbsp;/g, ' ')
-    .replace(/[ \t]{1,200}\n/g, '\n').replace(/\n{3,}/g, '\n\n')
-    .trim();
 }
 
 function themedEmailHtml(content: ThemedEmailContent): string {

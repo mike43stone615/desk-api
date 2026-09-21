@@ -25,7 +25,22 @@ const CONTENT_TYPES: Record<string, string> = {
 };
 
 /** Client-side routes of the copied single-page app: all answered with index.html. */
-export const LIBRARY_UI_PAGES = ['/', '/login', '/developer'] as const;
+export const LIBRARY_UI_PAGES = ['/', '/login', '/developer', '/confirm-email', '/reset-password'] as const;
+
+/**
+ * First path segments that belong to the API, now or in future. A web page (or a file in library-ui/) may never use one:
+ * that would shadow an API route, or be shadowed by one added later. Checked when the server starts.
+ */
+export const RESERVED_API_ROOTS = [
+  'auth', 'setup', 'gateway', 'admin', 'integrations', 'functions', 'health', 'metrics', 'docs', 'errors', 'status',
+  'webhooks', 'v1', 'v2', 'api', '.well-known', 'openapi.json', 'internal', 'oauth', 'graphql',
+] as const;
+
+/** The reserved API roots this path collides with, or null. */
+export function reservedRootOf(path: string): string | null {
+  const first = path.replace(/^\/+/, '').split('/')[0].toLowerCase();
+  return (RESERVED_API_ROOTS as readonly string[]).includes(first) ? first : null;
+}
 
 function listFiles(dir: string, prefix = ''): string[] {
   return readdirSync(dir, { withFileTypes: true }).flatMap((entry) =>
@@ -34,6 +49,10 @@ function listFiles(dir: string, prefix = ''): string[] {
 }
 
 export function registerLibraryUi(app: FastifyInstance): void {
+  for (const page of LIBRARY_UI_PAGES) {
+    const clash = reservedRootOf(page);
+    if (clash) throw new Error(`Web page ${page} collides with the reserved API root "${clash}"`);
+  }
   let files: string[];
   try {
     files = listFiles(UI_DIR);

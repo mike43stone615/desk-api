@@ -10,8 +10,8 @@ const emailField = z.string().min(1, 'email is required').max(MAX_EMAIL_LENGTH, 
 export const SignUpSchema = z.object({
   email: emailField.email('email must be a valid email address'),
   password: z.string().min(1, 'password is required').max(128, 'password must be at most 128 characters'),
-  firstName: z.string().min(1, 'firstName is required').max(MAX_NAME_LENGTH, `firstName must be at most ${MAX_NAME_LENGTH} characters`),
-  lastName: z.string().min(1, 'lastName is required').max(MAX_NAME_LENGTH, `lastName must be at most ${MAX_NAME_LENGTH} characters`),
+  firstName: z.string().min(1, 'firstName is required').max(MAX_NAME_LENGTH, `firstName must be at most ${MAX_NAME_LENGTH} characters`).transform((v) => v.normalize('NFC')),
+  lastName: z.string().min(1, 'lastName is required').max(MAX_NAME_LENGTH, `lastName must be at most ${MAX_NAME_LENGTH} characters`).transform((v) => v.normalize('NFC')),
 });
 export type SignUpRequest = z.infer<typeof SignUpSchema>;
 

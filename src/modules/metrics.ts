@@ -95,3 +95,26 @@ export function routeLabel(request: { routeOptions?: { url?: string }; is404?: b
 export function methodLabel(method: string): string {
   return KNOWN_METHODS.has(method) ? method : 'OTHER';
 }
+
+// Sign-up to first successful call, without any personal detail: how long after a key was created its first call came.
+export const keyFirstCallSeconds = new Histogram({
+  name: 'desk_key_first_call_seconds',
+  help: 'Seconds between an API key being created and its first call',
+  buckets: [10, 60, 300, 1800, 3600, 86400, 604800],
+  registers: [metricsRegistry],
+});
+
+export const keysCreatedTotal = new Counter({
+  name: 'desk_keys_created_total',
+  help: 'API keys created',
+  registers: [metricsRegistry],
+});
+
+// The limiter keeps one shared count in Redis. When Redis is configured but not answering it falls back to a count kept
+// in this process (still a limit, but not shared): this counts every request that had to use the fallback, and the
+// uptime watch alerts on it.
+export const rateLimitFallbackTotal = new Counter({
+  name: 'desk_rate_limit_fallback_total',
+  help: 'Requests counted in memory because Redis was configured but unavailable',
+  registers: [metricsRegistry],
+});

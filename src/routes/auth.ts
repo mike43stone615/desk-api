@@ -20,7 +20,8 @@ import { getClientIp } from '../middleware/api-protection';
 import { emailFingerprint } from '../middleware/log-redaction';
 import { isNewSignInDevice, notifySecurityEvent } from '../domain/auth/security-notices';
 import { listSecurityEvents, recordSecurityEvent } from '../modules/audit/security-events';
-import { checkSignupRateLimit } from '../middleware/signup-limiter';
+import { emailLinkBase } from '../domain/email/link-base';
+import { checkSignupDomainLimit, checkSignupRateLimit } from '../middleware/signup-limiter';
 import { signinLockedSeconds, recordSigninFailure, clearSigninFailures } from '../middleware/signin-throttle';
 import {
   sendEmailConfirmationEmail,
@@ -141,18 +142,21 @@ export async function signInHandler(request: FastifyRequest, reply: FastifyReply
 }
 
 export async function signUpHandler(request: FastifyRequest, reply: FastifyReply) {
-  if (!checkSignupRateLimit(getClientIp(request))) {
+  if (!(await checkSignupRateLimit(getClientIp(request)))) {
     throw new HttpError(429, 'Too many signup attempts. Please try again later.', 'rate_limited');
   }
   const parsed = SignUpSchema.safeParse(request.body ?? {});
   if (!parsed.success) throw validationError(parsed.error);
   const { email, password, firstName, lastName } = parsed.data;
+  if (!(await checkSignupDomainLimit(email))) {
+    throw new HttpError(429, 'Too many sign-ups from this e-mail domain. Please try again later.', 'rate_limited');
+  }
 
   const trimmedEmail = email.trim();
   try {
     const result = await authService.signUp(trimmedEmail, password, firstName.trim(), lastName.trim());
     if (result) {
-      await sendEmailConfirmationEmail(config, result.user.email, result.confirmationToken, request.id);
+      await sendEmailConfirmationEmail(config, result.user.email, result.confirmationToken, request.id, emailLinkBase(request));
       audit(request, 'signup_success', 'ok', { userId: result.user.id });
     } else {
       // Email already registered — notify the real account owner instead of
@@ -186,7 +190,7 @@ export async function requestEmailConfirmationHandler(request: FastifyRequest, r
 
   const token = await authService.requestEmailConfirmation(email);
   if (token) {
-    await sendEmailConfirmationEmail(config, email, token, request.id);
+    await sendEmailConfirmationEmail(config, email, token, request.id, emailLinkBase(request));
     audit(request, 'email_confirmation_requested', 'ok', { account: emailFingerprint(email) });
   }
 
@@ -327,7 +331,7 @@ export async function requestPasswordResetHandler(request: FastifyRequest, reply
   const token = await authService.requestPasswordReset(email);
   if (token) {
     audit(request, 'password_reset_requested', 'ok', { account: emailFingerprint(email) });
-    await sendPasswordResetEmail(config, email, token, request.id);
+    await sendPasswordResetEmail(config, email, token, request.id, emailLinkBase(request));
   }
 
   // Response is identical whether or not the email is registered or on cooldown,

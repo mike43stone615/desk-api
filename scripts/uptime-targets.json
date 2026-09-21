@@ -244,6 +244,20 @@
       "maxIncrease": 0,
       "unit": "refused calls",
       "failuresBeforeAlert": 1
+    },
+    {
+      "name": "rate-limit-shared-counter",
+      "what": "Redis stopped answering, so request limits are counted per process instead of shared",
+      "kind": "counter",
+      "url": "http://localhost:3458/metrics",
+      "headers": {
+        "x-api-key": "env:METRICS_DOCS_API_KEY"
+      },
+      "timeoutSec": 10,
+      "metric": "desk_rate_limit_fallback_total",
+      "maxIncrease": 0,
+      "unit": "requests counted without Redis",
+      "failuresBeforeAlert": 1
     }
   ],
   "processes": [

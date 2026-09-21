@@ -54,6 +54,8 @@ export const ERROR_CODES: Record<string, string> = {
   api_key_required: 'An x-api-key header is required.',
   invalid_api_key: 'The API key is unknown or has been revoked.',
   api_key_service_not_enabled: 'The key is not enabled for this API.',
+  market_analysis_daily_cap: 'The key has used its market analyses for today.',
+  api_key_scope_missing: 'The key does not include the part of the Desk API this endpoint belongs to.',
   api_key_endpoint_not_allowed: 'A key cannot call this endpoint.',
   api_key_limit_reached: 'The account already has the maximum number of active keys.',
   api_key_service_unavailable: 'One of the chosen APIs is not available for new keys right now.',

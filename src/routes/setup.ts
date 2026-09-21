@@ -11,6 +11,7 @@
 // (POST /drafts, POST /drafts/:id/complete) — see middleware/idempotency.ts,
 // registered against these exact two routes.
 import type { FastifyReply, FastifyRequest } from 'fastify';
+import { nfcDeep } from '../utils/strings';
 import { HttpError, validationError } from '../middleware/http-error';
 import { requireAuth, requireConfirmedEmail } from '../middleware/auth';
 import { generateId, nowUtc } from '../domain/auth/tokens';
@@ -198,7 +199,7 @@ export async function patchDraftHandler(request: FastifyRequest, reply: FastifyR
   const parsed = DraftPatchSchema.safeParse(request.body ?? {});
   if (!parsed.success) throw validationError(parsed.error);
 
-  const draftJson = JSON.stringify(parsed.data.draft);
+  const draftJson = JSON.stringify(nfcDeep(parsed.data.draft)); // stored in one canonical Unicode form
   if (draftJson.length > MAX_DRAFT_BYTES) throw new HttpError(413, 'Setup draft is too large.', 'draft_too_large');
 
   const now = nowUtc();
@@ -449,7 +450,7 @@ export async function listPendingInvitesHandler(request: FastifyRequest, reply: 
   const page = parsePage(request.query);
 
   const { rows: fetched } = await pool.query<Record<string, unknown>>(
-    `SELECT bm.id, bm.business_id, b.name AS business_name, bm.role, bm.invited_at,
+    `SELECT bm.id, bm.business_id, b.name AS business_name, bm.role, bm.invited_at, bm.invited_by_user_id,
             u.email AS invited_by_email, u.first_name AS invited_by_first_name, u.last_name AS invited_by_last_name
      FROM business_memberships bm
      INNER JOIN businesses b ON b.id = bm.business_id
@@ -469,6 +470,7 @@ export async function listPendingInvitesHandler(request: FastifyRequest, reply: 
       businessName: row.business_name,
       role: formatRole(parseMemberRole(String(row.role ?? ''))),
       invitedAt: row.invited_at,
+      invitedByUserId: row.invited_by_user_id ?? null,
       invitedBy: {
         email: row.invited_by_email,
         firstName: row.invited_by_first_name,

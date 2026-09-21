@@ -59,7 +59,7 @@ describe('unknown URLs and wrong methods', () => {
   });
 
   it('works the same for parameterised, versioned and wildcard routes', async () => {
-    const draft = await app.inject({ method: 'PUT', url: '/v1/setup/drafts/abc' });
+    const draft = await app.inject({ method: 'POST', url: '/v1/setup/drafts/abc' });
     expect(draft.statusCode).toBe(405);
     expect(String(draft.headers.allow)).toContain('PATCH');
 

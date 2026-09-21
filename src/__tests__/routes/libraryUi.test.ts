@@ -91,3 +91,13 @@ describe('API Library web pages (served from api.deskbusiness.co)', () => {
     expect(res.headers['x-frame-options']).toBeTruthy();
   });
 });
+
+describe('reserved names', () => {
+  it('no web page or library file uses a name reserved for the API, and the check itself works', async () => {
+    const { LIBRARY_UI_PAGES, RESERVED_API_ROOTS, reservedRootOf } = await import('../../routes/libraryUi');
+    for (const page of LIBRARY_UI_PAGES) expect(reservedRootOf(page), page).toBeNull();
+    for (const root of RESERVED_API_ROOTS) expect(reservedRootOf(`/${root}/anything`), root).toBe(root);
+    expect(reservedRootOf('/Auth')).toBe('auth');
+    expect(reservedRootOf('/developer')).toBeNull();
+  });
+});

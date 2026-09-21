@@ -28,7 +28,10 @@
     "generate:openapi": "tsx scripts/export-openapi.ts",
     "generate:client": "npm run generate:openapi && openapi-typescript docs/openapi.json -o packages/desk-client/src/openapi-types.ts",
     "lint": "eslint src --ext .ts",
-    "format": "prettier --write src"
+    "format": "prettier --write src",
+    "sdk:types": "tsx scripts/export-openapi.ts openapi-out && npx openapi-typescript openapi-out/library.json -o sdk/typescript/desk-api-library.d.ts",
+    "scan:logs": "node scripts/scan-logs.mjs",
+    "traces": "node scripts/slow-traces.mjs"
   },
   "dependencies": {
     "@fastify/cookie": "^11.1.2",

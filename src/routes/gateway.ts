@@ -17,7 +17,8 @@ import { config } from '../config';
 import { KEY_BUCKET_FACTOR } from '../middleware/api-protection';
 import { BrokerError } from '../domain/gateway/broker';
 import { getServiceCatalog } from '../domain/gateway/services';
-import { CreateGatewayKeySchema } from '../validators/gateway';
+import { AddKeyServiceSchema, CreateGatewayKeySchema } from '../validators/gateway';
+import { GATEWAY_SERVICES, type GatewayService } from '../domain/gateway/services';
 import { LIBRARY_OPENAPI_SPEC } from '../openapi';
 
 function auditKey(request: FastifyRequest, event: string, meta: Record<string, unknown>) {
@@ -49,11 +50,12 @@ export async function createGatewayKeyHandler(request: FastifyRequest, reply: Fa
   const user = request.currentUser!;
 
   try {
-    const created = await gatewayApiKeys.create(user.id, parsed.data.label, parsed.data.services, parsed.data.expiresInDays);
+    const created = await gatewayApiKeys.create(user.id, parsed.data.label, parsed.data.services, parsed.data.expiresInDays, [...new Set(parsed.data.deskScopes)]);
     auditKey(request, 'gateway_key_created', {
       userId: user.id,
       keyId: created.id,
       services: created.services.join(','),
+      deskScopes: (created.deskScopes ?? []).join(','),
     });
     notifySecurityEvent(request, user.email, 'api_key_created', parsed.data.label);
     return reply.status(201).send({ apiKey: created });
@@ -66,6 +68,47 @@ export async function createGatewayKeyHandler(request: FastifyRequest, reply: Fa
       throw new HttpError(502, 'Could not set up access to one of the selected APIs. Nothing was created; please try again.', 'upstream_provisioning_failed');
     }
     throw err;
+  }
+}
+
+function keyServiceError(err: unknown): never {
+  if (err instanceof GatewayKeyError) {
+    const status = err.code === 'not_found' ? 404 : err.code === 'service_unavailable' ? 503 : 409;
+    throw new HttpError(status, err.message, `api_key_${err.code}`);
+  }
+  if (err instanceof BrokerError) throw new HttpError(502, 'Could not set up access to that API. Nothing was changed; please try again.', 'upstream_provisioning_failed');
+  throw err;
+}
+
+/** Adds an API to one of the caller's own keys (the key and its secret stay the same). */
+export async function addKeyServiceHandler(request: FastifyRequest, reply: FastifyReply) {
+  await requireAuth(request, reply);
+  await requireConfirmedEmail(request, reply);
+  const { id } = request.params as { id: string };
+  const parsed = AddKeyServiceSchema.safeParse(request.body ?? {});
+  if (!parsed.success) throw validationError(parsed.error);
+  const user = request.currentUser!;
+  try {
+    const key = await gatewayApiKeys.addService(user.id, id, parsed.data.service);
+    auditKey(request, 'gateway_key_service_added', { userId: user.id, keyId: id, service: parsed.data.service });
+    return reply.send({ apiKey: key });
+  } catch (err) {
+    return keyServiceError(err);
+  }
+}
+
+/** Removes an API from one of the caller's own keys (at least one must remain). */
+export async function removeKeyServiceHandler(request: FastifyRequest, reply: FastifyReply) {
+  await requireAuth(request, reply);
+  const { id, service } = request.params as { id: string; service: string };
+  if (!(GATEWAY_SERVICES as readonly string[]).includes(service)) throw new HttpError(404, 'No such API.', 'not_found');
+  const user = request.currentUser!;
+  try {
+    const key = await gatewayApiKeys.removeService(user.id, id, service as GatewayService);
+    auditKey(request, 'gateway_key_service_removed', { userId: user.id, keyId: id, service });
+    return reply.send({ apiKey: key });
+  } catch (err) {
+    return keyServiceError(err);
   }
 }
 

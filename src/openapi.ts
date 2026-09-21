@@ -369,6 +369,12 @@ const BASE_SPEC = {
     '/gateway/api-keys/{id}/usage': {
       get: { tags: ['API Library'], summary: 'Calls and errors per day for one of your own keys, its expiry, and the limits that apply', security: [{ SessionToken: [] }], parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }, { name: 'days', in: 'query', required: false, schema: { type: 'integer', minimum: 1, maximum: 90, default: 30 } }], responses: { '200': { description: 'Usage and limits' }, '404': { description: 'Not your key, or revoked' } } },
     },
+    '/gateway/api-keys/{id}/services': {
+      post: { tags: ['API Library'], summary: 'Add an API to one of your keys', security: [{ SessionToken: [] }], parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }], responses: { '200': { description: 'The key with its APIs' }, '404': { description: 'Not your key' }, '503': { description: 'That API is not available' } } },
+    },
+    '/gateway/api-keys/{id}/services/{service}': {
+      delete: { tags: ['API Library'], summary: 'Remove an API from one of your keys (at least one must stay)', security: [{ SessionToken: [] }], parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }, { name: 'service', in: 'path', required: true, schema: { type: 'string' } }], responses: { '200': { description: 'The key with its APIs' }, '404': { description: 'Not your key' }, '409': { description: 'A key needs at least one API' } } },
+    },
     '/gateway/api-keys/{id}/suspend': {
       post: { tags: ['API Library'], summary: 'Switch one of your own keys off without revoking it', security: [{ SessionToken: [] }], parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }], responses: { '200': { description: 'Suspended' }, '404': { description: 'Not your key, or already revoked' } } },
     },
@@ -381,6 +387,9 @@ const BASE_SPEC = {
     '/admin/gateway-keys/reconcile': {
       get: { tags: ['Admin'], summary: 'What the last comparison of our keys with the backends found', security: [{ SessionToken: [] }], responses: { '200': { description: 'The last report, or null before the first run' } } },
       post: { tags: ['Admin'], summary: 'Compare our keys with the backends now (orphans are revoked), and return the report', security: [{ SessionToken: [] }], responses: { '200': { description: 'The new report' } } },
+    },
+    '/admin/gateway-keys/{id}/limit': {
+      post: { tags: ['Admin'], summary: 'Give one key its own per-minute limit (null clears it)', security: [{ SessionToken: [] }], parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }], responses: { '200': { description: 'OK' }, '404': { description: 'No such key' } } },
     },
     '/admin/gateway-keys/{id}/suspend': {
       post: { tags: ['Admin'], summary: 'Suspend any API key (nothing is revoked)', security: [{ SessionToken: [] }], parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }], responses: { '200': { description: 'Suspended' }, '404': { description: 'No such key' } } },
@@ -418,6 +427,7 @@ const BASE_SPEC = {
     },
     '/setup/drafts/{id}': {
       get: { tags: ['Setup'], summary: 'Get a draft', security: [{ SessionToken: [] }, { ApiLibraryKey: [] }], responses: { '200': { description: 'OK' }, '404': { description: 'Not found' } } },
+      put: { tags: ['Setup'], summary: 'Replace a draft (256KB cap); the same as PATCH', security: [{ SessionToken: [] }], responses: { '200': { description: 'OK' }, '413': { description: 'Draft too large' } } },
       patch: { tags: ['Setup'], summary: 'Update a draft (256KB cap)', security: [{ SessionToken: [] }], responses: { '200': { description: 'OK' }, '413': { description: 'Draft too large' } } },
       delete: { tags: ['Setup'], summary: 'Delete a draft', security: [{ SessionToken: [] }], responses: { '200': { description: 'OK' }, '404': { description: 'Not found' } } },
     },

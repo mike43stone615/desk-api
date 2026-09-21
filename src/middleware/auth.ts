@@ -6,7 +6,7 @@ import { timingSafeEqual } from 'crypto';
 import type { FastifyReply, FastifyRequest } from 'fastify';
 import { HttpError } from './http-error';
 import { authDb, authService } from '../infrastructure/auth';
-import { gatewayApiKeys, looksLikeGatewayKey, type VerifiedGatewayKey } from '../domain/gateway/keys';
+import { gatewayApiKeys, looksLikeGatewayKey, type DeskScope, type VerifiedGatewayKey } from '../domain/gateway/keys';
 import { LEGACY_SESSION_COOKIE_NAME, sessionCookieName } from '../infrastructure/auth/session-cookie';
 import { config } from '../config';
 import { enforceUserRouteLimit, routeKey } from './route-limits';
@@ -40,6 +40,16 @@ export const GATEWAY_KEY_ALLOWED_ROUTES: ReadonlySet<string> = new Set([
   'GET /setup/invites',
 ]);
 
+/** Which scope each allowed route needs (see DESK_SCOPES in domain/gateway/keys.ts). */
+export const GATEWAY_ROUTE_SCOPES: Readonly<Record<string, DeskScope>> = {
+  'GET /auth/session': 'profile',
+  'GET /setup/drafts': 'drafts',
+  'GET /setup/drafts/:id': 'drafts',
+  'GET /setup/businesses': 'businesses',
+  'GET /setup/businesses/:id/members': 'businesses',
+  'GET /setup/invites': 'businesses',
+};
+
 async function authenticateWithGatewayKey(request: FastifyRequest, apiKey: string): Promise<void> {
   const verified = await gatewayApiKeys.verify(apiKey);
   if (!verified) throw new HttpError(401, 'Invalid or revoked API key.', 'invalid_api_key');
@@ -51,6 +61,11 @@ async function authenticateWithGatewayKey(request: FastifyRequest, apiKey: strin
   const matched = routeKey(request);
   if (!matched || !GATEWAY_KEY_ALLOWED_ROUTES.has(matched)) {
     throw new HttpError(403, 'This API key cannot call this endpoint.', 'api_key_endpoint_not_allowed');
+  }
+  // A key can be limited to some parts of the Desk API (the owner chose its scopes when creating it).
+  const scope = GATEWAY_ROUTE_SCOPES[matched];
+  if (scope && !verified.deskScopes.has(scope)) {
+    throw new HttpError(403, `This API key does not include the "${scope}" scope.`, 'api_key_scope_missing');
   }
   const owner = await authDb.findUserById(verified.ownerUserId);
   if (!owner) throw new HttpError(401, 'Invalid or revoked API key.', 'invalid_api_key');

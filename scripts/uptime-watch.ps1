@@ -195,9 +195,9 @@ function Invoke-CounterCheck($check, $st) {
   if ($page.status -ne 200) { return "answered $($page.status)" }
   $total = 0.0
   foreach ($line in ($page.content -split "`n")) {
-    if (-not $line.StartsWith($check.metric + '{')) { continue }
+    if (-not ($line.StartsWith($check.metric + '{') -or $line.StartsWith($check.metric + ' '))) { continue }   # with or without labels
     $ok = $true
-    foreach ($m in $check.labels.PSObject.Properties) { if ($line -notmatch ('{0}="({1})"' -f $m.Name, $m.Value)) { $ok = $false } }
+    if ($check.labels) { foreach ($m in $check.labels.PSObject.Properties) { if ($line -notmatch ('{0}="({1})"' -f $m.Name, $m.Value)) { $ok = $false } } }
     if ($ok) { $total += [double](($line -split ' ')[-1]) }
   }
   $prev = $st.value

@@ -44,6 +44,8 @@ const PUBLIC: Record<string, string> = {
   'GET /': 'API Library web page',
   'GET /login': 'API Library web page',
   'GET /developer': 'API Library web page',
+  'GET /confirm-email': 'API Library web page (the link in the confirmation e-mail)',
+  'GET /reset-password': 'API Library web page (the link in the reset e-mail)',
   'GET /app.js': 'API Library web asset',
   'GET /style.css': 'API Library web asset',
   'GET /desk_logo.png': 'API Library web asset',

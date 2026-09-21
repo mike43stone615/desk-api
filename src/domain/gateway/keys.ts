@@ -7,6 +7,7 @@ import { createHash, randomBytes, randomUUID } from 'crypto';
 import { pool } from '../../db';
 import { suspendedKeyIds } from '../suspension';
 import { config } from '../../config';
+import { keyFirstCallSeconds, keysCreatedTotal } from '../../modules/metrics';
 import { decryptSecret, encryptSecret } from './crypto';
 import { provisionBrokerKey, revokeBrokerKey } from './broker';
 import {
@@ -17,6 +18,9 @@ import {
 } from './services';
 
 export const GATEWAY_KEY_PREFIX = 'deskgw_';
+/** Parts of the Desk API a key may read: its own profile, setup drafts, businesses (with members and invites). */
+export const DESK_SCOPES = ['profile', 'drafts', 'businesses'] as const;
+export type DeskScope = (typeof DESK_SCOPES)[number];
 /** Bounds how many real backend keys a single account can cause to be minted. */
 export const MAX_ACTIVE_KEYS_PER_USER = 10;
 
@@ -47,6 +51,10 @@ export interface GatewayKeySummary {
   suspended?: boolean;
   /** When the key stops working, or null for a key that does not expire. */
   expiresAt?: string | null;
+  /** Which parts of the Desk API the key may read (all of them unless the owner chose fewer). */
+  deskScopes?: DeskScope[];
+  /** A limit set for this key by an administrator (calls a minute), or null for the standard limit. */
+  rateLimitPerMinute?: number | null;
 }
 
 export interface CreatedGatewayKey extends GatewayKeySummary {
@@ -62,6 +70,8 @@ export interface VerifiedGatewayKey {
   suspended: boolean;
   /** Set when the key is past its expiry date or has been idle too long: it must be refused, with this reason. */
   timeProblem?: 'expired' | 'idle';
+  deskScopes: ReadonlySet<DeskScope>;
+  rateLimitPerMinute: number | null;
 }
 
 export function looksLikeGatewayKey(value: unknown): value is string {
@@ -81,7 +91,12 @@ interface KeyRow {
   created_at: string;
   last_used_at: string | null;
   expires_at?: string | null;
+  desk_scopes?: DeskScope[];
+  rate_limit_per_minute?: number | null;
 }
+
+/** How often a key's "last used" time is refreshed while it is in use. */
+export const LAST_USED_REFRESH_MS = 5 * 60_000;
 
 /** A key nobody has used for this long is refused (and revoked by the nightly job); the owner can simply make a new one. */
 export const KEY_IDLE_DAYS = 180;
@@ -102,6 +117,8 @@ function toSummary(row: KeyRow, services: GatewayService[]): GatewayKeySummary {
     lastUsedAt: row.last_used_at,
     services,
     expiresAt: row.expires_at ?? null,
+    deskScopes: row.desk_scopes ?? [...DESK_SCOPES],
+    rateLimitPerMinute: row.rate_limit_per_minute ?? null,
   };
 }
 
@@ -114,7 +131,7 @@ export const gatewayApiKeys = {
   /** The owner's non-revoked keys, newest first, each with its enabled services. */
   async list(ownerUserId: string): Promise<GatewayKeySummary[]> {
     const { rows } = await pool.query<KeyRow>(
-      `SELECT id, label, key_prefix, created_at, last_used_at, expires_at
+      `SELECT id, label, key_prefix, created_at, last_used_at, expires_at, desk_scopes, rate_limit_per_minute
        FROM gateway_api_keys
        WHERE revoked_at IS NULL AND owner_user_id = $1
        ORDER BY created_at DESC`,
@@ -151,7 +168,7 @@ export const gatewayApiKeys = {
    * services are minted first; if anything after that fails, whatever was
    * already minted is revoked again so no orphaned live credentials remain.
    */
-  async create(ownerUserId: string, label: string, requested: GatewayService[], expiresInDays?: number): Promise<CreatedGatewayKey> {
+  async create(ownerUserId: string, label: string, requested: GatewayService[], expiresInDays?: number, deskScopes: DeskScope[] = [...DESK_SCOPES]): Promise<CreatedGatewayKey> {
     const services = orderServices(requested);
     if (services.length === 0) throw new GatewayKeyError('service_unavailable', 'Choose at least one API.');
 
@@ -197,10 +214,10 @@ export const gatewayApiKeys = {
       try {
         await client.query('BEGIN');
         const inserted = await client.query<KeyRow>(
-          `INSERT INTO gateway_api_keys (id, owner_user_id, label, key_hash, key_prefix, expires_at)
-           VALUES ($1, $2, $3, $4, $5, $6)
-           RETURNING id, label, key_prefix, created_at, last_used_at, expires_at`,
-          [id, ownerUserId, label, keyHash, keyPrefix, expiresInDays ? new Date(Date.now() + expiresInDays * 86_400_000).toISOString() : null],
+          `INSERT INTO gateway_api_keys (id, owner_user_id, label, key_hash, key_prefix, expires_at, desk_scopes)
+           VALUES ($1, $2, $3, $4, $5, $6, $7)
+           RETURNING id, label, key_prefix, created_at, last_used_at, expires_at, desk_scopes, rate_limit_per_minute`,
+          [id, ownerUserId, label, keyHash, keyPrefix, expiresInDays ? new Date(Date.now() + expiresInDays * 86_400_000).toISOString() : null, deskScopes],
         );
         row = inserted.rows[0];
         for (const service of services) {
@@ -212,6 +229,7 @@ export const gatewayApiKeys = {
           );
         }
         await client.query('COMMIT');
+        keysCreatedTotal.inc();
       } catch (err) {
         await client.query('ROLLBACK').catch(() => {});
         throw err;
@@ -295,28 +313,90 @@ export const gatewayApiKeys = {
   async verify(plaintext: string): Promise<VerifiedGatewayKey | null> {
     if (!looksLikeGatewayKey(plaintext)) return null;
     try {
-      const { rows } = await pool.query<{ id: string; owner_user_id: string; revoked_at: string | null; created_at: string; last_used_at: string | null; expires_at: string | null }>(
-        `SELECT id, owner_user_id, revoked_at, created_at, last_used_at, expires_at FROM gateway_api_keys WHERE key_hash = $1`,
+      const { rows } = await pool.query<{ id: string; owner_user_id: string; revoked_at: string | null; created_at: string; last_used_at: string | null; desk_scopes: DeskScope[]; rate_limit_per_minute: number | null; expires_at: string | null }>(
+        `SELECT id, owner_user_id, revoked_at, created_at, last_used_at, expires_at, desk_scopes, rate_limit_per_minute FROM gateway_api_keys WHERE key_hash = $1`,
         [hashGatewayKey(plaintext)],
       );
       const key = rows[0];
       if (!key || key.revoked_at) return null;
       // An expired or idle key is refused with its own reason (see verifyOrExplain in the routes).
       const timeProblem = keyTimeProblem(key);
-      if (timeProblem) return { id: key.id, ownerUserId: key.owner_user_id, services: new Set(), suspended: false, timeProblem };
+      if (timeProblem) return { id: key.id, ownerUserId: key.owner_user_id, services: new Set(), suspended: false, timeProblem, deskScopes: new Set(key.desk_scopes ?? DESK_SCOPES), rateLimitPerMinute: key.rate_limit_per_minute ?? null };
       const { rows: grants } = await pool.query<{ service: GatewayService }>(
         `SELECT service FROM gateway_api_key_grants WHERE api_key_id = $1`,
         [key.id],
       );
-      pool.query(`UPDATE gateway_api_keys SET last_used_at = ${NOW_SQL} WHERE id = $1`, [key.id]).catch(() => {});
+      // "Last used" only has to be roughly right, so it is written at most every few minutes: a busy key no longer causes a
+      // database write on every call (a GET used to write). The first call of a key is also counted for the funnel.
+      if (!key.last_used_at || Date.now() - Date.parse(key.last_used_at) > LAST_USED_REFRESH_MS) {
+        if (!key.last_used_at) keyFirstCallSeconds.observe(Math.max(0, (Date.now() - Date.parse(key.created_at)) / 1000));
+        pool.query(`UPDATE gateway_api_keys SET last_used_at = ${NOW_SQL} WHERE id = $1`, [key.id]).catch(() => {});
+      }
       const { rows: off } = await pool.query(
         `SELECT 1 FROM key_suspensions WHERE api_key_id = $1 UNION ALL SELECT 1 FROM account_suspensions WHERE user_id = $2`,
         [key.id, key.owner_user_id],
       );
-      return { id: key.id, ownerUserId: key.owner_user_id, services: new Set(grants.map((g) => g.service)), suspended: off.length > 0 };
+      return { id: key.id, ownerUserId: key.owner_user_id, services: new Set(grants.map((g) => g.service)), suspended: off.length > 0, deskScopes: new Set(key.desk_scopes ?? DESK_SCOPES), rateLimitPerMinute: key.rate_limit_per_minute ?? null };
     } catch {
       return null;
     }
+  },
+
+  /**
+   * Adds an API to a key the caller owns (a brokered API gets its own real backend key, minted now). The key itself, and
+   * everything already using it, is untouched.
+   */
+  async addService(ownerUserId: string, keyId: string, service: GatewayService): Promise<GatewayKeySummary> {
+    const { rows } = await pool.query<{ id: string; revoked_at: string | null }>(
+      `SELECT id, revoked_at FROM gateway_api_keys WHERE id = $1 AND owner_user_id = $2`,
+      [keyId, ownerUserId],
+    );
+    if (!rows[0]) throw new GatewayKeyError('not_found', 'API key not found.');
+    if (rows[0].revoked_at) throw new GatewayKeyError('already_revoked', 'This API key has been revoked.');
+    const catalog = new Map(getServiceCatalog().map((e) => [e.service, e]));
+    if (!catalog.get(service)?.available) throw new GatewayKeyError('service_unavailable', `${catalog.get(service)?.name ?? service} is not available right now.`);
+    const existing = await pool.query<{ service: GatewayService }>(`SELECT service FROM gateway_api_key_grants WHERE api_key_id = $1`, [keyId]);
+    if (!existing.rows.some((g) => g.service === service)) {
+      let backendKeyId: string | null = null;
+      let encrypted: string | null = null;
+      if (isBrokeredService(service)) {
+        const secret = config.gatewayKeyEncryptionSecret;
+        if (!secret) throw new GatewayKeyError('service_unavailable', 'Key storage is not configured.');
+        const provisioned = await provisionBrokerKey(service, `gateway:${ownerUserId}:${keyId}`);
+        backendKeyId = provisioned.backendKeyId;
+        encrypted = encryptSecret(provisioned.plaintext, secret);
+      }
+      try {
+        await pool.query(
+          `INSERT INTO gateway_api_key_grants (id, api_key_id, service, backend_key_id, encrypted_backend_key) VALUES ($1, $2, $3, $4, $5)`,
+          [randomUUID(), keyId, service, backendKeyId, encrypted],
+        );
+      } catch (err) {
+        if (backendKeyId && isBrokeredService(service)) await revokeBrokerKey(service, backendKeyId).catch(() => {});
+        throw err;
+      }
+    }
+    return (await this.list(ownerUserId)).find((k) => k.id === keyId)!;
+  },
+
+  /** Removes an API from a key the caller owns. At least one API must stay; the backend key of a brokered API is revoked. */
+  async removeService(ownerUserId: string, keyId: string, service: GatewayService): Promise<GatewayKeySummary> {
+    const { rows } = await pool.query<{ id: string; revoked_at: string | null }>(
+      `SELECT id, revoked_at FROM gateway_api_keys WHERE id = $1 AND owner_user_id = $2`,
+      [keyId, ownerUserId],
+    );
+    if (!rows[0]) throw new GatewayKeyError('not_found', 'API key not found.');
+    if (rows[0].revoked_at) throw new GatewayKeyError('already_revoked', 'This API key has been revoked.');
+    const existing = await pool.query<{ service: GatewayService }>(`SELECT service FROM gateway_api_key_grants WHERE api_key_id = $1`, [keyId]);
+    if (!existing.rows.some((g) => g.service === service)) return (await this.list(ownerUserId)).find((k) => k.id === keyId)!;
+    if (existing.rows.length <= 1) throw new GatewayKeyError('limit_reached', 'A key needs at least one API. Revoke the key instead.');
+    const removed = await pool.query<{ backend_key_id: string | null }>(
+      `DELETE FROM gateway_api_key_grants WHERE api_key_id = $1 AND service = $2 RETURNING backend_key_id`,
+      [keyId, service],
+    );
+    const backendKeyId = removed.rows[0]?.backend_key_id;
+    if (backendKeyId && isBrokeredService(service)) await revokeBrokerKey(service, backendKeyId).catch(() => {});
+    return (await this.list(ownerUserId)).find((k) => k.id === keyId)!;
   },
 
   /** The decrypted real backend key for a brokered grant, or null. */
@@ -337,3 +417,35 @@ export const gatewayApiKeys = {
     }
   },
 };
+
+// ── per-key limit ─────────────────────────────────────────────────────────────────────────────────────────────────
+const factorCache = new Map<string, { factor: number | null; at: number }>();
+const FACTOR_TTL_MS = 60_000;
+
+/**
+ * The share of an address's allowance this key gets, when an administrator gave it its own limit; null for the
+ * standard limit. The limiter runs before the key is verified, so this looks the key up by its hash (kept for a
+ * minute in memory, so a busy key costs one lookup a minute).
+ */
+export async function keyRateFactor(plaintext: string, perMinuteOfAnAddress: number): Promise<number | null> {
+  const hash = hashGatewayKey(plaintext);
+  const hit = factorCache.get(hash);
+  const now = Date.now();
+  if (hit && now - hit.at < FACTOR_TTL_MS) return hit.factor;
+  let factor: number | null;
+  try {
+    const { rows } = await pool.query<{ rate_limit_per_minute: number | null }>(`SELECT rate_limit_per_minute FROM gateway_api_keys WHERE key_hash = $1`, [hash]);
+    const custom = rows[0]?.rate_limit_per_minute;
+    factor = custom ? custom / perMinuteOfAnAddress : null;
+  } catch {
+    factor = null;
+  }
+  if (factorCache.size > 5000) factorCache.clear();
+  factorCache.set(hash, { factor, at: now });
+  return factor;
+}
+
+/** For tests and for when an administrator changes a limit. */
+export function forgetKeyRateFactors(): void {
+  factorCache.clear();
+}

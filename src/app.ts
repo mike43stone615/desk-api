@@ -98,20 +98,21 @@ import {
   libraryOpenApiHandler,
   keyUsageHandler,
   resumeGatewayKeyHandler,
-  suspendGatewayKeyHandler,
+  suspendGatewayKeyHandler, addKeyServiceHandler, removeKeyServiceHandler,
   listGatewayKeysHandler,
   listGatewayServicesHandler,
   revokeGatewayKeyHandler,
 } from './routes/gateway';
 import { gatewayMarketProxyHandler, gatewayRegistryProxyHandler } from './routes/gatewayProxy';
 import { registerLibraryUi } from './routes/libraryUi';
-import { adminReconcileReportHandler, adminReconcileRunHandler, adminListKeysHandler, adminResumeKeyHandler, adminSuspendKeyHandler, adminSuspendUserHandler, adminUnsuspendUserHandler } from './routes/adminAccounts';
+import { adminReconcileReportHandler, adminReconcileRunHandler, adminListKeysHandler, adminResumeKeyHandler, adminSuspendKeyHandler, adminSetKeyLimitHandler, adminSuspendUserHandler, adminUnsuspendUserHandler } from './routes/adminAccounts';
 import { registerSecurityTxt } from './routes/securityTxt';
 import { registerWebhooks } from './routes/webhooks';
 import { buildStatus, statusHtml } from './domain/health/status';
 import { ERROR_CODES } from './middleware/error-codes';
 import { registerPathParamCheck } from './middleware/path-params';
 import { recordKeyUsage } from './domain/gateway/usage';
+import { routeKey } from './middleware/route-limits';
 import { sendWithEtag } from './middleware/etag';
 
 // Captured once at module load (= process start for all practical purposes)
@@ -186,6 +187,25 @@ export async function buildApp(options: { logStream?: { write: (line: string) =>
       reply.removeHeader('content-length');
       return '';
     }
+    return payload;
+  });
+
+  // /v1 conventions, continued: a create answers 201 Created with a Location header that says where the new thing is.
+  // (The legacy unprefixed paths keep answering 200 where they always did.)
+  const V1_CREATES: Record<string, (payload: Record<string, unknown>, url: string) => string | null> = {
+    'POST /setup/drafts': (p) => (typeof p.id === 'string' ? `/v1/setup/drafts/${p.id}` : null),
+    'POST /setup/drafts/:id/complete': () => '/v1/setup/businesses',
+    'POST /setup/businesses/:id/members': (_p, url) => url.split('?')[0],
+    'POST /gateway/api-keys': () => '/v1/gateway/api-keys',
+  };
+  app.addHook('onSend', async (request, reply, payload) => {
+    if (request.method !== 'POST' || !request.url.startsWith('/v1/') || (reply.statusCode !== 200 && reply.statusCode !== 201) || typeof payload !== 'string') return payload;
+    const build = V1_CREATES[routeKey(request) ?? ''];
+    if (!build) return payload;
+    try {
+      const location = build(JSON.parse(payload) as Record<string, unknown>, request.url);
+      if (location) reply.code(201).header('Location', location);
+    } catch { /* not JSON: leave the answer alone */ }
     return payload;
   });
 
@@ -433,6 +453,7 @@ async function registerLegacyAndVersionedRoutes(instance: FastifyInstance) {
   instance.get('/setup/drafts/:id', getDraftHandler);
   instance.post('/setup/drafts', createDraftHandler);
   instance.patch('/setup/drafts/:id', patchDraftHandler);
+  instance.put('/setup/drafts/:id', patchDraftHandler); // the same whole-draft replace, under the verb that means it
   instance.delete('/setup/drafts/:id', deleteDraftHandler);
   instance.post('/setup/drafts/:id/complete', completeDraftHandler);
   instance.get('/setup/businesses', listBusinessesHandler);
@@ -449,6 +470,7 @@ async function registerLegacyAndVersionedRoutes(instance: FastifyInstance) {
   instance.post('/admin/gateway-keys/reconcile', small, adminReconcileRunHandler);
   instance.post('/admin/users/:id/suspend', small, adminSuspendUserHandler);
   instance.post('/admin/users/:id/unsuspend', small, adminUnsuspendUserHandler);
+  instance.post('/admin/gateway-keys/:id/limit', small, adminSetKeyLimitHandler);
   instance.post('/admin/gateway-keys/:id/suspend', small, adminSuspendKeyHandler);
   instance.post('/admin/gateway-keys/:id/resume', small, adminResumeKeyHandler);
   instance.get('/admin/tables', adminTablesHandler);
@@ -484,6 +506,8 @@ async function registerLegacyAndVersionedRoutes(instance: FastifyInstance) {
   instance.post('/gateway/api-keys', small, createGatewayKeyHandler);
   instance.delete('/gateway/api-keys/:id', revokeGatewayKeyHandler);
   instance.get('/gateway/api-keys/:id/usage', keyUsageHandler);
+  instance.post('/gateway/api-keys/:id/services', small, addKeyServiceHandler);
+  instance.delete('/gateway/api-keys/:id/services/:service', removeKeyServiceHandler);
   instance.post('/gateway/api-keys/:id/suspend', small, suspendGatewayKeyHandler);
   instance.post('/gateway/api-keys/:id/resume', small, resumeGatewayKeyHandler);
 

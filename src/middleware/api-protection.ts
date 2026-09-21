@@ -12,7 +12,8 @@ import { createHash } from 'crypto';
 import { getRedis } from './redis-client';
 import { problemBody } from './http-error';
 import { config } from '../config';
-import { GATEWAY_KEY_PREFIX } from '../domain/gateway/keys';
+import { rateLimitFallbackTotal } from '../modules/metrics';
+import { GATEWAY_KEY_PREFIX, keyRateFactor } from '../domain/gateway/keys';
 
 interface RateLimitResult {
   allowed: boolean;
@@ -122,7 +123,10 @@ export async function checkRateBucket(key: string, factor = 1): Promise<RateLimi
 
 async function redisCheck(key: string, factor = 1): Promise<RateLimitResult> {
   const redis = getRedis();
-  if (!redis) return memCheck(key, factor);
+  if (!redis) {
+    if (config.redisUrl) rateLimitFallbackTotal.inc(); // configured but not answering: alerted on by the uptime watch
+    return memCheck(key, factor);
+  }
 
   const now = Date.now();
   const windows: Array<{ key: string; limit: number; windowMs: number; label: string }> = [
@@ -243,9 +247,12 @@ export function registerApiProtection(app: FastifyInstance) {
     // made-up key still costs the address's own allowance below, so rotating fake keys gains nothing.
     const presentedKey = request.headers['x-api-key'];
     if (typeof presentedKey === 'string' && presentedKey.startsWith(GATEWAY_KEY_PREFIX)) {
-      const keyResult = await redisCheck(`key:${createHash('sha256').update(presentedKey).digest('hex')}`, KEY_BUCKET_FACTOR);
+      // An administrator can give a partner's key its own limit (keyRateFactor); otherwise half an address's.
+      const custom = await keyRateFactor(presentedKey, config.rateLimitPerMinute);
+      const factor = custom ?? KEY_BUCKET_FACTOR;
+      const keyResult = await redisCheck(`key:${createHash('sha256').update(presentedKey).digest('hex')}`, factor);
       if (!keyResult.allowed) {
-        return tooManyRequests(request, reply, keyResult.reason, keyResult.resetAt, scaled(config.rateLimitPerMinute, KEY_BUCKET_FACTOR));
+        return tooManyRequests(request, reply, keyResult.reason, keyResult.resetAt, scaled(config.rateLimitPerMinute, factor));
       }
     }
 

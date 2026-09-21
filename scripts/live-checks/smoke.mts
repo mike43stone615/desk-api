@@ -25,6 +25,12 @@ try {
   const catalog = await h.call('GET', '/v1/errors', { pace: 0 });
   h.check('the error catalogue is served', catalog.s === 200 && catalog.json.errors.length > 30, String(catalog.s));
 
+  // 1b. the logo in every e-mail is fetched from the host the e-mail's link points to: both hosts must serve it
+  for (const host of ['https://app.deskbusiness.co', 'https://api.deskbusiness.co']) {
+    const logo = await fetch(`${host}/desk_logo.png`).catch(() => null);
+    h.check(`the e-mail logo is served by ${new URL(host).hostname} as an image`, logo?.status === 200 && /image\/png/.test(logo.headers.get('content-type') ?? ''), String(logo?.status));
+  }
+
   // 2. an account, both ways of signing in, and the password rules
   const u = await h.mkUser('a');
   const bearer = await h.signin(u);

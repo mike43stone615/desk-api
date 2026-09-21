@@ -5,6 +5,7 @@ import { z } from 'zod';
 import { pool } from '../db';
 import { HttpError, validationError } from '../middleware/http-error';
 import { guard } from './admin';
+import { forgetKeyRateFactors } from '../domain/gateway/keys';
 import { logMutation, requestIp, requestUserAgent } from '../modules/audit/mutation-audit';
 import { resumeKey, suspendKey, suspendUser, unsuspendUser } from '../domain/suspension';
 import { lastReconcileReport, runReconcileAndRemember } from '../domain/gateway/reconcile';
@@ -88,6 +89,21 @@ export async function adminSuspendKeyHandler(request: FastifyRequest, reply: Fas
   if (!(await suspendKey(id, null, parsed.data.reason ?? 'suspended by an administrator', actor(request)))) throw new HttpError(404, 'No such key (or it was revoked).', 'api_key_not_found');
   record(request, 'suspend_key', 'gateway_api_key', id, { reason: parsed.data.reason ?? null });
   return reply.send({ ok: true, suspended: true });
+}
+
+const KeyLimitSchema = z.object({ perMinute: z.number().int('perMinute must be a whole number.').min(1).max(6000).nullable() });
+
+/** Gives one key its own per-minute limit (a partner), or clears it (null) so the standard limit applies again. */
+export async function adminSetKeyLimitHandler(request: FastifyRequest, reply: FastifyReply) {
+  await guard(request, reply);
+  const { id } = request.params as { id: string };
+  const parsed = KeyLimitSchema.safeParse(request.body ?? {});
+  if (!parsed.success) throw validationError(parsed.error);
+  const result = await pool.query(`UPDATE gateway_api_keys SET rate_limit_per_minute = $2 WHERE id = $1 AND revoked_at IS NULL`, [id, parsed.data.perMinute]);
+  if ((result.rowCount ?? 0) === 0) throw new HttpError(404, 'No such key (or it is revoked).', 'not_found');
+  forgetKeyRateFactors();
+  record(request, 'set_key_limit', 'gateway_api_key', id, { perMinute: parsed.data.perMinute });
+  return reply.send({ ok: true, perMinute: parsed.data.perMinute });
 }
 
 export async function adminResumeKeyHandler(request: FastifyRequest, reply: FastifyReply) {

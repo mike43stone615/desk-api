@@ -46,6 +46,8 @@ export const CALLER_RULES: Record<string, { ip: Limit; email?: Limit }> = {
 /** "METHOD /pattern" (without /v1) -> limit per signed-in account. */
 export const USER_RULES: Record<string, Limit> = {
   'POST /gateway/api-keys': perHour('key-create', 10, 'API keys created'),
+  'POST /gateway/api-keys/:id/services': perHour('key-service-add', 20, 'APIs added to keys'),
+  'DELETE /gateway/api-keys/:id/services/:service': perHour('key-service-remove', 20, 'APIs removed from keys'),
   'DELETE /gateway/api-keys/:id': perHour('key-revoke', 30, 'API keys revoked'),
   'POST /setup/businesses/:id/members': perHour('invite', 20, 'invitations sent'),
   'POST /setup/drafts': perHour('draft-create', 30, 'drafts created'),
