@@ -104,3 +104,7 @@ registry-api, market-validation-api, compliance-os and desk-oracle now deploy th
 - desk-oracle's `data\source-snapshots` now lives in its live folder and survives deploys (before, every deploy wiped it).
 - For a few seconds during a reload two copies run, so a scheduled job that starts at that instant can run twice. Jobs that must not run twice should take a lock.
 - Boot recovery and the uptime watch's recovery still just start the service's deploy workflow; it starts the supervisor when none is running.
+
+## compliance-os is retired (20 September 2026)
+
+The compliance data and its read API now live in **desk-oracle** (`src/compliance-compat/`, the `compliance` schema of the Desk Oracle database, an exact copy of the old database as of 16 September). desk-oracle's worker answers on port 3000 as compliance-os did, so desk-api and market-validation-api are unchanged. It was compared with the running compliance-os on 84 requests before the switch (78 identical; the rest intended differences). The `compliance-os` check in the uptime watch now checks that port. compliance-os's own service, deploy and scheduled workflows are stopped/disabled and it is no longer in boot recovery (its deploy would take port 3000 from desk-oracle). Its database `compliance_os` is kept as an archive and is still backed up. Not carried over: the old importers, review workflow and scheduled source monitoring.

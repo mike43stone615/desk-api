@@ -50,7 +50,7 @@
     },
     {
       "name": "compliance-os",
-      "what": "compliance-os on this machine",
+      "what": "the compliance data API (retired compliance-os; now served by desk-oracle on port 3000)",
       "url": "http://localhost:3000/health",
       "timeoutSec": 5,
       "expectStatus": 200
