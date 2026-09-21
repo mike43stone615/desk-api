@@ -27,9 +27,11 @@ team; roles are owner, admin, developer and viewer; a team is its own table, not
 `GET /teams/invites`, `POST /teams/invites/:membershipId/accept`, `DELETE /teams/invites/:membershipId`; and `teamId` on
 `POST /gateway/api-keys`, `?teamId=` on `GET /gateway/api-keys`.
 
-## Not built yet
+## Invitation e-mails
 
-An e-mail to the person invited (they see the invitation on the Teams page, or in `GET /teams/invites`).
+The person invited is e-mailed (they see the invitation on the Teams page, or in `GET /teams/invites`). An address with no account is
+kept in `team_email_invites` for 30 days and e-mailed a link to sign up; when that address is confirmed the invitation becomes a
+pending membership. The answer to the inviter is the same either way, and the same pending invitation is not e-mailed twice in a day.
 
 ## Screens
 

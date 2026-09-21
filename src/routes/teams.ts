@@ -4,6 +4,8 @@ import type { FastifyReply, FastifyRequest } from 'fastify';
 import { HttpError, validationError } from '../middleware/http-error';
 import { requireAuth, requireConfirmedEmail } from '../middleware/auth';
 import { pool } from '../db';
+import { config } from '../config';
+import { sendTeamInviteEmail, sendTeamInviteSignupEmail } from '../infrastructure/email/resend';
 import { recordSecurityEvent } from '../modules/audit/security-events';
 import { gatewayApiKeys } from '../domain/gateway/keys';
 import { emitWebhookEvent } from '../domain/webhooks/webhooks';
@@ -53,7 +55,7 @@ export async function getTeamHandler(request: FastifyRequest, reply: FastifyRepl
   }
 }
 
-/** Invites an existing account. The answer is the same whether or not the address has an account. */
+/** Invites an address (an account gets a pending invitation, any other address one kept until it signs up) and e-mails it. The answer is the same either way. */
 export async function inviteTeamMemberHandler(request: FastifyRequest, reply: FastifyReply) {
   await requireAuth(request, reply);
   await requireConfirmedEmail(request, reply);
@@ -62,9 +64,13 @@ export async function inviteTeamMemberHandler(request: FastifyRequest, reply: Fa
   if (!parsed.success) throw validationError(parsed.error);
   const user = request.currentUser!;
   try {
-    await teams.invite(id, user.id, parsed.data.email, parsed.data.role);
+    const outcome = await teams.invite(id, user.id, parsed.data.email, parsed.data.role);
+    // Best-effort: sendEmail logs its own failures and never throws, so a mail outage cannot block the invitation.
+    const to = parsed.data.email.trim().toLowerCase();
+    if (outcome.notify === 'existing') await sendTeamInviteEmail(config, to, outcome.teamName, user.email, request.id);
+    else if (outcome.notify === 'signup') await sendTeamInviteSignupEmail(config, to, outcome.teamName, user.email, request.id);
     audit(request, 'team_member_invited', { userId: user.id, teamId: id, role: parsed.data.role });
-    return reply.status(202).send({ ok: true, message: 'If that address has a Desk account, it now has an invitation to accept.' });
+    return reply.status(202).send({ ok: true, message: 'The invitation is on its way: the address is e-mailed and can accept once it has a Desk account.' });
   } catch (err) {
     return teamFailure(err);
   }

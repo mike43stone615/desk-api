@@ -472,6 +472,9 @@ export function createFakeDb() {
       for (const [id, i] of emailInvites) if (String(i.invited_at) <= p[0]) emailInvites.delete(id);
       return { rows: [], rowCount: 1 };
     }
+    // Team invitations to addresses without an account: nothing is kept in these tests (the real-database tests cover them).
+    if (s.startsWith('SELECT team_id, role, invited_by_user_id, invited_at FROM team_email_invites WHERE email = $1')) return { rows: [], rowCount: 0 };
+    if (s.startsWith('DELETE FROM team_email_invites WHERE email = $1') || s.startsWith('DELETE FROM team_email_invites WHERE invited_at <= $1')) return { rows: [], rowCount: 0 };
     if (s.startsWith('INSERT INTO business_memberships') && s.includes('DO NOTHING')) {
       const [id, business_id, user_id, role, invited_by_user_id, invited_at, now] = p;
       if (![...memberships.values()].some((m) => m.business_id === business_id && m.user_id === user_id)) {

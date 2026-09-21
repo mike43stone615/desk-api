@@ -140,6 +140,49 @@ export async function sendBusinessInviteSignupEmail(
   });
 }
 
+/** An existing account was invited to a team: says who and where to accept. */
+export async function sendTeamInviteEmail(config: AppConfig, to: string, teamName: string, inviterEmail: string, requestId: string): Promise<void> {
+  await sendEmail(config, {
+    to,
+    subject: `You've been invited to the team ${teamName} on Desk`,
+    html: themedEmailHtml({
+      title: `You've been invited to ${teamName}`,
+      body: `${inviterEmail} invited you to the team ${teamName} in the Desk API Library. Sign in and open Teams to accept or decline.`,
+      actionLabel: 'Open your invitations',
+      actionUrl: `${libraryBase()}/developer/teams`,
+      note: 'If you were not expecting this, you can decline it once signed in, or ignore this email: nothing happens until you accept.',
+    }),
+    requestId,
+    skippedEvent: 'team_invite_email_skipped',
+    failedEvent: 'team_invite_email_failed',
+    sentEvent: 'team_invite_email_sent',
+  });
+}
+
+/** For an address with no Desk account yet: says who invited them to which team and how to join. */
+export async function sendTeamInviteSignupEmail(config: AppConfig, to: string, teamName: string, inviterEmail: string, requestId: string): Promise<void> {
+  await sendEmail(config, {
+    to,
+    subject: `You've been invited to the team ${teamName} on Desk`,
+    html: themedEmailHtml({
+      title: `You've been invited to ${teamName}`,
+      body: `${inviterEmail} invited you to the team ${teamName} in the Desk API Library. Create an account with this email address and confirm it, then open Teams to accept or decline.`,
+      actionLabel: 'Create your account',
+      actionUrl: `${libraryBase()}/login`,
+      note: 'If you were not expecting this, you can ignore this email: nothing happens unless you sign up with this address. The invitation expires after 30 days.',
+    }),
+    requestId,
+    skippedEvent: 'team_invite_email_skipped',
+    failedEvent: 'team_invite_email_failed',
+    sentEvent: 'team_invite_email_sent',
+  });
+}
+
+/** The API Library's own address (team invitations are answered there, not in the Desk app). */
+function libraryBase(): string {
+  return (process.env.API_PUBLIC_URL || 'https://api.deskbusiness.co').replace(/\/+$/, '');
+}
+
 export async function sendAccountAlreadyExistsEmail(
   config: AppConfig,
   to: string,

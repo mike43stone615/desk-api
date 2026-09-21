@@ -334,7 +334,7 @@ registerRoute('/developer/teams', async (app) => {
       ${roles.length ? `
         <div class="card" style="margin:var(--sp-lg) 0;">
           <h3 class="biz-section-title">Invite someone</h3>
-          <p class="biz-sub" style="margin-bottom:var(--sp-md);">They need a Desk account with this e-mail address. They see the invitation on this page after signing in.</p>
+          <p class="biz-sub" style="margin-bottom:var(--sp-md);">We e-mail them. If they have no Desk account yet, the invitation waits 30 days for them to sign up with this address; either way they accept it on this page.</p>
           <form id="invite-form" novalidate>
             <div class="field-float has-icon">
               <span class="field-icon">${icon('mail_outline')}</span>

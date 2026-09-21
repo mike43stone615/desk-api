@@ -13,6 +13,11 @@ export type TeamRole = (typeof TEAM_ROLES)[number];
 export const MAX_TEAMS_CREATED_PER_USER = 5;
 export const MAX_KEYS_PER_TEAM = 25;
 export const MAX_MEMBERS_PER_TEAM = 50;
+/** Bounds how many not-yet-registered people one team can have waiting. */
+export const MAX_EMAIL_INVITES_PER_TEAM = 50;
+
+/** What the route should do after an invitation: e-mail an existing account, e-mail an address to sign up, or nothing. */
+export interface TeamInviteOutcome { teamName: string; notify: 'existing' | 'signup' | null }
 
 export type TeamErrorCode =
   | 'not_found'
@@ -150,23 +155,49 @@ export const teams = {
   },
 
   /**
-   * Invites an existing account by e-mail. The answer is the same whether or not the address has an account (nothing
-   * says who is registered); only an account that exists gets a pending membership. An admin may invite developers and
+   * Invites an address. The answer is the same whether or not it has an account (nothing says who is registered); an account
+   * gets a pending membership, any other address a kept invitation that becomes one when it signs up. An admin may invite developers and
    * viewers; only an owner may invite admins or owners.
    */
-  async invite(teamId: string, inviterId: string, email: string, role: TeamRole): Promise<void> {
+  async invite(teamId: string, inviterId: string, email: string, role: TeamRole): Promise<TeamInviteOutcome> {
     const mine = await requireRole(teamId, inviterId, 'admin');
     if ((role === 'owner' || role === 'admin') && mine !== 'owner') throw new TeamError('forbidden', 'Only an owner can invite an admin or another owner.');
     const { rows: c } = await pool.query<{ n: string }>(`SELECT COUNT(*) AS n FROM team_members WHERE team_id = $1`, [teamId]);
     if (Number(c[0]?.n ?? 0) >= MAX_MEMBERS_PER_TEAM) throw new TeamError('limit_reached', `A team can have at most ${MAX_MEMBERS_PER_TEAM} members.`);
-    const { rows: u } = await pool.query<{ id: string }>(`SELECT id FROM users WHERE lower(email) = lower($1)`, [email.trim()]);
+    const { rows: t } = await pool.query<{ name: string }>(`SELECT name FROM teams WHERE id = $1`, [teamId]);
+    const teamName = t[0]?.name ?? 'a team';
+    const address = email.trim().toLowerCase();
+    const now = new Date().toISOString();
+    const repeatCutoff = new Date(Date.now() - 24 * 3_600_000).toISOString();
+    const { rows: u } = await pool.query<{ id: string }>(`SELECT id FROM users WHERE lower(email) = lower($1)`, [address]);
     const target = u[0]?.id;
-    if (!target) return; // same answer as for a real account
-    await pool.query(
-      `INSERT INTO team_members (id, team_id, user_id, role, invited_by_user_id) VALUES ($1, $2, $3, $4, $5)
-       ON CONFLICT (team_id, user_id) DO NOTHING`,
-      [randomUUID(), teamId, target, role, inviterId],
+    if (target) {
+      // A new invitation, or a pending one older than a day (so it can be sent again). An accepted member, or the same pending
+      // invitation made in the last day, changes nothing and sends no second e-mail.
+      const { rows } = await pool.query(
+        `INSERT INTO team_members (id, team_id, user_id, role, invited_by_user_id, created_at) VALUES ($1, $2, $3, $4, $5, $6)
+         ON CONFLICT (team_id, user_id) DO UPDATE SET role = excluded.role, invited_by_user_id = excluded.invited_by_user_id, created_at = excluded.created_at
+           WHERE team_members.accepted_at IS NULL AND team_members.created_at < $7
+         RETURNING id`,
+        [randomUUID(), teamId, target, role, inviterId, now, repeatCutoff],
+      );
+      return { teamName, notify: rows[0] ? 'existing' : null };
+    }
+    // No account: keep the invitation until this address is confirmed by someone who signs up with it (see claimEmailInvites).
+    const { rows: waiting } = await pool.query<{ n: string }>(`SELECT COUNT(*) AS n FROM team_email_invites WHERE team_id = $1`, [teamId]);
+    const { rows } = await pool.query(
+      `INSERT INTO team_email_invites (id, team_id, email, role, invited_by_user_id, invited_at) VALUES ($1, $2, $3, $4, $5, $6)
+       ON CONFLICT (team_id, email) DO UPDATE SET role = excluded.role, invited_by_user_id = excluded.invited_by_user_id, invited_at = excluded.invited_at
+         WHERE team_email_invites.invited_at < $7
+       RETURNING id`,
+      [randomUUID(), teamId, address, role, inviterId, now, repeatCutoff],
     );
+    if (rows[0] && Number(waiting[0]?.n ?? 0) >= MAX_EMAIL_INVITES_PER_TEAM) {
+      // over the bound for people waiting to sign up: undo this one quietly (same answer as any other invitation)
+      await pool.query(`DELETE FROM team_email_invites WHERE id = $1`, [rows[0].id]);
+      return { teamName, notify: null };
+    }
+    return { teamName, notify: rows[0] ? 'signup' : null };
   },
 
   /** Invitations waiting for the person. */

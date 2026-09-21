@@ -3,6 +3,12 @@
 What changed in the Desk API, newest first. Breaking changes are never made inside `v1` (see docs/API-VERSIONING.md);
 everything below is additive unless it says "safer".
 
+## 2026-09-21: team invitation e-mails
+
+- Inviting someone to a team now e-mails them. An address with no Desk account is kept for 30 days and e-mailed a link to sign up; once
+  that address is confirmed the invitation appears as a pending team invitation. The answer to the inviter is unchanged (identical either
+  way), and the same invitation is not e-mailed twice within a day.
+
 ## 2026-09-21: platform features
 
 - **Sandbox keys** (`sandbox: true`): fixed sample answers, no backend, nothing metered or billed.

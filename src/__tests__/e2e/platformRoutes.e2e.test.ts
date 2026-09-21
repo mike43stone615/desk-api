@@ -16,10 +16,22 @@ vi.mock('../../domain/gateway/broker', async (orig) => {
   };
 });
 
+// The mail provider is not called; what would be sent is recorded.
+const mail = vi.hoisted(() => ({ existing: [] as unknown[][], signup: [] as unknown[][] }));
+vi.mock('../../infrastructure/email/resend', async (orig) => {
+  const real = await orig<typeof import('../../infrastructure/email/resend')>();
+  return {
+    ...real,
+    sendTeamInviteEmail: vi.fn(async (...args: unknown[]) => { mail.existing.push(args); }),
+    sendTeamInviteSignupEmail: vi.fn(async (...args: unknown[]) => { mail.signup.push(args); }),
+  };
+});
+
 import { pool } from '../../db';
 import { buildApp } from '../../app';
 import { config } from '../../config';
 import { assignPlan, BillingError, setInvoiceStatus } from '../../domain/billing/plans';
+import { claimEmailInvites, deleteExpiredEmailInvites } from '../../domain/setup/email-invites';
 import { deleteOldDeliveries, processDueDeliveries, type Sender } from '../../domain/webhooks/webhooks';
 import type { FastifyInstance } from 'fastify';
 
@@ -261,5 +273,60 @@ describe.skipIf(!hasDb)('E2E: status, changelog, billing, GraphQL and webhook re
     expect(await setInvoiceStatus(invoiceId, 'paid')).toBe(true);
     expect((await pool.query('SELECT status FROM invoices WHERE id = $1', [invoiceId])).rows[0].status).toBe('paid');
     await pool.query('DELETE FROM invoices WHERE subject_id = $1', [u.id]);
+  });
+
+  it('team invitations are e-mailed: an account gets an invitation and a mail once a day, a new address is kept until it signs up', async () => {
+    mail.existing.length = 0;
+    mail.signup.length = 0;
+    const owner = await mkUser('inv-owner');
+    const dev = await mkUser('inv-dev');
+    const team = (await call('POST', '/v1/teams', owner, { name: 'Invite team' })).json().team;
+
+    // an existing account: a pending membership and one e-mail; the same invitation again sends nothing more
+    const first = await call('POST', `/v1/teams/${team.id}/members`, owner, { email: dev.email.toUpperCase(), role: 'developer' });
+    expect(first.statusCode).toBe(202);
+    expect(mail.existing).toHaveLength(1);
+    expect(mail.existing[0].slice(1, 4)).toEqual([dev.email, 'Invite team', owner.email]);
+    const again = await call('POST', `/v1/teams/${team.id}/members`, owner, { email: dev.email, role: 'developer' });
+    expect(again.statusCode).toBe(202);
+    expect(again.json()).toEqual(first.json()); // same answer either way
+    expect(mail.existing).toHaveLength(1);
+    // after a day the pending invitation may be sent again
+    await pool.query(`UPDATE team_members SET created_at = $2 WHERE team_id = $1 AND user_id = $3`, [team.id, new Date(Date.now() - 2 * 86_400_000).toISOString(), dev.id]);
+    await call('POST', `/v1/teams/${team.id}/members`, owner, { email: dev.email, role: 'viewer' });
+    expect(mail.existing).toHaveLength(2);
+    expect((await pool.query('SELECT role FROM team_members WHERE team_id = $1 AND user_id = $2', [team.id, dev.id])).rows[0].role).toBe('viewer');
+    // an accepted member is not e-mailed again
+    await pool.query(`UPDATE team_members SET accepted_at = now()::text, created_at = $3 WHERE team_id = $1 AND user_id = $2`, [team.id, dev.id, new Date(Date.now() - 2 * 86_400_000).toISOString()]);
+    await call('POST', `/v1/teams/${team.id}/members`, owner, { email: dev.email, role: 'viewer' });
+    expect(mail.existing).toHaveLength(2);
+
+    // an address with no account: kept, one sign-up mail, no second mail inside a day, same answer
+    const stranger = `newcomer-${rid()}@example.com`;
+    const s1 = await call('POST', `/v1/teams/${team.id}/members`, owner, { email: stranger, role: 'developer' });
+    expect(s1.json()).toEqual(first.json());
+    expect(mail.signup).toHaveLength(1);
+    expect(mail.signup[0].slice(1, 4)).toEqual([stranger, 'Invite team', owner.email]);
+    await call('POST', `/v1/teams/${team.id}/members`, owner, { email: stranger, role: 'developer' });
+    expect(mail.signup).toHaveLength(1);
+    expect((await pool.query('SELECT COUNT(*)::int n FROM team_email_invites WHERE team_id = $1', [team.id])).rows[0].n).toBe(1);
+
+    // the person signs up and confirms that address: the invitation becomes a pending membership (not yet accepted)
+    const joined = await mkUser('inv-joined', stranger);
+    expect(await claimEmailInvites({ id: joined.id, email: stranger })).toBeGreaterThanOrEqual(1);
+    const row = (await pool.query('SELECT role, accepted_at FROM team_members WHERE team_id = $1 AND user_id = $2', [team.id, joined.id])).rows[0];
+    expect(row).toMatchObject({ role: 'developer', accepted_at: null });
+    expect((await call('GET', '/v1/teams/invites', joined)).json().invites.map((i: { teamId: string }) => i.teamId)).toContain(team.id);
+    expect((await pool.query('SELECT COUNT(*)::int n FROM team_email_invites WHERE team_id = $1', [team.id])).rows[0].n).toBe(0);
+
+    // unclaimed invitations expire after 30 days
+    await call('POST', `/v1/teams/${team.id}/members`, owner, { email: `old-${rid()}@example.com`, role: 'viewer' });
+    await pool.query(`UPDATE team_email_invites SET invited_at = $2 WHERE team_id = $1`, [team.id, new Date(Date.now() - 40 * 86_400_000).toISOString()]);
+    await deleteExpiredEmailInvites();
+    expect((await pool.query('SELECT COUNT(*)::int n FROM team_email_invites WHERE team_id = $1', [team.id])).rows[0].n).toBe(0);
+
+    // only an admin or owner may invite, and only an owner may invite an admin
+    expect((await call('POST', `/v1/teams/${team.id}/members`, dev, { email: `x-${rid()}@example.com`, role: 'viewer' })).statusCode).toBeGreaterThanOrEqual(403);
+    expect(mail.signup).toHaveLength(2); // the newcomer and the one that expired; the refused invitation sent nothing
   });
 });
