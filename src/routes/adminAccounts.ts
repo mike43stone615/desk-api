@@ -106,6 +106,19 @@ export async function adminSetKeyLimitHandler(request: FastifyRequest, reply: Fa
   return reply.send({ ok: true, perMinute: parsed.data.perMinute });
 }
 
+/** Gives a whole team its own per-minute limit (shared by all its keys), or clears it (null) so the standard team limit applies. */
+export async function adminSetTeamLimitHandler(request: FastifyRequest, reply: FastifyReply) {
+  await guard(request, reply);
+  const { id } = request.params as { id: string };
+  const parsed = KeyLimitSchema.safeParse(request.body ?? {});
+  if (!parsed.success) throw validationError(parsed.error);
+  const result = await pool.query(`UPDATE teams SET rate_limit_per_minute = $2 WHERE id = $1`, [id, parsed.data.perMinute]);
+  if ((result.rowCount ?? 0) === 0) throw new HttpError(404, 'No such team.', 'team_not_found');
+  forgetKeyRateFactors();
+  record(request, 'set_team_limit', 'team', id, { perMinute: parsed.data.perMinute });
+  return reply.send({ ok: true, perMinute: parsed.data.perMinute });
+}
+
 export async function adminResumeKeyHandler(request: FastifyRequest, reply: FastifyReply) {
   await guard(request, reply);
   const { id } = request.params as { id: string };

@@ -23,12 +23,14 @@ export const DESK_SCOPES = ['profile', 'drafts', 'businesses'] as const;
 export type DeskScope = (typeof DESK_SCOPES)[number];
 /** Bounds how many real backend keys a single account can cause to be minted. */
 export const MAX_ACTIVE_KEYS_PER_USER = 10;
+export const MAX_ACTIVE_KEYS_PER_TEAM = 25;
 
 export type GatewayKeyErrorCode =
   | 'limit_reached'
   | 'service_unavailable'
   | 'not_found'
-  | 'already_revoked';
+  | 'already_revoked'
+  | 'team_desk_api';
 
 export class GatewayKeyError extends Error {
   constructor(
@@ -55,6 +57,8 @@ export interface GatewayKeySummary {
   deskScopes?: DeskScope[];
   /** A limit set for this key by an administrator (calls a minute), or null for the standard limit. */
   rateLimitPerMinute?: number | null;
+  /** The team the key belongs to, or null for a personal key. A team key shares the team's allowance. */
+  teamId?: string | null;
 }
 
 export interface CreatedGatewayKey extends GatewayKeySummary {
@@ -72,6 +76,8 @@ export interface VerifiedGatewayKey {
   timeProblem?: 'expired' | 'idle';
   deskScopes: ReadonlySet<DeskScope>;
   rateLimitPerMinute: number | null;
+  /** The team the key belongs to (its allowance is the team's), or null. */
+  teamId: string | null;
 }
 
 export function looksLikeGatewayKey(value: unknown): value is string {
@@ -93,6 +99,7 @@ interface KeyRow {
   expires_at?: string | null;
   desk_scopes?: DeskScope[];
   rate_limit_per_minute?: number | null;
+  team_id?: string | null;
 }
 
 /** How often a key's "last used" time is refreshed while it is in use. */
@@ -119,6 +126,7 @@ function toSummary(row: KeyRow, services: GatewayService[]): GatewayKeySummary {
     expiresAt: row.expires_at ?? null,
     deskScopes: row.desk_scopes ?? [...DESK_SCOPES],
     rateLimitPerMinute: row.rate_limit_per_minute ?? null,
+    teamId: row.team_id ?? null,
   };
 }
 
@@ -128,22 +136,28 @@ function orderServices(services: Iterable<GatewayService>): GatewayService[] {
 }
 
 export const gatewayApiKeys = {
-  /** The owner's non-revoked keys, newest first, each with its enabled services. */
-  async list(ownerUserId: string): Promise<GatewayKeySummary[]> {
+  /**
+   * The non-revoked keys, newest first, each with its enabled services. Without a team: the person's own personal keys
+   * (team keys they made belong to the team and are listed under it). With a team id: that team's keys (the caller
+   * has already checked the person may see them).
+   */
+  async list(ownerUserId: string, teamId?: string): Promise<GatewayKeySummary[]> {
+    const scope = teamId ? `k.team_id = $1` : `k.owner_user_id = $1 AND k.team_id IS NULL`;
+    const param = teamId ?? ownerUserId;
     const { rows } = await pool.query<KeyRow>(
-      `SELECT id, label, key_prefix, created_at, last_used_at, expires_at, desk_scopes, rate_limit_per_minute
-       FROM gateway_api_keys
-       WHERE revoked_at IS NULL AND owner_user_id = $1
-       ORDER BY created_at DESC`,
-      [ownerUserId],
+      `SELECT k.id, k.label, k.key_prefix, k.created_at, k.last_used_at, k.expires_at, k.desk_scopes, k.rate_limit_per_minute, k.team_id
+       FROM gateway_api_keys k
+       WHERE k.revoked_at IS NULL AND ${scope}
+       ORDER BY k.created_at DESC`,
+      [param],
     );
     if (rows.length === 0) return [];
     const { rows: grantRows } = await pool.query<{ api_key_id: string; service: GatewayService }>(
       `SELECT g.api_key_id, g.service
        FROM gateway_api_key_grants g
        JOIN gateway_api_keys k ON k.id = g.api_key_id
-       WHERE k.owner_user_id = $1 AND k.revoked_at IS NULL`,
-      [ownerUserId],
+       WHERE ${scope} AND k.revoked_at IS NULL`,
+      [param],
     );
     const byKey = new Map<string, GatewayService[]>();
     for (const g of grantRows) {
@@ -155,12 +169,22 @@ export const gatewayApiKeys = {
     return rows.map((r) => ({ ...toSummary(r, orderServices(byKey.get(r.id) ?? [])), suspended: suspended.has(r.id) }));
   },
 
-  async countActive(ownerUserId: string): Promise<number> {
+  async countActive(ownerUserId: string, teamId?: string): Promise<number> {
     const { rows } = await pool.query<{ count: string }>(
-      `SELECT COUNT(*) AS count FROM gateway_api_keys WHERE revoked_at IS NULL AND owner_user_id = $1`,
-      [ownerUserId],
+      teamId
+        ? `SELECT COUNT(*) AS count FROM gateway_api_keys WHERE revoked_at IS NULL AND team_id = $1`
+        : `SELECT COUNT(*) AS count FROM gateway_api_keys WHERE revoked_at IS NULL AND owner_user_id = $1 AND team_id IS NULL`,
+      [teamId ?? ownerUserId],
     );
     return Number(rows[0]?.count ?? 0);
+  },
+
+  /** The summary of one live key, whether it is personal or a team's (the caller has already checked access). */
+  async summaryOf(keyId: string): Promise<GatewayKeySummary | undefined> {
+    const { rows } = await pool.query<{ owner_user_id: string; team_id: string | null }>(`SELECT owner_user_id, team_id FROM gateway_api_keys WHERE id = $1`, [keyId]);
+    const key = rows[0];
+    if (!key) return undefined;
+    return (await this.list(key.owner_user_id, key.team_id ?? undefined)).find((k) => k.id === keyId);
   },
 
   /**
@@ -168,7 +192,7 @@ export const gatewayApiKeys = {
    * services are minted first; if anything after that fails, whatever was
    * already minted is revoked again so no orphaned live credentials remain.
    */
-  async create(ownerUserId: string, label: string, requested: GatewayService[], expiresInDays?: number, deskScopes: DeskScope[] = [...DESK_SCOPES]): Promise<CreatedGatewayKey> {
+  async create(ownerUserId: string, label: string, requested: GatewayService[], expiresInDays?: number, deskScopes: DeskScope[] = [...DESK_SCOPES], teamId?: string): Promise<CreatedGatewayKey> {
     const services = orderServices(requested);
     if (services.length === 0) throw new GatewayKeyError('service_unavailable', 'Choose at least one API.');
 
@@ -178,7 +202,13 @@ export const gatewayApiKeys = {
         throw new GatewayKeyError('service_unavailable', `${catalog.get(service)?.name ?? service} is not available right now.`);
       }
     }
-    if ((await this.countActive(ownerUserId)) >= MAX_ACTIVE_KEYS_PER_USER) {
+    if (teamId) {
+      // A team key would act as whoever made it on the Desk API, which would hand that person's data to the whole team.
+      if (services.includes('desk_api')) throw new GatewayKeyError('team_desk_api', 'A team key cannot carry the Desk API (it would act as one person). Use a personal key for that.');
+      if ((await this.countActive(ownerUserId, teamId)) >= MAX_ACTIVE_KEYS_PER_TEAM) {
+        throw new GatewayKeyError('limit_reached', `A team can have at most ${MAX_ACTIVE_KEYS_PER_TEAM} active keys. Revoke one first.`);
+      }
+    } else if ((await this.countActive(ownerUserId)) >= MAX_ACTIVE_KEYS_PER_USER) {
       throw new GatewayKeyError('limit_reached', `You can have at most ${MAX_ACTIVE_KEYS_PER_USER} active keys. Revoke one first.`);
     }
 
@@ -214,10 +244,10 @@ export const gatewayApiKeys = {
       try {
         await client.query('BEGIN');
         const inserted = await client.query<KeyRow>(
-          `INSERT INTO gateway_api_keys (id, owner_user_id, label, key_hash, key_prefix, expires_at, desk_scopes)
-           VALUES ($1, $2, $3, $4, $5, $6, $7)
-           RETURNING id, label, key_prefix, created_at, last_used_at, expires_at, desk_scopes, rate_limit_per_minute`,
-          [id, ownerUserId, label, keyHash, keyPrefix, expiresInDays ? new Date(Date.now() + expiresInDays * 86_400_000).toISOString() : null, deskScopes],
+          `INSERT INTO gateway_api_keys (id, owner_user_id, label, key_hash, key_prefix, expires_at, desk_scopes, team_id)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+           RETURNING id, label, key_prefix, created_at, last_used_at, expires_at, desk_scopes, rate_limit_per_minute, team_id`,
+          [id, ownerUserId, label, keyHash, keyPrefix, expiresInDays ? new Date(Date.now() + expiresInDays * 86_400_000).toISOString() : null, deskScopes, teamId ?? null],
         );
         row = inserted.rows[0];
         for (const service of services) {
@@ -290,7 +320,7 @@ export const gatewayApiKeys = {
    */
   async revokeAllForOwner(ownerUserId: string): Promise<number> {
     const { rows } = await pool.query<{ id: string }>(
-      `SELECT id FROM gateway_api_keys WHERE owner_user_id = $1 AND revoked_at IS NULL`,
+      `SELECT id FROM gateway_api_keys WHERE owner_user_id = $1 AND revoked_at IS NULL AND team_id IS NULL`,
       [ownerUserId],
     );
     let revoked = 0;
@@ -313,15 +343,15 @@ export const gatewayApiKeys = {
   async verify(plaintext: string): Promise<VerifiedGatewayKey | null> {
     if (!looksLikeGatewayKey(plaintext)) return null;
     try {
-      const { rows } = await pool.query<{ id: string; owner_user_id: string; revoked_at: string | null; created_at: string; last_used_at: string | null; desk_scopes: DeskScope[]; rate_limit_per_minute: number | null; expires_at: string | null }>(
-        `SELECT id, owner_user_id, revoked_at, created_at, last_used_at, expires_at, desk_scopes, rate_limit_per_minute FROM gateway_api_keys WHERE key_hash = $1`,
+      const { rows } = await pool.query<{ id: string; owner_user_id: string; revoked_at: string | null; created_at: string; last_used_at: string | null; desk_scopes: DeskScope[]; rate_limit_per_minute: number | null; expires_at: string | null; team_id: string | null }>(
+        `SELECT id, owner_user_id, revoked_at, created_at, last_used_at, expires_at, desk_scopes, rate_limit_per_minute, team_id FROM gateway_api_keys WHERE key_hash = $1`,
         [hashGatewayKey(plaintext)],
       );
       const key = rows[0];
       if (!key || key.revoked_at) return null;
       // An expired or idle key is refused with its own reason (see verifyOrExplain in the routes).
       const timeProblem = keyTimeProblem(key);
-      if (timeProblem) return { id: key.id, ownerUserId: key.owner_user_id, services: new Set(), suspended: false, timeProblem, deskScopes: new Set(key.desk_scopes ?? DESK_SCOPES), rateLimitPerMinute: key.rate_limit_per_minute ?? null };
+      if (timeProblem) return { id: key.id, ownerUserId: key.owner_user_id, services: new Set(), suspended: false, timeProblem, deskScopes: new Set(key.desk_scopes ?? DESK_SCOPES), rateLimitPerMinute: key.rate_limit_per_minute ?? null, teamId: key.team_id ?? null };
       const { rows: grants } = await pool.query<{ service: GatewayService }>(
         `SELECT service FROM gateway_api_key_grants WHERE api_key_id = $1`,
         [key.id],
@@ -336,7 +366,7 @@ export const gatewayApiKeys = {
         `SELECT 1 FROM key_suspensions WHERE api_key_id = $1 UNION ALL SELECT 1 FROM account_suspensions WHERE user_id = $2`,
         [key.id, key.owner_user_id],
       );
-      return { id: key.id, ownerUserId: key.owner_user_id, services: new Set(grants.map((g) => g.service)), suspended: off.length > 0, deskScopes: new Set(key.desk_scopes ?? DESK_SCOPES), rateLimitPerMinute: key.rate_limit_per_minute ?? null };
+      return { id: key.id, ownerUserId: key.owner_user_id, services: new Set(grants.map((g) => g.service)), suspended: off.length > 0, deskScopes: new Set(key.desk_scopes ?? DESK_SCOPES), rateLimitPerMinute: key.rate_limit_per_minute ?? null, teamId: key.team_id ?? null };
     } catch {
       return null;
     }
@@ -347,12 +377,13 @@ export const gatewayApiKeys = {
    * everything already using it, is untouched.
    */
   async addService(ownerUserId: string, keyId: string, service: GatewayService): Promise<GatewayKeySummary> {
-    const { rows } = await pool.query<{ id: string; revoked_at: string | null }>(
-      `SELECT id, revoked_at FROM gateway_api_keys WHERE id = $1 AND owner_user_id = $2`,
+    const { rows } = await pool.query<{ id: string; revoked_at: string | null; team_id: string | null }>(
+      `SELECT id, revoked_at, team_id FROM gateway_api_keys WHERE id = $1 AND owner_user_id = $2`,
       [keyId, ownerUserId],
     );
     if (!rows[0]) throw new GatewayKeyError('not_found', 'API key not found.');
     if (rows[0].revoked_at) throw new GatewayKeyError('already_revoked', 'This API key has been revoked.');
+    if (rows[0].team_id && service === 'desk_api') throw new GatewayKeyError('team_desk_api', 'A team key cannot carry the Desk API (it would act as one person). Use a personal key for that.');
     const catalog = new Map(getServiceCatalog().map((e) => [e.service, e]));
     if (!catalog.get(service)?.available) throw new GatewayKeyError('service_unavailable', `${catalog.get(service)?.name ?? service} is not available right now.`);
     const existing = await pool.query<{ service: GatewayService }>(`SELECT service FROM gateway_api_key_grants WHERE api_key_id = $1`, [keyId]);
@@ -376,7 +407,7 @@ export const gatewayApiKeys = {
         throw err;
       }
     }
-    return (await this.list(ownerUserId)).find((k) => k.id === keyId)!;
+    return (await this.summaryOf(keyId))!;
   },
 
   /** Removes an API from a key the caller owns. At least one API must stay; the backend key of a brokered API is revoked. */
@@ -388,7 +419,7 @@ export const gatewayApiKeys = {
     if (!rows[0]) throw new GatewayKeyError('not_found', 'API key not found.');
     if (rows[0].revoked_at) throw new GatewayKeyError('already_revoked', 'This API key has been revoked.');
     const existing = await pool.query<{ service: GatewayService }>(`SELECT service FROM gateway_api_key_grants WHERE api_key_id = $1`, [keyId]);
-    if (!existing.rows.some((g) => g.service === service)) return (await this.list(ownerUserId)).find((k) => k.id === keyId)!;
+    if (!existing.rows.some((g) => g.service === service)) return (await this.summaryOf(keyId))!;
     if (existing.rows.length <= 1) throw new GatewayKeyError('limit_reached', 'A key needs at least one API. Revoke the key instead.');
     const removed = await pool.query<{ backend_key_id: string | null }>(
       `DELETE FROM gateway_api_key_grants WHERE api_key_id = $1 AND service = $2 RETURNING backend_key_id`,
@@ -396,7 +427,7 @@ export const gatewayApiKeys = {
     );
     const backendKeyId = removed.rows[0]?.backend_key_id;
     if (backendKeyId && isBrokeredService(service)) await revokeBrokerKey(service, backendKeyId).catch(() => {});
-    return (await this.list(ownerUserId)).find((k) => k.id === keyId)!;
+    return (await this.summaryOf(keyId))!;
   },
 
   /** The decrypted real backend key for a brokered grant, or null. */
@@ -419,30 +450,48 @@ export const gatewayApiKeys = {
 };
 
 // ── per-key limit ─────────────────────────────────────────────────────────────────────────────────────────────────
-const factorCache = new Map<string, { factor: number | null; at: number }>();
+const factorCache = new Map<string, { info: KeyBucketInfo; at: number }>();
 const FACTOR_TTL_MS = 60_000;
 
+export interface KeyBucketInfo {
+  /** The share of an address's allowance the bucket gets; null for the standard share. */
+  factor: number | null;
+  /** Set for a team key: every key of the team draws on one bucket named by this id. */
+  teamId: string | null;
+}
+
 /**
- * The share of an address's allowance this key gets, when an administrator gave it its own limit; null for the
- * standard limit. The limiter runs before the key is verified, so this looks the key up by its hash (kept for a
+ * Which allowance a presented key draws on. A personal key has its own bucket, with the administrator's limit for it when
+ * one was set. A team key draws on its TEAM's bucket, shared with every other key of the team, with the team's limit when
+ * an administrator set one. The limiter runs before the key is verified, so this looks the key up by its hash (kept for a
  * minute in memory, so a busy key costs one lookup a minute).
  */
-export async function keyRateFactor(plaintext: string, perMinuteOfAnAddress: number): Promise<number | null> {
+export async function keyBucketInfo(plaintext: string, perMinuteOfAnAddress: number): Promise<KeyBucketInfo> {
   const hash = hashGatewayKey(plaintext);
   const hit = factorCache.get(hash);
   const now = Date.now();
-  if (hit && now - hit.at < FACTOR_TTL_MS) return hit.factor;
-  let factor: number | null;
+  if (hit && now - hit.at < FACTOR_TTL_MS) return hit.info;
+  let info: KeyBucketInfo;
   try {
-    const { rows } = await pool.query<{ rate_limit_per_minute: number | null }>(`SELECT rate_limit_per_minute FROM gateway_api_keys WHERE key_hash = $1`, [hash]);
-    const custom = rows[0]?.rate_limit_per_minute;
-    factor = custom ? custom / perMinuteOfAnAddress : null;
+    const { rows } = await pool.query<{ rate_limit_per_minute: number | null; team_id: string | null; team_limit: number | null }>(
+      `SELECT k.rate_limit_per_minute, k.team_id, t.rate_limit_per_minute AS team_limit
+         FROM gateway_api_keys k LEFT JOIN teams t ON t.id = k.team_id WHERE k.key_hash = $1`,
+      [hash],
+    );
+    const r = rows[0];
+    if (r?.team_id) info = { teamId: r.team_id, factor: r.team_limit ? r.team_limit / perMinuteOfAnAddress : null };
+    else info = { teamId: null, factor: r?.rate_limit_per_minute ? r.rate_limit_per_minute / perMinuteOfAnAddress : null };
   } catch {
-    factor = null;
+    info = { factor: null, teamId: null };
   }
   if (factorCache.size > 5000) factorCache.clear();
-  factorCache.set(hash, { factor, at: now });
-  return factor;
+  factorCache.set(hash, { info, at: now });
+  return info;
+}
+
+/** The share of an address's allowance a personal key gets when an administrator gave it its own limit; else null. */
+export async function keyRateFactor(plaintext: string, perMinuteOfAnAddress: number): Promise<number | null> {
+  return (await keyBucketInfo(plaintext, perMinuteOfAnAddress)).factor;
 }
 
 /** For tests and for when an administrator changes a limit. */

@@ -11,10 +11,12 @@ import { HttpError, validationError } from '../middleware/http-error';
 import { sendWithEtag } from '../middleware/etag';
 import { requireAuth, requireConfirmedEmail } from '../middleware/auth';
 import { gatewayApiKeys, GatewayKeyError } from '../domain/gateway/keys';
+import { keyManagerOwner, keyViewerOwner, teams as teamsDomain, TeamError } from '../domain/teams/teams';
+import { pool } from '../db';
 import { resumeKey, suspendKey } from '../domain/suspension';
 import { IDLE_DAYS, keyUsage, limitsFor } from '../domain/gateway/usage';
 import { config } from '../config';
-import { KEY_BUCKET_FACTOR } from '../middleware/api-protection';
+import { KEY_BUCKET_FACTOR, TEAM_BUCKET_FACTOR } from '../middleware/api-protection';
 import { BrokerError } from '../domain/gateway/broker';
 import { getServiceCatalog } from '../domain/gateway/services';
 import { AddKeyServiceSchema, CreateGatewayKeySchema } from '../validators/gateway';
@@ -38,8 +40,19 @@ export async function listGatewayServicesHandler(request: FastifyRequest, reply:
 
 export async function listGatewayKeysHandler(request: FastifyRequest, reply: FastifyReply) {
   await requireAuth(request, reply);
-  const keys = await gatewayApiKeys.list(request.currentUser!.id);
-  return reply.send({ apiKeys: keys });
+  const user = request.currentUser!;
+  const { teamId } = request.query as { teamId?: string };
+  if (teamId) {
+    // A team's keys are visible to every accepted member (a viewer sees them and their usage, never a secret).
+    try {
+      await teamsDomain.requireMember(teamId, user.id, 'viewer');
+    } catch (err) {
+      if (err instanceof TeamError) throw new HttpError(err.code === 'not_found' ? 404 : 403, err.message, `team_${err.code}`);
+      throw err;
+    }
+    return reply.send({ apiKeys: await gatewayApiKeys.list(user.id, teamId) });
+  }
+  return reply.send({ apiKeys: await gatewayApiKeys.list(user.id) });
 }
 
 export async function createGatewayKeyHandler(request: FastifyRequest, reply: FastifyReply) {
@@ -50,18 +63,22 @@ export async function createGatewayKeyHandler(request: FastifyRequest, reply: Fa
   const user = request.currentUser!;
 
   try {
-    const created = await gatewayApiKeys.create(user.id, parsed.data.label, parsed.data.services, parsed.data.expiresInDays, [...new Set(parsed.data.deskScopes)]);
+    // A team key needs the developer role or higher in that team.
+    if (parsed.data.teamId) await teamsDomain.requireMember(parsed.data.teamId, user.id, 'developer');
+    const created = await gatewayApiKeys.create(user.id, parsed.data.label, parsed.data.services, parsed.data.expiresInDays, [...new Set(parsed.data.deskScopes)], parsed.data.teamId);
     auditKey(request, 'gateway_key_created', {
       userId: user.id,
       keyId: created.id,
       services: created.services.join(','),
       deskScopes: (created.deskScopes ?? []).join(','),
+      teamId: created.teamId ?? '',
     });
     notifySecurityEvent(request, user.email, 'api_key_created', parsed.data.label);
     return reply.status(201).send({ apiKey: created });
   } catch (err) {
+    if (err instanceof TeamError) throw new HttpError(err.code === 'not_found' ? 404 : 403, err.message, `team_${err.code}`);
     if (err instanceof GatewayKeyError) {
-      throw new HttpError(err.code === 'limit_reached' ? 409 : 503, err.message, `api_key_${err.code}`);
+      throw new HttpError(err.code === 'limit_reached' ? 409 : err.code === 'team_desk_api' ? 400 : 503, err.message, `api_key_${err.code}`);
     }
     if (err instanceof BrokerError) {
       request.log.error({ err }, 'gateway key provisioning failed');
@@ -73,7 +90,7 @@ export async function createGatewayKeyHandler(request: FastifyRequest, reply: Fa
 
 function keyServiceError(err: unknown): never {
   if (err instanceof GatewayKeyError) {
-    const status = err.code === 'not_found' ? 404 : err.code === 'service_unavailable' ? 503 : 409;
+    const status = err.code === 'not_found' ? 404 : err.code === 'service_unavailable' ? 503 : err.code === 'team_desk_api' ? 400 : 409;
     throw new HttpError(status, err.message, `api_key_${err.code}`);
   }
   if (err instanceof BrokerError) throw new HttpError(502, 'Could not set up access to that API. Nothing was changed; please try again.', 'upstream_provisioning_failed');
@@ -89,7 +106,9 @@ export async function addKeyServiceHandler(request: FastifyRequest, reply: Fasti
   if (!parsed.success) throw validationError(parsed.error);
   const user = request.currentUser!;
   try {
-    const key = await gatewayApiKeys.addService(user.id, id, parsed.data.service);
+    const owner = await keyManagerOwner(user.id, id);
+    if (!owner) throw new GatewayKeyError('not_found', 'API key not found.');
+    const key = await gatewayApiKeys.addService(owner, id, parsed.data.service);
     auditKey(request, 'gateway_key_service_added', { userId: user.id, keyId: id, service: parsed.data.service });
     return reply.send({ apiKey: key });
   } catch (err) {
@@ -104,12 +123,21 @@ export async function removeKeyServiceHandler(request: FastifyRequest, reply: Fa
   if (!(GATEWAY_SERVICES as readonly string[]).includes(service)) throw new HttpError(404, 'No such API.', 'not_found');
   const user = request.currentUser!;
   try {
-    const key = await gatewayApiKeys.removeService(user.id, id, service as GatewayService);
+    const owner = await keyManagerOwner(user.id, id);
+    if (!owner) throw new GatewayKeyError('not_found', 'API key not found.');
+    const key = await gatewayApiKeys.removeService(owner, id, service as GatewayService);
     auditKey(request, 'gateway_key_service_removed', { userId: user.id, keyId: id, service });
     return reply.send({ apiKey: key });
   } catch (err) {
     return keyServiceError(err);
   }
+}
+
+/** The calls a minute a key may make: a personal key gets half an address's worth; a team key draws on its team's shared allowance. */
+async function effectivePerMinute(teamId: string | null): Promise<number> {
+  if (!teamId) return Math.ceil(config.rateLimitPerMinute * KEY_BUCKET_FACTOR);
+  const { rows } = await pool.query<{ rate_limit_per_minute: number | null }>(`SELECT rate_limit_per_minute FROM teams WHERE id = $1`, [teamId]);
+  return rows[0]?.rate_limit_per_minute ?? Math.ceil(config.rateLimitPerMinute * TEAM_BUCKET_FACTOR);
 }
 
 /** How much one of the caller's own keys has been used (calls and errors per day), and the limits that apply to it. */
@@ -118,7 +146,8 @@ export async function keyUsageHandler(request: FastifyRequest, reply: FastifyRep
   const { id } = request.params as { id: string };
   const q = request.query as { days?: string };
   const days = Math.min(90, Math.max(1, Number.parseInt(q.days ?? '30', 10) || 30));
-  const mine = (await gatewayApiKeys.list(request.currentUser!.id)).find((k) => k.id === id);
+  const viewerOwner = await keyViewerOwner(request.currentUser!.id, id);
+  const mine = viewerOwner ? await gatewayApiKeys.summaryOf(id) : undefined;
   if (!mine) throw new HttpError(404, 'That key does not exist, is not yours, or was revoked.', 'api_key_not_found');
   const daily = await keyUsage(id, days);
   return reply.send({
@@ -129,7 +158,8 @@ export async function keyUsageHandler(request: FastifyRequest, reply: FastifyRep
     idleExpiryDays: IDLE_DAYS,
     totals: { calls: daily.reduce((n, d) => n + d.calls, 0), errors: daily.reduce((n, d) => n + d.errors, 0) },
     daily,
-    limits: limitsFor(Math.ceil(config.rateLimitPerMinute * KEY_BUCKET_FACTOR)),
+    limits: limitsFor(await effectivePerMinute(mine.teamId ?? null)),
+    ...(mine.teamId ? { teamId: mine.teamId, sharedWithTeam: true } : {}),
   });
 }
 
@@ -138,7 +168,8 @@ export async function suspendGatewayKeyHandler(request: FastifyRequest, reply: F
   await requireAuth(request, reply);
   const { id } = request.params as { id: string };
   const user = request.currentUser!;
-  if (!(await suspendKey(id, user.id, 'suspended by its owner', user.email))) throw new HttpError(404, 'That key does not exist, is not yours, or was revoked.', 'api_key_not_found');
+  const owner = await keyManagerOwner(user.id, id);
+  if (!owner || !(await suspendKey(id, owner, 'suspended by its owner', user.email))) throw new HttpError(404, 'That key does not exist, is not yours, or was revoked.', 'api_key_not_found');
   auditKey(request, 'gateway_key_suspended', { userId: user.id, keyId: id });
   return reply.send({ ok: true, suspended: true });
 }
@@ -147,7 +178,8 @@ export async function resumeGatewayKeyHandler(request: FastifyRequest, reply: Fa
   await requireAuth(request, reply);
   const { id } = request.params as { id: string };
   const user = request.currentUser!;
-  if (!(await resumeKey(id, user.id))) throw new HttpError(404, 'That key is not suspended, or is not yours.', 'api_key_not_found');
+  const owner = await keyManagerOwner(user.id, id);
+  if (!owner || !(await resumeKey(id, owner))) throw new HttpError(404, 'That key is not suspended, or is not yours.', 'api_key_not_found');
   auditKey(request, 'gateway_key_resumed', { userId: user.id, keyId: id });
   return reply.send({ ok: true, suspended: false });
 }
@@ -157,7 +189,9 @@ export async function revokeGatewayKeyHandler(request: FastifyRequest, reply: Fa
   const { id } = request.params as { id: string };
   const user = request.currentUser!;
   try {
-    const { upstreamFailures } = await gatewayApiKeys.revoke(user.id, id);
+    const owner = await keyManagerOwner(user.id, id);
+    if (!owner) throw new GatewayKeyError('not_found', 'API key not found.');
+    const { upstreamFailures } = await gatewayApiKeys.revoke(owner, id);
     auditKey(request, 'gateway_key_revoked', { userId: user.id, keyId: id });
     if (upstreamFailures.length > 0) {
       request.log.warn(

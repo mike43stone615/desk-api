@@ -7,6 +7,9 @@ everything below is additive unless it says "safer".
 
 - **Requests:** a body over the size limit now gets a clean `413` (through Cloudflare it used to surface as a 502); a text
   value containing the NUL character (U+0000) is a `400` with code `invalid_characters` (it used to be a 500).
+- **Teams:** people can share API keys and one allowance (`/teams`, `teamId` on key creation). Roles owner, admin, developer,
+  viewer; limits and the daily analysis cap are shared by all of a team's keys; a team key carries the Registry and Market APIs
+  only. Migration 0021.
 - **Housekeeping:** expired idempotency records are deleted daily (they were only cleared when the same key was reused).
 - **Checked live, no change needed:** odd and encoded paths, long URLs and headers, HEAD/OPTIONS, CORS look-alikes, unknown
   and privileged fields in bodies, type mix-ups, duplicate keys, prototype-pollution keys, huge numbers, timestamp format,

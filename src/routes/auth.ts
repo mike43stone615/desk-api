@@ -6,6 +6,7 @@
 // enumeration-safety behavior (reset/confirmation-request endpoints always
 // return {ok:true} regardless of account existence) are unchanged so the
 // Flutter client (lib/core/api_client.dart) needs no changes.
+import { teams as teamsDomain } from '../domain/teams/teams';
 import type { FastifyReply, FastifyRequest } from 'fastify';
 import type { Session } from '../interfaces/database';
 import { HttpError, validationError } from '../middleware/http-error';
@@ -385,7 +386,7 @@ async function requireCurrentPassword(request: FastifyRequest, reply: FastifyRep
 export async function exportAccountHandler(request: FastifyRequest, reply: FastifyReply) {
   await requireAuth(request, reply);
   const user = request.currentUser!;
-  const [sessions, drafts, businesses, keys, events] = await Promise.all([
+  const [sessions, drafts, businesses, keys, events, teamList] = await Promise.all([
     authService.listSessions(user.id),
     pool.query<{ id: string; draft_json: string; created_at: string; updated_at: string }>(
       `SELECT id, draft_json, created_at, updated_at FROM business_setup_drafts WHERE user_id = $1 ORDER BY updated_at DESC`,
@@ -402,6 +403,7 @@ export async function exportAccountHandler(request: FastifyRequest, reply: Fasti
     ),
     gatewayApiKeys.list(user.id),
     listSecurityEvents(user.id, emailFingerprint(user.email), 1000),
+    teamsDomain.list(user.id),
   ]);
   const day = new Date().toISOString().slice(0, 10);
   reply.header('Content-Disposition', `attachment; filename="desk-data-${day}.json"`);
@@ -414,6 +416,7 @@ export async function exportAccountHandler(request: FastifyRequest, reply: Fasti
     businesses: businesses.rows,
     drafts: drafts.rows.map((d) => ({ id: d.id, createdAt: d.created_at, updatedAt: d.updated_at, draft: safeJson(d.draft_json) })),
     apiKeys: keys,
+    teams: teamList,
     securityEvents: events.map((e) => ({ id: e.id, event: e.event, outcome: e.outcome, at: new Date(e.created_at).toISOString(), ip: e.ip_address, userAgent: e.user_agent })),
   });
 }

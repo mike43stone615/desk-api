@@ -13,7 +13,7 @@ import { getRedis } from './redis-client';
 import { problemBody } from './http-error';
 import { config } from '../config';
 import { rateLimitFallbackTotal } from '../modules/metrics';
-import { GATEWAY_KEY_PREFIX, keyRateFactor } from '../domain/gateway/keys';
+import { GATEWAY_KEY_PREFIX, keyBucketInfo } from '../domain/gateway/keys';
 
 interface RateLimitResult {
   allowed: boolean;
@@ -220,6 +220,8 @@ export function normalizePath(url: string): string {
 /** Same error shape as everywhere else, plus the standard Retry-After header. */
 /** One API key gets half of what one address gets. */
 export const KEY_BUCKET_FACTOR = 0.5;
+/** A team's shared allowance, unless an administrator set one: one whole address's worth, shared by all its keys. */
+export const TEAM_BUCKET_FACTOR = 1;
 /** One signed-in person gets two and a half times an address's allowance (several devices, one account). */
 export const USER_BUCKET_FACTOR = 2.5;
 
@@ -248,9 +250,11 @@ export function registerApiProtection(app: FastifyInstance) {
     const presentedKey = request.headers['x-api-key'];
     if (typeof presentedKey === 'string' && presentedKey.startsWith(GATEWAY_KEY_PREFIX)) {
       // An administrator can give a partner's key its own limit (keyRateFactor); otherwise half an address's.
-      const custom = await keyRateFactor(presentedKey, config.rateLimitPerMinute);
-      const factor = custom ?? KEY_BUCKET_FACTOR;
-      const keyResult = await redisCheck(`key:${createHash('sha256').update(presentedKey).digest('hex')}`, factor);
+      // A team key draws on its TEAM's bucket, shared by every key of the team (the team's limit when an administrator set one).
+      const info = await keyBucketInfo(presentedKey, config.rateLimitPerMinute);
+      const factor = info.factor ?? (info.teamId ? TEAM_BUCKET_FACTOR : KEY_BUCKET_FACTOR);
+      const bucket = info.teamId ? `team:${info.teamId}` : `key:${createHash('sha256').update(presentedKey).digest('hex')}`;
+      const keyResult = await redisCheck(bucket, factor);
       if (!keyResult.allowed) {
         return tooManyRequests(request, reply, keyResult.reason, keyResult.resetAt, scaled(config.rateLimitPerMinute, factor));
       }

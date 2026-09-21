@@ -127,6 +127,7 @@ const BASE_SPEC = {
       description:
         'Developer API keys. Sign in, create a key, and choose which APIs it can call. Send the key as an x-api-key header. Key management itself requires a signed-in session.',
     },
+    { name: 'Teams', description: 'People sharing API keys and one allowance. Roles: owner, admin, developer, viewer. Team keys carry the Registry and Market APIs only. Session-only.' },
     { name: 'System', description: 'Health and metrics' },
   ],
   components: {
@@ -380,6 +381,33 @@ const BASE_SPEC = {
     },
     '/gateway/api-keys/{id}/resume': {
       post: { tags: ['API Library'], summary: 'Switch a suspended key back on', security: [{ SessionToken: [] }], parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }], responses: { '200': { description: 'Resumed' }, '404': { description: 'Not suspended, or not your key' } } },
+    },
+    '/teams': {
+      get: { tags: ['Teams'], summary: 'The teams you belong to, with your role, their member and key counts', security: [{ SessionToken: [] }], responses: { '200': { description: 'OK' } } },
+      post: { tags: ['Teams'], summary: 'Create a team (you become its owner). Team keys share one allowance', security: [{ SessionToken: [] }], requestBody: { required: true, content: { 'application/json': { schema: { type: 'object', required: ['name'], properties: { name: { type: 'string', maxLength: 64 } } } } } }, responses: { '201': { description: 'Created (Location header)' }, '409': { description: 'You already created the maximum number of teams (code team_limit_reached)' } } },
+    },
+    '/teams/invites': {
+      get: { tags: ['Teams'], summary: 'Team invitations waiting for you', security: [{ SessionToken: [] }], responses: { '200': { description: 'OK' } } },
+    },
+    '/teams/invites/{membershipId}/accept': {
+      post: { tags: ['Teams'], summary: 'Accept a team invitation', security: [{ SessionToken: [] }], parameters: [{ name: 'membershipId', in: 'path', required: true, schema: { type: 'string' } }], responses: { '200': { description: 'Accepted' }, '404': { description: 'No such invitation' } } },
+    },
+    '/teams/invites/{membershipId}': {
+      delete: { tags: ['Teams'], summary: 'Decline a team invitation', security: [{ SessionToken: [] }], parameters: [{ name: 'membershipId', in: 'path', required: true, schema: { type: 'string' } }], responses: { '204': { description: 'Declined' }, '404': { description: 'No such invitation' } } },
+    },
+    '/teams/{id}': {
+      get: { tags: ['Teams'], summary: 'One team and its members (any member may look)', security: [{ SessionToken: [] }], parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }], responses: { '200': { description: 'The team and its members' }, '404': { description: 'No such team, or you are not in it' } } },
+      delete: { tags: ['Teams'], summary: 'Delete a team (owner only): every team key is revoked first', security: [{ SessionToken: [] }], parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }], responses: { '204': { description: 'Deleted' }, '403': { description: 'Only an owner can (code team_forbidden)' }, '404': { description: 'No such team, or you are not in it' } } },
+    },
+    '/teams/{id}/members': {
+      post: { tags: ['Teams'], summary: 'Invite an existing Desk account by e-mail (admin or owner). The answer is the same whether or not the address has an account', security: [{ SessionToken: [] }], parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }], requestBody: { required: true, content: { 'application/json': { schema: { type: 'object', required: ['email'], properties: { email: { type: 'string' }, role: { type: 'string', enum: ['owner', 'admin', 'developer', 'viewer'], default: 'developer' } } } } } }, responses: { '202': { description: 'Invitation recorded if the account exists' }, '403': { description: 'Your role does not allow that (code team_forbidden)' }, '404': { description: 'No such team, or you are not in it' }, '409': { description: 'The team is full (code team_limit_reached)' } } },
+    },
+    '/teams/{id}/members/{membershipId}': {
+      patch: { tags: ['Teams'], summary: 'Change a member\'s role (admin or owner; only an owner may touch admins and owners)', security: [{ SessionToken: [] }], parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }, { name: 'membershipId', in: 'path', required: true, schema: { type: 'string' } }], requestBody: { required: true, content: { 'application/json': { schema: { type: 'object', required: ['role'], properties: { role: { type: 'string', enum: ['owner', 'admin', 'developer', 'viewer'] } } } } } }, responses: { '200': { description: 'Changed' }, '403': { description: 'Your role does not allow that' }, '404': { description: 'No such team or member' }, '409': { description: 'A team must keep an owner (code team_last_owner)' } } },
+      delete: { tags: ['Teams'], summary: 'Remove a member, withdraw an invitation, or leave (remove yourself). The last owner cannot leave', security: [{ SessionToken: [] }], parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }, { name: 'membershipId', in: 'path', required: true, schema: { type: 'string' } }], responses: { '204': { description: 'Removed' }, '403': { description: 'Your role does not allow that' }, '404': { description: 'No such team or member' }, '409': { description: 'A team must keep an owner (code team_last_owner)' } } },
+    },
+    '/admin/teams/{id}/limit': {
+      post: { tags: ['Admin'], summary: 'Give a whole team its own per-minute limit, shared by all its keys (null clears it)', security: [{ SessionToken: [] }], parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }], responses: { '200': { description: 'OK' }, '404': { description: 'No such team' } } },
     },
     '/admin/gateway-keys': {
       get: { tags: ['Admin'], summary: 'Every live API key: owner, services, last use, and whether it is suspended', security: [{ SessionToken: [] }], responses: { '200': { description: 'OK' }, '403': { description: 'Not an administrator, or the sign-in is older than 24 hours' } } },

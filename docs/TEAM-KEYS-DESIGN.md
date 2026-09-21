@@ -1,28 +1,33 @@
-# Team and organization keys: design (September 2026)
+# Team keys (built 21 September 2026)
 
-Today a key belongs to one person and dies with their account. A team needs keys that outlive one person and are managed
-by several. This page is the design. It is written down and **not built**, because building it needs three decisions that
-are the owner's, and changes what an account owns (deletion, export and suspension all touch it).
+Several people share API keys and one allowance. Decided by the owner on 21 September 2026: **limits are shared across a
+team; roles are owner, admin, developer and viewer; a team is its own table, not a business.**
 
-## Decisions needed
+## How it works
 
-1. **Who is limited?** Limits and the daily market-analysis cap are per key today. A team key would need a team allowance
-   shared across its keys, or stay per key.
-2. **Who may do what?** Proposed roles: `owner` (everything, can delete the team), `admin` (create/revoke keys, invite),
-   `developer` (create their own keys, see usage), `viewer` (see usage only).
-3. **Is a team a business?** Reusing business membership (owner/admin/member) needs no new people model but makes every
-   business a team. A separate `teams` table is cleaner and costs one small migration.
+- `teams` and `team_members` (migration 0021). A person joins only by accepting an invitation; an invitation gives nothing until
+  then. Inviting works only for accounts that exist, and the answer is the same for an address that has none.
+- A key with a `team_id` belongs to the team, not to the person who made it (the maker is kept as its recorded owner for audit).
+- **One allowance.** Every key of a team draws on one per-minute bucket (a whole address's worth by default, or the number an
+  administrator sets with `POST /admin/teams/:id/limit`) and one daily cap of market analyses (twice a single key's).
+- **Roles.** owner: everything, may delete the team. admin: invite and remove developers and viewers, change their roles,
+  manage every key; cannot touch an owner or another admin. developer: create keys and manage the ones they made. viewer: see
+  the team, its keys and their usage. A stranger and a team that does not exist look the same (404).
+- **A team key never carries the Desk API** (it would act as whoever made it and hand their data to the whole team): only the
+  Registry and Market APIs (`api_key_team_desk_api`).
+- **When a person goes** (leaves or is deleted) the keys they made are handed to the best remaining member (an owner, else an
+  admin, else the earliest joiner) and no key stops working; that member becomes an owner if none remains; a team with nobody
+  left is deleted with its keys. The last owner cannot leave or be demoted (`team_last_owner`). Account deletion revokes only
+  the person's personal keys.
+- Limits: 5 teams created per person, 50 members and 25 keys per team.
 
-## Proposed model (recommended: separate teams)
+## API (session-only, like the key routes)
 
-- `teams (id, name, created_by, created_at)` and `team_members (team_id, user_id, role, accepted_at)`.
-- `gateway_api_keys` gains a nullable `team_id`. A key with a `team_id` belongs to the team: any `admin`/`owner` can revoke
-  it, its usage is visible to `viewer` and above, and it survives its creator leaving (the creator is recorded for audit).
-- Deleting a person hands their team keys to the team (no key silently stops working); the last owner cannot leave.
-- Scopes, expiry, limits and suspension apply to team keys unchanged.
-- API: `POST /teams`, `GET /teams`, `POST /teams/:id/members`, and `teamId` on `POST /gateway/api-keys`.
+`POST/GET /teams`, `GET/DELETE /teams/:id`, `POST /teams/:id/members`, `PATCH/DELETE /teams/:id/members/:membershipId`,
+`GET /teams/invites`, `POST /teams/invites/:membershipId/accept`, `DELETE /teams/invites/:membershipId`; and `teamId` on
+`POST /gateway/api-keys`, `?teamId=` on `GET /gateway/api-keys`.
 
-## Why not now
+## Not built yet
 
-It is roughly two days of work plus screens, and no team is asking for it yet. When it is wanted, the three decisions above
-are the only things blocking the build.
+Screens in the developer pages (the API is complete and tested against a real database: `src/__tests__/e2e/teams.e2e.test.ts`),
+and an e-mail to the person invited (they see the invitation in `GET /teams/invites`).
