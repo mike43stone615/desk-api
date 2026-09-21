@@ -27,7 +27,7 @@ beforeAll(async () => {
 
 const specOps = (paths: Ops) => Object.entries(paths).flatMap(([p, ops]) => Object.keys(ops).map((m) => ({ key: `${m.toUpperCase()} ${p}`, method: m, path: p, op: ops[m] })));
 // Static web pages, the docs pages and the two wildcard proxies (documented by their explicit endpoints) are not API operations.
-const NOT_OPERATIONS = /^GET (\/|\/login|\/developer|\/confirm-email|\/reset-password|\/app\.js|\/style\.css|\/desk_logo\.png|\/fonts\/.*|\/pages\/.*|\/docs|\/docs\/openapi\.json|\/gateway\/openapi\.json)$|\/gateway\/(registry|market)\/\*$|\{\*\}/;
+const NOT_OPERATIONS = /^GET (\/|\/login|\/developer|\/developer\/teams|\/team-rules\.js|\/confirm-email|\/reset-password|\/app\.js|\/style\.css|\/desk_logo\.png|\/fonts\/.*|\/pages\/.*|\/docs|\/docs\/openapi\.json|\/gateway\/openapi\.json)$|\/gateway\/(registry|market)\/\*$|\{\*\}/;
 
 describe('the main spec matches the routes', () => {
   it('every real API route is documented', () => {

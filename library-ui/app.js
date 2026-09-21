@@ -642,6 +642,9 @@ const ICONS = {
   view_column_outlined: '<rect x="3" y="4" width="18" height="16" rx="1"/><path d="M9 4v16M15 4v16"/>',
   open_in_full: '<path d="M8 3H3v5"/><path d="M16 21h5v-5"/><path d="M3 3l7 7"/><path d="M21 21l-7-7"/>',
   search: '<circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/>',
+  group: '<circle cx="9" cy="8" r="3.5"/><path d="M2 20c0-3.5 3-6 7-6s7 2.5 7 6"/><circle cx="17.5" cy="9" r="2.5"/><path d="M18 14c2.5.3 4 2.2 4 5"/>',
+  group_add: '<circle cx="9" cy="8" r="3.5"/><path d="M2 20c0-3.5 3-6 7-6s7 2.5 7 6"/><path d="M19 5v6M16 8h6"/>',
+  person_add: '<circle cx="9" cy="8" r="4"/><path d="M2 21c0-4 3.5-7 7-7s7 3 7 7"/><path d="M18 8v6M15 11h6"/>',
 };
 
 // aria-hidden: this SVG never carries its own accessible name (no <title>,
@@ -668,6 +671,7 @@ registerRoute('/loading', async (app) => {
   await Promise.all([
     import('./pages/auth.js'),
     import('./pages/developer.js'),
+    import('./pages/teams.js'),
   ]);
   await restoreSession();
   await route();

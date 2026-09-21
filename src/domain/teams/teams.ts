@@ -46,12 +46,18 @@ export interface TeamSummary {
   rateLimitPerMinute: number | null;
 }
 
+/** Same shape as a business member (see setup.ts): the membership's own id, who they are under `user`, and the dates. */
 export interface TeamMemberRow {
   id: string;
+  teamId: string;
   userId: string;
-  email: string;
   role: TeamRole;
-  accepted: boolean;
+  invitedByUserId: string | null;
+  invitedAt: string | null;
+  /** null while the invitation has not been accepted. */
+  acceptedAt: string | null;
+  createdAt: string;
+  user: { email: string; firstName: string; lastName: string };
 }
 
 /** The person's ACCEPTED role in a team, or null when they are not a member (an unaccepted invitation gives nothing). */
@@ -119,8 +125,8 @@ export const teams = {
     const role = await requireRole(teamId, userId, 'viewer');
     const team = (await this.list(userId)).find((t) => t.id === teamId);
     if (!team) throw new TeamError('not_found', 'Team not found.');
-    const { rows } = await pool.query<{ id: string; user_id: string; email: string; role: TeamRole; accepted_at: string | null }>(
-      `SELECT m.id, m.user_id, u.email, m.role, m.accepted_at
+    const { rows } = await pool.query<{ id: string; team_id: string; user_id: string; email: string; first_name: string; last_name: string; role: TeamRole; invited_by_user_id: string | null; accepted_at: string | null; created_at: string }>(
+      `SELECT m.id, m.team_id, m.user_id, u.email, u.first_name, u.last_name, m.role, m.invited_by_user_id, m.accepted_at, m.created_at
          FROM team_members m JOIN users u ON u.id = m.user_id
         WHERE m.team_id = $1
         ORDER BY (m.role = 'owner') DESC, u.email ASC, m.id ASC`,
@@ -129,7 +135,17 @@ export const teams = {
     const seePending = atLeast(role, 'admin');
     return {
       team,
-      members: rows.filter((r) => r.accepted_at || seePending).map((r) => ({ id: r.id, userId: r.user_id, email: r.email, role: r.role, accepted: r.accepted_at !== null })),
+      members: rows.filter((r) => r.accepted_at || seePending).map((r) => ({
+        id: r.id,
+        teamId: r.team_id,
+        userId: r.user_id,
+        role: r.role,
+        invitedByUserId: r.invited_by_user_id,
+        invitedAt: r.invited_by_user_id ? r.created_at : null,
+        acceptedAt: r.accepted_at,
+        createdAt: r.created_at,
+        user: { email: r.email, firstName: r.first_name, lastName: r.last_name },
+      })),
     };
   },
 
@@ -154,13 +170,23 @@ export const teams = {
   },
 
   /** Invitations waiting for the person. */
-  async pendingFor(userId: string): Promise<Array<{ membershipId: string; teamId: string; teamName: string; role: TeamRole }>> {
-    const { rows } = await pool.query<{ id: string; team_id: string; name: string; role: TeamRole }>(
-      `SELECT m.id, m.team_id, t.name, m.role FROM team_members m JOIN teams t ON t.id = m.team_id
+  async pendingFor(userId: string): Promise<Array<{ id: string; teamId: string; teamName: string; role: TeamRole; invitedAt: string; invitedByUserId: string | null; invitedBy: { email: string; firstName: string; lastName: string } | null }>> {
+    const { rows } = await pool.query<{ id: string; team_id: string; name: string; role: TeamRole; created_at: string; invited_by_user_id: string | null; email: string | null; first_name: string | null; last_name: string | null }>(
+      `SELECT m.id, m.team_id, t.name, m.role, m.created_at, m.invited_by_user_id, i.email, i.first_name, i.last_name
+         FROM team_members m JOIN teams t ON t.id = m.team_id LEFT JOIN users i ON i.id = m.invited_by_user_id
         WHERE m.user_id = $1 AND m.accepted_at IS NULL ORDER BY m.created_at ASC, m.id ASC`,
       [userId],
     );
-    return rows.map((r) => ({ membershipId: r.id, teamId: r.team_id, teamName: r.name, role: r.role }));
+    // Same names as a pending business invitation (see setup.ts): id, teamName, invitedAt, invitedByUserId, invitedBy.
+    return rows.map((r) => ({
+      id: r.id,
+      teamId: r.team_id,
+      teamName: r.name,
+      role: r.role,
+      invitedAt: r.created_at,
+      invitedByUserId: r.invited_by_user_id,
+      invitedBy: r.email ? { email: r.email, firstName: r.first_name ?? '', lastName: r.last_name ?? '' } : null,
+    }));
   },
 
   async accept(membershipId: string, userId: string): Promise<void> {

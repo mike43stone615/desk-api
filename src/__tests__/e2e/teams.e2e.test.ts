@@ -72,7 +72,7 @@ describe.skipIf(!hasDb)('E2E: teams', () => {
     expect(inv.statusCode).toBe(202);
     const pending = (await call('GET', '/v1/teams/invites', u)).json().invites;
     expect(pending).toHaveLength(1);
-    expect((await call('POST', `/v1/teams/invites/${pending[0].membershipId}/accept`, u)).statusCode).toBe(200);
+    expect((await call('POST', `/v1/teams/invites/${pending[0].id}/accept`, u)).statusCode).toBe(200);
     return u;
   }
 
@@ -98,7 +98,7 @@ describe.skipIf(!hasDb)('E2E: teams', () => {
     expect(real.json()).toEqual(fake.json());
     expect((await call('GET', `/v1/teams/${teamId}`, dev)).statusCode).toBe(404); // pending: not a member yet
     const pending = (await call('GET', '/v1/teams/invites', dev)).json().invites[0];
-    await call('POST', `/v1/teams/invites/${pending.membershipId}/accept`, dev);
+    await call('POST', `/v1/teams/invites/${pending.id}/accept`, dev);
     expect((await call('GET', `/v1/teams/${teamId}`, dev)).statusCode).toBe(200);
   });
 

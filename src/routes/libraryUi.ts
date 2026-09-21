@@ -25,7 +25,7 @@ const CONTENT_TYPES: Record<string, string> = {
 };
 
 /** Client-side routes of the copied single-page app: all answered with index.html. */
-export const LIBRARY_UI_PAGES = ['/', '/login', '/developer', '/confirm-email', '/reset-password'] as const;
+export const LIBRARY_UI_PAGES = ['/', '/login', '/developer', '/developer/teams', '/confirm-email', '/reset-password'] as const;
 
 /**
  * First path segments that belong to the API, now or in future. A web page (or a file in library-ui/) may never use one:
@@ -33,7 +33,7 @@ export const LIBRARY_UI_PAGES = ['/', '/login', '/developer', '/confirm-email', 
  */
 export const RESERVED_API_ROOTS = [
   'auth', 'setup', 'gateway', 'admin', 'integrations', 'functions', 'health', 'metrics', 'docs', 'errors', 'status',
-  'webhooks', 'v1', 'v2', 'api', '.well-known', 'openapi.json', 'internal', 'oauth', 'graphql',
+  'webhooks', 'teams', 'v1', 'v2', 'api', '.well-known', 'openapi.json', 'internal', 'oauth', 'graphql',
 ] as const;
 
 /** The reserved API roots this path collides with, or null. */

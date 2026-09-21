@@ -27,8 +27,16 @@ exception, and each is listed in the API description.
 ## Fields and formats
 
 - Timestamps are ISO-8601 in UTC. Ids are opaque strings (the format differs by service and may change; never parse them).
-- The same thing has the same name everywhere: a member is `{ id, userId, role, email, ... }` and an invitation carries both
-  `invitedBy` (the person) and `invitedByUserId` (their id).
+- Names: JSON fields and query names are camelCase; ids are `id` (a thing's own) or `<thing>Id` (a reference to another:
+  `userId`, `businessId`, `teamId`, `keyId`); times end in `At` (`createdAt`, `acceptedAt`, `invitedAt`); a person's own tag on
+  a credential is `label`, the name of a business, team or registered entity is `name`. Roles in the newer APIs (teams) are the
+  lower-case values `owner`, `admin`, `developer`, `viewer`; the business endpoints still return display text ("Owner", "Member")
+  because the shipped apps read it, and that stays until `/v2`.
+- A pending invitation looks the same for a business and for a team: `id`, the thing's id and name (`businessId` and
+  `businessName`, `teamId` and `teamName`), `role`, `invitedAt`, `invitedByUserId`, `invitedBy`. A member looks the same too:
+  `id`, the thing's id, `userId`, `role`, `invitedByUserId`, `invitedAt`, `acceptedAt`, `createdAt`, and the person under `user`.
+- The same thing has the same name everywhere: a member's person is under `user` (`email`, `firstName`, `lastName`), and an
+  invitation carries both `invitedBy` (the person) and `invitedByUserId` (their id).
 - Text is stored in Unicode NFC form (an accented letter is one character however it was typed).
 - States are two-letter codes (`FL`) or a full state name; anything else is a `400`.
 
@@ -45,6 +53,12 @@ administrator; the standard is half of what one address gets.
   `/v1` promises.
 - **Paging** is offered where lists can grow (drafts, businesses, members); reference lists (business structures) accept
   `limit` and `cursor` but return everything when they are not given, so existing callers see no change.
+- **Two paging styles, on purpose** (decided 21 September 2026): the small personal lists of the Desk API (drafts,
+  businesses, members, teams, keys: tens of rows at most) use `limit` and `offset` ("skip this many"), because a person
+  rarely sees more than one page and it is simple. Lists that can grow large use `limit` and `cursor` ("the next batch after
+  this bookmark"), which does not skip or repeat rows when the list changes between pages: today that is the registry's
+  reference lists, and it is the style every list will use in `/v2`. Which list uses which is in the API description.
+  Small lists say `hasMore` so a client knows whether another page exists.
 
 ## Reserved names
 

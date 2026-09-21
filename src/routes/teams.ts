@@ -39,14 +39,14 @@ export async function createTeamHandler(request: FastifyRequest, reply: FastifyR
 
 export async function listTeamsHandler(request: FastifyRequest, reply: FastifyReply) {
   await requireAuth(request, reply);
-  return reply.send({ teams: await teams.list(request.currentUser!.id) });
+  return reply.send({ hasMore: false, teams: await teams.list(request.currentUser!.id) });
 }
 
 export async function getTeamHandler(request: FastifyRequest, reply: FastifyReply) {
   await requireAuth(request, reply);
   const { id } = request.params as { id: string };
   try {
-    return reply.send(await teams.get(id, request.currentUser!.id));
+    return reply.send({ hasMore: false, ...(await teams.get(id, request.currentUser!.id)) });
   } catch (err) {
     return teamFailure(err);
   }
@@ -71,7 +71,7 @@ export async function inviteTeamMemberHandler(request: FastifyRequest, reply: Fa
 
 export async function listTeamInvitesHandler(request: FastifyRequest, reply: FastifyReply) {
   await requireAuth(request, reply);
-  return reply.send({ invites: await teams.pendingFor(request.currentUser!.id) });
+  return reply.send({ hasMore: false, invites: await teams.pendingFor(request.currentUser!.id) });
 }
 
 export async function acceptTeamInviteHandler(request: FastifyRequest, reply: FastifyReply) {

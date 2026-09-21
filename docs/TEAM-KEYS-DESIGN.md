@@ -29,5 +29,11 @@ team; roles are owner, admin, developer and viewer; a team is its own table, not
 
 ## Not built yet
 
-Screens in the developer pages (the API is complete and tested against a real database: `src/__tests__/e2e/teams.e2e.test.ts`),
-and an e-mail to the person invited (they see the invitation in `GET /teams/invites`).
+An e-mail to the person invited (they see the invitation on the Teams page, or in `GET /teams/invites`).
+
+## Screens
+
+The API Library site has a **Teams** tab (`/developer/teams`): create a team, accept or decline invitations, invite people, change
+roles, remove people or leave, create and revoke team keys, delete the team. The page only shows buttons the person's role
+allows (`library-ui/team-rules.js`, tested against the server's rules); the server still decides. The API is tested against a real
+database in `src/__tests__/e2e/teams.e2e.test.ts`.
