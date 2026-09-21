@@ -14,6 +14,14 @@ describe('shouldCaptureError', () => {
     expect(shouldCaptureError(new HttpError(500, 'Internal server error.'))).toBe(true);
   });
 
+  it('does not capture a service behind the API being down, slow or full (watched elsewhere), but does capture one refusing us', () => {
+    expect(shouldCaptureError(new HttpError(503, 'down', 'upstream_unavailable'))).toBe(false);
+    expect(shouldCaptureError(new HttpError(502, 'unreachable', 'upstream_unreachable'))).toBe(false);
+    expect(shouldCaptureError(new HttpError(504, 'slow', 'gateway_timeout'))).toBe(false);
+    expect(shouldCaptureError(new HttpError(502, 'refused our key', 'upstream_rejected'))).toBe(true);
+    expect(shouldCaptureError(new HttpError(500, 'bug', 'internal_error'))).toBe(true);
+  });
+
   it('does not capture Zod validation errors', () => {
     const result = z.object({ email: z.string() }).safeParse({});
     expect(result.success).toBe(false);

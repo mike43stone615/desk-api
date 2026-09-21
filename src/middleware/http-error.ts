@@ -166,8 +166,13 @@ function problem(request: FastifyRequest, status: number, detail: string, errors
  * checks the error's own semantic status instead, which is known before any
  * response has been sent.
  */
+// A service behind this API being down, slow or full is already watched by the uptime check and the dependency metrics, and
+// it repeats for every caller while it lasts; reporting each one to Sentry buried the errors that are real bugs.
+const EXPECTED_UPSTREAM_CODES = new Set(['upstream_unavailable', 'upstream_unreachable', 'upstream_response_too_large', 'gateway_timeout', 'service_unavailable']);
+
 export function shouldCaptureError(error: Error): boolean {
   if (error instanceof ZodError) return false; // validation errors are routine 400s, not incidents
+  if (error instanceof HttpError && error.code && EXPECTED_UPSTREAM_CODES.has(error.code)) return false;
   const status = (error as { status?: unknown }).status ?? (error as { statusCode?: unknown }).statusCode;
   return typeof status !== 'number' || status >= 500;
 }
