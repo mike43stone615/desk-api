@@ -30,6 +30,20 @@ describe('API Library web pages (served from api.deskbusiness.co)', () => {
     expect(res.headers.etag).toMatch(/^"[0-9a-f]{24}"$/);
   });
 
+  it('recognises the file whether the tag arrives plain, weak (as Cloudflare rewrites it), in a list, or as *', async () => {
+    const { etagMatches } = await import('../../routes/libraryUi');
+    expect(etagMatches('"abc"', '"abc"')).toBe(true);
+    expect(etagMatches('W/"abc"', '"abc"')).toBe(true);
+    expect(etagMatches('"x", W/"abc" , "y"', '"abc"')).toBe(true);
+    expect(etagMatches('*', '"abc"')).toBe(true);
+    expect(etagMatches('"other"', '"abc"')).toBe(false);
+    expect(etagMatches(undefined, '"abc"')).toBe(false);
+    expect(etagMatches(['"a"', 'W/"abc"'], '"abc"')).toBe(true);
+    const first = await app.inject({ method: 'GET', url: '/style.css' });
+    const weak = await app.inject({ method: 'GET', url: '/style.css', headers: { 'if-none-match': `W/${first.headers.etag}` } });
+    expect(weak.statusCode).toBe(304);
+  });
+
   it('answers 304 when the browser already has the current file, and the full file when it does not', async () => {
     const first = await app.inject({ method: 'GET', url: '/style.css' });
     const again = await app.inject({ method: 'GET', url: '/style.css', headers: { 'if-none-match': first.headers.etag as string } });

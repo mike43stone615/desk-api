@@ -44,6 +44,17 @@ export function reservedRootOf(path: string): string | null {
   return (RESERVED_API_ROOTS as readonly string[]).includes(first) ? first : null;
 }
 
+/**
+ * If-None-Match may carry several tags, "*", and weak tags (W/"..."): Cloudflare turns the ETag of a file it compresses into a weak
+ * one, and a browser sends back exactly what it was given, so a plain equality test would never answer 304 in production.
+ */
+export function etagMatches(header: string | string[] | undefined, etag: string): boolean {
+  const value = Array.isArray(header) ? header.join(',') : header;
+  if (!value) return false;
+  if (value.trim() === '*') return true;
+  return value.split(',').some((tag) => tag.trim().replace(/^W\//, '') === etag);
+}
+
 function listFiles(dir: string, prefix = ''): string[] {
   return readdirSync(dir, { withFileTypes: true }).flatMap((entry) =>
     entry.isDirectory() ? listFiles(join(dir, entry.name), `${prefix}${entry.name}/`) : [`${prefix}${entry.name}`],
@@ -72,7 +83,7 @@ export function registerLibraryUi(app: FastifyInstance): void {
       // hid a deploy from returning visitors); "no-cache" makes the browser ask every time, and the ETag makes that ask cheap.
       reply.header('Cache-Control', 'private, no-cache');
       reply.header('ETag', etag);
-      if (req.headers['if-none-match'] === etag) {
+      if (etagMatches(req.headers['if-none-match'], etag)) {
         reply.code(304);
         return reply.send();
       }

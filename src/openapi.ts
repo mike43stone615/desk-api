@@ -848,6 +848,9 @@ function withStandardResponses<T extends { paths: Record<string, Record<string, 
       };
       if (op.requestBody || (op.parameters && op.parameters.length > 0) || method === 'post' || method === 'patch') add('400', 'The request was not valid (see `code` and `errors`)');
       if ((op.security ?? []).length > 0) add('401', 'Missing, invalid or expired credentials');
+      // Refused although the credential is valid: not allowed for this person, an API key or app token used where it is not accepted
+      // (or without the scope it needs), a suspended key or account, or a cookie request that came from another website.
+      if ((op.security ?? []).length > 0) add('403', 'Refused: not allowed for this credential or person (a key or token used where it is not accepted, a missing scope, a suspended key or account, or a cookie request from another website)');
       if (path.includes('{')) add('404', 'No such item');
       add('429', 'Too many requests (see the Retry-After header)');
       add('500', 'Something went wrong on our side');
@@ -880,6 +883,27 @@ for (const [path, method, schema] of BODY_VALIDATORS) {
   const op = (BASE_SPEC.paths as unknown as Record<string, Record<string, SpecOperation>>)[path]?.[method];
   if (!op) throw new Error(`openapi: no ${method.toUpperCase()} ${path} to attach a request body to`);
   (op as Record<string, unknown>).requestBody = { required: true, content: { 'application/json': { schema: bodySchemaFrom(schema) } } };
+}
+
+/**
+ * Answers found by running the API for real that an operation's hand-written entry did not list: the /v1 versions answer 201 for a
+ * create and 204 for a delete (the legacy unprefixed paths keep their 200), and a few operations can also answer 412.
+ */
+const EXTRA_RESPONSES: Array<[path: string, method: string, responses: Record<string, string>]> = [
+  ['/setup/businesses/{id}/members', 'post', { '201': 'Created (the /v1 answer for the same invitation)' }],
+  ['/setup/drafts/{id}/complete', 'post', { '201': 'Created (the /v1 answer; the business is in the body)' }],
+  ['/setup/drafts/{id}', 'patch', { '412': 'The If-Match version is stale: someone saved the draft in between. Read it again' }],
+  ['/setup/drafts/{id}', 'put', { '412': 'The If-Match version is stale: someone saved the draft in between. Read it again' }],
+  ['/setup/drafts/{id}', 'delete', { '204': 'Deleted (the /v1 answer; the legacy path answers 200)' }],
+  ['/setup/businesses/{id}/members/{membershipId}', 'delete', { '204': 'Removed (the /v1 answer; the legacy path answers 200)' }],
+  ['/auth/sessions/{id}', 'delete', { '204': 'Signed that device out (the /v1 answer; the legacy path answers 200)' }],
+  ['/admin/tables/{table}/rows/{id}', 'delete', { '204': 'Deleted (the /v1 answer; the legacy path answers 200)' }],
+];
+for (const [path, method, extra] of EXTRA_RESPONSES) {
+  const op = (BASE_SPEC.paths as unknown as Record<string, Record<string, SpecOperation>>)[path]?.[method];
+  if (!op) throw new Error(`openapi: no ${method.toUpperCase()} ${path} to add responses to`);
+  op.responses ??= {};
+  for (const [status, description] of Object.entries(extra)) if (!(status in op.responses)) (op.responses as Record<string, unknown>)[status] = { description };
 }
 
 export const OPENAPI_SPEC = withStandardResponses(BASE_SPEC);
