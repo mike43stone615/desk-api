@@ -13,6 +13,8 @@ const IS_LOCAL_DEV = location.hostname === 'localhost' || location.hostname === 
 
 // This copy is served by desk-api itself (api.deskbusiness.co), so the API is
 // same-origin: relative URLs, and the session cookie is first-party.
+import { setAdminTab } from './tabs.js';
+
 export const API_BASE = '';
 
 // Error monitoring -- the web app's own Sentry project (separate from the
@@ -313,6 +315,7 @@ export async function confirmPasswordReset(token, password) {
 }
 
 export async function signOut() {
+  setAdminTab(false); adminCheckedFor = null;
   try {
     await api('/auth/signout', { method: 'POST', body: {} });
   } finally {
@@ -327,6 +330,7 @@ export async function signOut() {
 // an already-rejected cookie sitting in the browser doing nothing is
 // harmless, and the next restoreSession() will get the same 401 again.
 export function forceSignOutLocally() {
+  setAdminTab(false); adminCheckedFor = null;
   state.pendingPasswordResetEmail = null;
   state.user = null;
 }
@@ -371,6 +375,16 @@ export function backToBusinesses() {
 
 window.addEventListener('popstate', () => route());
 
+// Whether to show the Administration tab: asked once per signed-in person. A failed answer means "not an administrator";
+// the tab is only a convenience, the server does the refusing.
+let adminCheckedFor = null;
+async function ensureAdminTab() {
+  const id = state.user && state.user.id;
+  if (!id || adminCheckedFor === id) return;
+  adminCheckedFor = id;
+  try { setAdminTab(Boolean((await api('/admin/me')).isAdmin)); } catch { setAdminTab(false); }
+}
+
 async function route() {
   const url = new URL(location.href);
   const path = url.pathname === '/' ? '/developer' : url.pathname;
@@ -409,6 +423,7 @@ async function route() {
     }
   }
 
+  if (state.user) await ensureAdminTab();
   epoch++;
   renderChrome(path);
   const app = document.getElementById('app');
@@ -675,6 +690,7 @@ registerRoute('/loading', async (app) => {
     import('./pages/webhooks.js'),
     import('./pages/apps.js'),
     import('./pages/billing.js'),
+    import('./pages/admin.js'),
     import('./pages/authorize.js'),
   ]);
   await restoreSession();

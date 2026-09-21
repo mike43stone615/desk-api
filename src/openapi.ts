@@ -602,8 +602,18 @@ const BASE_SPEC = {
     '/setup/businesses/{id}/members/{membershipId}': {
       delete: { tags: ['Setup'], summary: 'Remove a member (owner/admin only; cannot remove the last owner)', security: [{ SessionToken: [] }], responses: { '200': { description: 'OK' }, '409': { description: 'Business must keep at least one owner' } } },
     },
+    '/admin/me': {
+      get: { tags: ['Admin'], summary: 'Whether the signed-in person may use the administrator pages (never an error for a non-administrator)', security: [{ SessionToken: [] }], responses: { '200': { description: 'OK: { isAdmin, isOwner }' } } },
+    },
+    '/admin/access': {
+      get: { tags: ['Admin'], summary: 'Who has administrator access: the owner(s) and the listed administrators', security: [{ SessionToken: [] }], responses: { '200': { description: 'OK' }, '403': { description: 'Admin access required' } } },
+      post: { tags: ['Admin'], summary: 'Give an existing, e-mail-confirmed account administrator access (owner only)', security: [{ SessionToken: [] }], requestBody: { required: true, content: { 'application/json': { schema: { type: 'object', required: ['email'], properties: { email: { type: 'string' }, note: { type: 'string' } } } } } }, responses: { '201': { description: 'Added' }, '403': { description: 'Only an owner can do this' }, '404': { description: 'No account with that address' }, '409': { description: 'Already on the list, an owner, or the address is not confirmed' } } },
+    },
+    '/admin/access/{userId}': {
+      delete: { tags: ['Admin'], summary: 'Take administrator access away from a listed person (owner only)', security: [{ SessionToken: [] }], parameters: [{ name: 'userId', in: 'path', required: true, schema: { type: 'string' } }], responses: { '204': { description: 'Removed' }, '403': { description: 'Only an owner can do this' }, '404': { description: 'That person is not on the list' } } },
+    },
     '/admin/tables': {
-      get: { tags: ['Admin'], summary: 'List browsable tables (this service + registry-api + compliance-os)', security: [{ SessionToken: [] }], responses: { '200': { description: 'OK' }, '403': { description: 'Admin access required' } } },
+      get: { tags: ['Admin'], summary: 'List browsable tables (this service, registry-api and market-validation-api)', security: [{ SessionToken: [] }], responses: { '200': { description: 'OK' }, '403': { description: 'Admin access required' } } },
     },
     '/admin/tables/{table}/rows': {
       get: { tags: ['Admin'], summary: 'List rows (supports filters/sort/pagination)', security: [{ SessionToken: [] }], responses: { '200': { description: 'OK' } } },

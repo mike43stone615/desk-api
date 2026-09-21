@@ -20,7 +20,7 @@ const UI_DIR = join(__dirname, '..', '..', '..', 'library-ui');
 const onDisk = (rel: string) => readFileSync(join(UI_DIR, rel), 'utf8');
 
 describe('API Library web pages (served from api.deskbusiness.co)', () => {
-  it.each(['/', '/login', '/developer', '/developer/teams', '/developer/webhooks', '/developer/apps', '/developer/billing'])('%s serves the app shell, titled "Desk API Library"', async (url) => {
+  it.each(['/', '/login', '/developer', '/developer/teams', '/developer/webhooks', '/developer/apps', '/developer/billing', '/developer/admin'])('%s serves the app shell, titled "Desk API Library"', async (url) => {
     const res = await app.inject({ method: 'GET', url });
     expect(res.statusCode).toBe(200);
     expect(res.headers['content-type']).toMatch(/text\/html/);
@@ -49,6 +49,7 @@ describe('API Library web pages (served from api.deskbusiness.co)', () => {
       '/pages/webhooks.js': /javascript/,
       '/pages/apps.js': /javascript/,
       '/pages/billing.js': /javascript/,
+      '/pages/admin.js': /javascript/,
       '/tabs.js': /javascript/,
       '/format.js': /javascript/,
       '/team-rules.js': /javascript/,

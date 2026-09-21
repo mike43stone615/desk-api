@@ -26,7 +26,7 @@ const CONTENT_TYPES: Record<string, string> = {
 };
 
 /** Client-side routes of the copied single-page app: all answered with index.html. */
-export const LIBRARY_UI_PAGES = ['/', '/login', '/developer', '/developer/teams', '/developer/webhooks', '/developer/apps', '/developer/billing', '/developer/authorize', '/confirm-email', '/reset-password'] as const;
+export const LIBRARY_UI_PAGES = ['/', '/login', '/developer', '/developer/teams', '/developer/webhooks', '/developer/apps', '/developer/billing', '/developer/admin', '/developer/authorize', '/confirm-email', '/reset-password'] as const;
 
 /**
  * First path segments that belong to the API, now or in future. A web page (or a file in library-ui/) may never use one:

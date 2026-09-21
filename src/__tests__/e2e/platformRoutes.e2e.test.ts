@@ -44,6 +44,9 @@ describe.skipIf(!hasDb)('E2E: status, changelog, billing, GraphQL and webhook re
   const incidents: string[] = [];
   const saved = { a: config.registryApiUrl, b: config.registryApiAdminKey, c: config.marketApiUrl, d: config.marketApiAdminKey, e: config.gatewayKeyEncryptionSecret };
   const adminEmail = `plat-admin-${rid()}@example.com`;
+  let ownerUser: Awaited<ReturnType<typeof mkUser>> | null = null;
+  /** The one account whose address is on the owner list for this file (made on first use). */
+  const mkOwner = async () => (ownerUser ??= await mkUser('owner', adminEmail));
 
   async function mkUser(name: string, email?: string, confirmed = true) {
     const id = rid();
@@ -85,7 +88,7 @@ describe.skipIf(!hasDb)('E2E: status, changelog, billing, GraphQL and webhook re
   });
 
   it('incidents: an administrator opens one and posts updates, everyone can read them, and bad input is refused', async () => {
-    const admin = await mkUser('admin', adminEmail);
+    const admin = await mkOwner();
     const person = await mkUser('reader');
     expect((await call('POST', '/v1/admin/incidents', person, { title: 'Slow', severity: 'minor', message: 'We are looking.' })).statusCode).toBe(403);
     expect((await call('POST', '/v1/admin/incidents', admin, { title: 'x', severity: 'minor', message: 'y' })).statusCode).toBe(400);
@@ -328,5 +331,72 @@ describe.skipIf(!hasDb)('E2E: status, changelog, billing, GraphQL and webhook re
     // only an admin or owner may invite, and only an owner may invite an admin
     expect((await call('POST', `/v1/teams/${team.id}/members`, dev, { email: `x-${rid()}@example.com`, role: 'viewer' })).statusCode).toBeGreaterThanOrEqual(403);
     expect(mail.signup).toHaveLength(2); // the newcomer and the one that expired; the refused invitation sent nothing
+  });
+
+  it('administrator access: the owner manages a list; listed people get the data tables, not the list; removal takes effect at once', async () => {
+    const owner = await mkOwner(); // the address put on the owner list in beforeAll
+    const helper = await mkUser('acc-helper');
+    const stranger = await mkUser('acc-stranger');
+    const unconfirmed = await mkUser('acc-unconfirmed', undefined, false);
+
+    // before: nobody but the owner
+    expect((await call('GET', '/v1/admin/me', helper)).json()).toEqual({ isAdmin: false, isOwner: false });
+    expect((await call('GET', '/v1/admin/me', owner)).json()).toEqual({ isAdmin: true, isOwner: true });
+    expect((await call('GET', '/v1/admin/tables', helper)).statusCode).toBe(403);
+    expect((await call('GET', '/v1/admin/me', null)).statusCode).toBe(401);
+
+    // only an owner may change the list; refusals are specific
+    expect((await call('POST', '/v1/admin/access', helper, { email: helper.email })).statusCode).toBe(403);
+    expect((await call('POST', '/v1/admin/access', owner, { email: `nobody-${rid()}@example.com` })).statusCode).toBe(404);
+    expect((await call('POST', '/v1/admin/access', owner, { email: unconfirmed.email })).statusCode).toBe(409);
+    expect((await call('POST', '/v1/admin/access', owner, { email: adminEmail })).statusCode).toBe(409);
+    expect((await call('POST', '/v1/admin/access', owner, { email: 'not an address' })).statusCode).toBe(400);
+    const added = await call('POST', '/v1/admin/access', owner, { email: helper.email.toUpperCase(), note: 'support' });
+    expect(added.statusCode, added.body).toBe(201);
+    expect((await call('POST', '/v1/admin/access', owner, { email: helper.email })).statusCode).toBe(409);
+
+    // the listed person: is an administrator, sees the list and the tables, edits data, but cannot change the list
+    expect((await call('GET', '/v1/admin/me', helper)).json()).toEqual({ isAdmin: true, isOwner: false });
+    const list = (await call('GET', '/v1/admin/access', helper)).json();
+    expect(list.owners).toContain(adminEmail.toLowerCase());
+    expect(list.admins.map((a: { email: string }) => a.email)).toContain(helper.email);
+    expect((await call('POST', '/v1/admin/access', helper, { email: stranger.email })).statusCode).toBe(403);
+    expect((await call('DELETE', `/v1/admin/access/${owner.id}`, helper)).statusCode).toBe(403);
+    const tables = (await call('GET', '/v1/admin/tables', helper)).json().tables as Array<{ name: string; editableColumns: string[] }>;
+    const plans = tables.find((t) => t.name === 'desk.plans');
+    expect(plans?.editableColumns).toContain('monthly_price_cents');
+    expect(tables.map((t) => t.name)).toEqual(expect.arrayContaining(['desk.users', 'desk.teams', 'desk.subscriptions', 'desk.webhook_endpoints']));
+
+    // editing a plan: a good value is saved (and audited), bad ones are refused in plain words
+    const patch = (values: Record<string, unknown>) => app.inject({ method: 'PATCH', url: '/v1/admin/tables/desk.plans/rows/developer', headers: { ...helper.headers, 'cf-connecting-ip': '203.0.113.9' }, payload: { values } });
+    const before = (await pool.query(`SELECT monthly_price_cents, max_keys, per_minute_limit FROM plans WHERE id = 'developer'`)).rows[0];
+    try {
+      const ok = await patch({ monthly_price_cents: '3100', per_minute_limit: '' });
+      expect(ok.statusCode, ok.body).toBe(200);
+      expect(ok.json().row).toMatchObject({ monthly_price_cents: 3100, per_minute_limit: null });
+      expect((await patch({ monthly_price_cents: 'lots' })).statusCode).toBe(400);
+      expect((await patch({ monthly_price_cents: -5 })).statusCode).toBe(400);
+      expect((await patch({ active: 'maybe' })).statusCode).toBe(400);
+      expect((await patch({ max_keys: '0' })).statusCode).toBe(400); // the database's own rule (must be above zero)
+      expect((await patch({ id: 'other' })).statusCode).toBe(400); // not an editable column
+    } finally {
+      await pool.query(`UPDATE plans SET monthly_price_cents = $1, max_keys = $2, per_minute_limit = $3 WHERE id = 'developer'`, [before.monthly_price_cents, before.max_keys, before.per_minute_limit]);
+    }
+    expect((await pool.query(`SELECT COUNT(*)::int n FROM mutation_audit_log WHERE user_email = $1 AND action = 'admin_table.update' AND entity_id = 'developer'`, [helper.email])).rows[0].n).toBeGreaterThanOrEqual(1);
+    // some tables cannot be deleted from here
+    const del = await app.inject({ method: 'DELETE', url: '/v1/admin/tables/desk.plans/rows/free', headers: { ...helper.headers, 'cf-connecting-ip': '203.0.113.9' } });
+    expect(del.statusCode).toBe(403);
+
+    // removal is immediate
+    expect((await call('DELETE', `/v1/admin/access/${helper.id}`, owner)).statusCode).toBe(204);
+    expect((await call('DELETE', `/v1/admin/access/${helper.id}`, owner)).statusCode).toBe(404);
+    expect((await call('GET', '/v1/admin/me', helper)).json()).toEqual({ isAdmin: false, isOwner: false });
+    expect((await call('GET', '/v1/admin/tables', helper)).statusCode).toBe(403);
+
+    // a listed person whose address is (somehow) not confirmed gets no access
+    await call('POST', '/v1/admin/access', owner, { email: stranger.email });
+    await pool.query('UPDATE users SET email_confirmed_at = NULL WHERE id = $1', [stranger.id]);
+    expect((await call('GET', '/v1/admin/me', stranger)).json().isAdmin).toBe(false);
+    await pool.query('DELETE FROM platform_admins WHERE user_id = $1', [stranger.id]);
   });
 });

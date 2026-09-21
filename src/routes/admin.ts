@@ -30,7 +30,7 @@ import { config } from '../config';
 import { logMutation, requestIp, requestUserAgent } from '../modules/audit/mutation-audit';
 import { timingSafeEqualString } from '../utils/timing-safe-compare';
 
-type AdminSource = 'desk' | 'registry' | 'compliance';
+type AdminSource = 'desk' | 'registry' | 'market' | 'compliance';
 
 const BUSINESS_INDUSTRIES = [
   'Restaurant',
@@ -141,6 +141,8 @@ const BUSINESS_INDUSTRIES = [
   'Laundromat / Dry Cleaning',
 ] as const;
 
+const TEAM_ROLES = ['owner', 'admin', 'developer', 'viewer'] as const;
+
 const TABLES = {
   users: {
     primaryKey: 'id',
@@ -209,6 +211,109 @@ const TABLES = {
     editable: ['role', 'invited_at', 'accepted_at'],
     secret: [],
     deletable: true,
+  },
+  // ── the platform tables (teams, plans and billing, webhooks, apps, status page, audit) ──
+  teams: {
+    primaryKey: 'id',
+    columns: ['id', 'name', 'created_by_user_id', 'rate_limit_per_minute', 'created_at'],
+    editable: ['name', 'rate_limit_per_minute'],
+    secret: [],
+    deletable: false, // deleting a team also ends its keys at the backends; use the Teams page
+  },
+  team_members: {
+    primaryKey: 'id',
+    columns: ['id', 'team_id', 'user_id', 'role', 'invited_by_user_id', 'accepted_at', 'created_at'],
+    editable: ['role', 'accepted_at'],
+    secret: [],
+    options: { role: TEAM_ROLES },
+    deletable: true,
+  },
+  plans: {
+    primaryKey: 'id',
+    columns: ['id', 'name', 'description', 'monthly_price_cents', 'included_analyses', 'overage_cents_per_analysis', 'per_minute_limit', 'max_keys', 'max_webhooks', 'active', 'sort_order'],
+    editable: ['name', 'description', 'monthly_price_cents', 'included_analyses', 'overage_cents_per_analysis', 'per_minute_limit', 'max_keys', 'max_webhooks', 'active', 'sort_order'],
+    secret: [],
+    deletable: false, // switch a plan off (active = false) instead
+  },
+  subscriptions: {
+    primaryKey: 'id',
+    columns: ['id', 'subject_type', 'subject_id', 'plan_id', 'status', 'period_start', 'period_end', 'provider', 'provider_ref', 'created_at'],
+    editable: ['plan_id', 'status', 'period_start', 'period_end', 'provider', 'provider_ref'],
+    secret: [],
+    options: { status: ['active', 'past_due', 'canceled'] },
+    deletable: true, // the person or team goes back to the Free plan
+  },
+  invoices: {
+    primaryKey: 'id',
+    columns: ['id', 'subject_type', 'subject_id', 'plan_id', 'period_start', 'period_end', 'currency', 'lines', 'subtotal_cents', 'status', 'created_at'],
+    editable: ['status'],
+    secret: [],
+    options: { status: ['draft', 'open', 'paid', 'void'] },
+    deletable: false, // a financial record: mark it void instead
+  },
+  usage_meter: {
+    primaryKey: 'subject_id',
+    columns: ['subject_type', 'subject_id', 'month', 'metric', 'quantity'],
+    editable: [],
+    secret: [],
+    deletable: false,
+  },
+  incidents: {
+    primaryKey: 'id',
+    columns: ['id', 'title', 'severity', 'status', 'started_at', 'resolved_at'],
+    editable: ['title', 'severity', 'status', 'resolved_at'],
+    secret: [],
+    options: { severity: ['minor', 'major', 'critical'], status: ['investigating', 'identified', 'monitoring', 'resolved'] },
+    deletable: true,
+  },
+  incident_updates: {
+    primaryKey: 'id',
+    columns: ['id', 'incident_id', 'status', 'message', 'created_at'],
+    editable: ['message'],
+    secret: [],
+    deletable: true,
+  },
+  webhook_endpoints: {
+    primaryKey: 'id',
+    columns: ['id', 'owner_user_id', 'team_id', 'url', 'events', 'active', 'consecutive_failures', 'disabled_reason', 'created_at'],
+    editable: ['active', 'consecutive_failures', 'disabled_reason'],
+    secret: [],
+    deletable: true,
+  },
+  webhook_deliveries: {
+    primaryKey: 'id',
+    columns: ['id', 'endpoint_id', 'event_id', 'event_type', 'status', 'attempts', 'next_attempt_at', 'last_status', 'last_error', 'created_at', 'delivered_at'],
+    editable: [],
+    secret: [],
+    deletable: true,
+  },
+  oauth_clients: {
+    primaryKey: 'id',
+    columns: ['id', 'owner_user_id', 'name', 'redirect_uris', 'scopes', 'created_at', 'revoked_at'],
+    editable: ['name', 'revoked_at'],
+    secret: [],
+    deletable: true,
+  },
+  gateway_api_keys: {
+    primaryKey: 'id',
+    columns: ['id', 'owner_user_id', 'label', 'key_prefix', 'team_id', 'sandbox', 'rate_limit_per_minute', 'created_at', 'last_used_at', 'expires_at', 'revoked_at'],
+    editable: ['label', 'rate_limit_per_minute', 'expires_at'],
+    secret: [],
+    deletable: false, // revoke a key from the API Keys page or the key tools, so its backend keys are ended too
+  },
+  mutation_audit_log: {
+    primaryKey: 'id',
+    columns: ['id', 'user_email', 'action', 'entity_type', 'entity_id', 'before', 'after', 'ip_address', 'created_at'],
+    editable: [],
+    secret: [],
+    deletable: false,
+  },
+  security_events: {
+    primaryKey: 'id',
+    columns: ['id', 'user_id', 'subject', 'event', 'outcome', 'ip_address', 'created_at'],
+    editable: [],
+    secret: [],
+    deletable: false,
   },
 } as const;
 
@@ -331,7 +436,51 @@ export function validateEditableValue(
     }
     return industry;
   }
+  const table: AdminTableConfig = TABLES[tableName];
+  // A column with a fixed list of choices accepts only those.
+  const choices = table.options?.[column];
+  if (choices) {
+    if (value === null || value === undefined || value === '') {
+      throw new HttpError(400, `${column} must be one of: ${choices.join(', ')}.`, 'invalid_value');
+    }
+    if (!choices.includes(String(value))) throw new HttpError(400, `${column} must be one of: ${choices.join(', ')}.`, 'invalid_value');
+    return String(value);
+  }
+  if (INTEGER_COLUMNS.has(`${tableName}.${column}`)) {
+    if (value === null || value === undefined || value === '') {
+      if (NULLABLE_INTEGER_COLUMNS.has(`${tableName}.${column}`)) return null;
+      throw new HttpError(400, `${column} needs a whole number.`, 'invalid_value');
+    }
+    const n = typeof value === 'number' ? value : Number(String(value).trim());
+    if (!Number.isInteger(n) || n < 0 || n > 2_000_000_000) throw new HttpError(400, `${column} must be a whole number from 0 up.`, 'invalid_value');
+    return n;
+  }
+  if (BOOLEAN_COLUMNS.has(`${tableName}.${column}`)) {
+    if (value === true || value === 'true') return true;
+    if (value === false || value === 'false') return false;
+    throw new HttpError(400, `${column} must be true or false.`, 'invalid_value');
+  }
   return value;
+}
+
+/** Columns edited as whole numbers, booleans, and which of the numbers may be left empty (NULL). */
+const INTEGER_COLUMNS = new Set([
+  'teams.rate_limit_per_minute', 'plans.monthly_price_cents', 'plans.included_analyses', 'plans.overage_cents_per_analysis', 'plans.per_minute_limit',
+  'plans.max_keys', 'plans.max_webhooks', 'plans.sort_order', 'webhook_endpoints.consecutive_failures', 'gateway_api_keys.rate_limit_per_minute',
+]);
+const NULLABLE_INTEGER_COLUMNS = new Set(['teams.rate_limit_per_minute', 'plans.overage_cents_per_analysis', 'plans.per_minute_limit', 'gateway_api_keys.rate_limit_per_minute']);
+const BOOLEAN_COLUMNS = new Set(['plans.active', 'webhook_endpoints.active']);
+
+/** A rule the database itself enforces (a limit, a link to another row, a duplicate) becomes a plain 400 rather than a 500. */
+export function friendlyDbError(err: unknown): HttpError | null {
+  const e = err as { code?: string; constraint?: string; detail?: string; column?: string };
+  if (typeof e?.code !== 'string') return null;
+  if (e.code === '23503') return new HttpError(409, 'Other records still refer to this row, or the value refers to a row that does not exist.', 'row_in_use');
+  if (e.code === '23505') return new HttpError(409, 'Another row already has that value.', 'duplicate_value');
+  if (e.code === '23514') return new HttpError(400, `That value breaks a rule of this table${e.constraint ? ` (${e.constraint})` : ''}.`, 'invalid_value');
+  if (e.code === '23502') return new HttpError(400, `${e.column ?? 'A column'} cannot be empty.`, 'invalid_value');
+  if (e.code.startsWith('22')) return new HttpError(400, 'That value is not in a form this column accepts.', 'invalid_value');
+  return null;
 }
 
 function columnOptionsFor(table: AdminTableConfig): Record<string, readonly string[]> {
@@ -345,7 +494,7 @@ function tableKey(source: AdminSource, rawName: string): string {
 function parseTableKey(raw: string): { source: AdminSource; rawName: string } {
   const [maybeSource, ...rest] = raw.split('.');
   if (
-    (maybeSource === 'desk' || maybeSource === 'registry' || maybeSource === 'compliance') &&
+    (maybeSource === 'desk' || maybeSource === 'registry' || maybeSource === 'market' || maybeSource === 'compliance') &&
     rest.length > 0
   ) {
     return { source: maybeSource, rawName: rest.join('.') };
@@ -364,8 +513,8 @@ async function proxyUpstreamJson<T = unknown>(
   method: 'GET' | 'PATCH' | 'DELETE' = 'GET',
   body?: unknown,
 ): Promise<T> {
-  const baseUrl = source === 'registry' ? config.registryApiUrl : config.complianceOsUrl;
-  const apiKey = source === 'registry' ? config.registryApiAdminKey : config.complianceOsApiKey;
+  const baseUrl = source === 'registry' ? config.registryApiUrl : source === 'market' ? config.marketApiUrl : config.complianceOsUrl;
+  const apiKey = source === 'registry' ? config.registryApiAdminKey : source === 'market' ? config.marketApiAdminKey : config.complianceOsApiKey;
   if (!baseUrl) throw new HttpError(503, `${source} service is not configured.`);
   if (!apiKey) throw new HttpError(503, `${source} admin key is not configured.`);
 
@@ -473,13 +622,15 @@ export async function guard(request: FastifyRequest, reply: FastifyReply): Promi
 
 export async function adminTablesHandler(request: FastifyRequest, reply: FastifyReply) {
   await guard(request, reply);
-  const [registryResult, complianceResult] = await Promise.all([
+  // compliance-os is retired (Desk Oracle serves its data and has no table browser), so it is no longer asked: it only ever
+  // answered "Not Found". Its table keys still parse, so an old link fails with the upstream's own answer.
+  const [registryResult, marketResult] = await Promise.all([
     listUpstreamTables('registry'),
-    listUpstreamTables('compliance'),
+    listUpstreamTables('market'),
   ]);
   const sourceErrors: Record<string, string> = {};
   if ('error' in registryResult) sourceErrors.registry = registryResult.error;
-  if ('error' in complianceResult) sourceErrors.compliance = complianceResult.error;
+  if ('error' in marketResult) sourceErrors.market = marketResult.error;
 
   const tables = [
     ...Object.entries(TABLES).map(([name, table]) => ({
@@ -494,7 +645,7 @@ export async function adminTablesHandler(request: FastifyRequest, reply: Fastify
       deletable: table.deletable === true,
     })),
     ...('tables' in registryResult ? registryResult.tables : []),
-    ...('tables' in complianceResult ? complianceResult.tables : []),
+    ...('tables' in marketResult ? marketResult.tables : []),
   ];
   // sourceErrors is only present when non-empty, so existing consumers that
   // only read `tables` see no shape change on the happy path.
@@ -596,10 +747,14 @@ export async function adminTableUpdateRowHandler(request: FastifyRequest, reply:
     .join(', ');
   const params = validatedEntries.map(([, value]) => normalizeValue(value));
   params.push(id);
-  await pool.query(
-    `UPDATE ${quoteIdentifier(tableName)} SET ${assignments} WHERE ${quoteIdentifier(table.primaryKey)} = $${params.length}`,
-    params,
-  );
+  try {
+    await pool.query(
+      `UPDATE ${quoteIdentifier(tableName)} SET ${assignments} WHERE ${quoteIdentifier(table.primaryKey)} = $${params.length}`,
+      params,
+    );
+  } catch (err) {
+    throw friendlyDbError(err) ?? err;
+  }
 
   const rowResult = await pool.query<Record<string, unknown>>(
     `SELECT ${columns} FROM ${quoteIdentifier(tableName)} WHERE ${quoteIdentifier(table.primaryKey)} = $1`,
@@ -647,10 +802,14 @@ export async function adminTableDeleteRowHandler(request: FastifyRequest, reply:
   // Deleting a person deletes their API keys with them; end those keys (and their backend keys) first.
   if (tableName === 'users' && before) await gatewayApiKeys.revokeAllForOwner(id);
 
-  await pool.query(
-    `DELETE FROM ${quoteIdentifier(tableName)} WHERE ${quoteIdentifier(table.primaryKey)} = $1`,
-    [id],
-  );
+  try {
+    await pool.query(
+      `DELETE FROM ${quoteIdentifier(tableName)} WHERE ${quoteIdentifier(table.primaryKey)} = $1`,
+      [id],
+    );
+  } catch (err) {
+    throw friendlyDbError(err) ?? err;
+  }
 
   logMutation({
     userId: request.currentUser?.id ?? null,

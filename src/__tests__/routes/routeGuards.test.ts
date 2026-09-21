@@ -58,6 +58,8 @@ const PUBLIC: Record<string, string> = {
   'GET /developer/webhooks': 'API Library web page (Webhooks tab)',
   'GET /developer/apps': 'API Library web page (Apps tab)',
   'GET /developer/billing': 'API Library web page (Plans & billing tab)',
+  'GET /developer/admin': 'API Library web page (Administration tab; the page and every request behind it check the person is an administrator)',
+  'GET /pages/admin.js': 'API Library web asset',
   'GET /pages/webhooks.js': 'API Library web asset',
   'GET /pages/apps.js': 'API Library web asset',
   'GET /pages/billing.js': 'API Library web asset',
@@ -133,7 +135,8 @@ describe('route guards', () => {
     const now = new Date().toISOString();
     db.users.set('rg-user', { id: 'rg-user', email: 'plain@example.com', password_hash: 'x', first_name: 'P', last_name: 'U', email_confirmed_at: now, created_at: now, updated_at: now });
     db.seedSession('rg-token', { id: 'rg-s', user_id: 'rg-user', token: 'rg-token', expires_at: new Date(Date.now() + 3_600_000).toISOString(), created_at: now });
-    for (const r of routes().filter((x) => x.key.split(' ')[1].startsWith('/admin'))) {
+    // GET /admin/me is the one admin path that answers everyone (it says { isAdmin: false } instead of refusing).
+    for (const r of routes().filter((x) => x.key.split(' ')[1].startsWith('/admin') && x.key !== 'GET /admin/me')) {
       const res = await app.inject({ method: r.method as 'GET', url: fill(r.url), headers: { authorization: 'Bearer rg-token' } });
       expect(res.statusCode, r.key).toBe(403);
     }

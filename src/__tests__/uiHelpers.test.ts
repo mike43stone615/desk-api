@@ -3,7 +3,7 @@ import { describe, it, expect } from 'vitest';
 // @ts-expect-error plain browser module without type declarations
 import { formatMoney, monthLabel, usageShare, parseLines, statusChip, EVENT_LABELS, SCOPE_LABELS } from '../../library-ui/format.js';
 // @ts-expect-error plain browser module without type declarations
-import { TABS, tabsHtml } from '../../library-ui/tabs.js';
+import { TABS, tabsHtml, setAdminTab } from '../../library-ui/tabs.js';
 
 describe('formatMoney', () => {
   it('shows whole dollars without cents and part dollars with two decimals', () => {
@@ -78,5 +78,20 @@ describe('tabsHtml', () => {
   });
   it('marks nothing when the page is not a tab', () => {
     expect(tabsHtml('/elsewhere')).not.toContain('aria-current');
+  });
+});
+
+describe('the Administration tab', () => {
+  it('is not in the tab row until an administrator is confirmed, and goes away again', () => {
+    setAdminTab(false);
+    expect(tabsHtml('/developer')).not.toContain('/developer/admin');
+    setAdminTab(true);
+    const html = tabsHtml('/developer/admin');
+    expect(html).toContain('href="/developer/admin"');
+    expect(html).toContain('Administration');
+    expect(html.match(/aria-current="page"/g)).toHaveLength(1);
+    setAdminTab('yes'); // only a real true counts
+    expect(tabsHtml('/developer')).not.toContain('/developer/admin');
+    setAdminTab(false);
   });
 });

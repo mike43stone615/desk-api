@@ -109,6 +109,7 @@ import { graphqlHandler } from './routes/graphql';
 import { changelogAtomHandler, changelogHandler, incidentsHandler, openIncidentHandler, updateIncidentHandler } from './routes/statusInfo';
 import { listIncidents } from './domain/status/incidents';
 import { invoicesHandler, listPlansHandler, subscriptionHandler } from './routes/billing';
+import { adminAccessAddHandler, adminAccessListHandler, adminAccessRemoveHandler, adminMeHandler } from './routes/adminAccess';
 import {
   acceptTeamInviteHandler,
   changeTeamRoleHandler,
@@ -547,6 +548,10 @@ async function registerLegacyAndVersionedRoutes(instance: FastifyInstance) {
   instance.post('/admin/billing/invoices/:id/status', small, adminInvoiceStatusHandler);
   instance.post('/admin/gateway-keys/:id/suspend', small, adminSuspendKeyHandler);
   instance.post('/admin/gateway-keys/:id/resume', small, adminResumeKeyHandler);
+  instance.get('/admin/me', adminMeHandler);
+  instance.get('/admin/access', adminAccessListHandler);
+  instance.post('/admin/access', small, adminAccessAddHandler);
+  instance.delete('/admin/access/:userId', small, adminAccessRemoveHandler);
   instance.get('/admin/tables', adminTablesHandler);
   instance.get('/admin/tables/:table/rows', adminTableRowsHandler);
   instance.patch('/admin/tables/:table/rows/:id', adminTableUpdateRowHandler);

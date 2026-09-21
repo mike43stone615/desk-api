@@ -13,6 +13,7 @@ import { enforceUserRouteLimit, routeKey } from './route-limits';
 import { checkRateBucket, USER_BUCKET_FACTOR } from './api-protection';
 import { ACCESS_TOKEN_PREFIX, verifyAccessToken, type VerifiedOAuthToken } from '../domain/oauth/oauth';
 import { isUserSuspended } from '../domain/suspension';
+import { isListedAdmin } from '../domain/admins';
 import type { User } from '../interfaces/database';
 
 declare module 'fastify' {
@@ -186,7 +187,8 @@ export async function requireAdmin(request: FastifyRequest, _reply: FastifyReply
   // but admin access must never be reachable through an API key regardless.
   if (request.gatewayKey || request.oauth) throw new HttpError(403, 'Admin access is not available with an API key or an app token.', 'admin_not_available_for_keys');
   const email = user.email.trim().toLowerCase();
-  if (!config.adminEmails.includes(email)) throw new HttpError(403, 'Admin access required.', 'admin_required');
+  // The owner(s) named in the server setting, or an account on the administrator list (with a confirmed address).
+  if (!config.adminEmails.includes(email) && !(await isListedAdmin(user.id))) throw new HttpError(403, 'Admin access required.', 'admin_required');
   // A stolen or forgotten session must not stay an administrator for its whole 30 days: the admin tools need a
   // sign-in from the last 24 hours (a normal session still works for everything else).
   const token = extractSessionToken(request);

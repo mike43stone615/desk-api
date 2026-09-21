@@ -35,6 +35,7 @@ export function createFakeDb() {
   const keyUsage: FakeRow[] = []; // migration 0017
   const suppressions = new Map<string, FakeRow>(); // migration 0018
   const accountSuspensions = new Map<string, FakeRow>(); // migration 0016, keyed by user id
+  const platformAdmins = new Set<string>(); // migration 0024: user ids on the administrator list
   const keySuspensions = new Map<string, FakeRow>(); // migration 0016, keyed by key id
   const emailInvites = new Map<string, FakeRow>(); // keyed by id (migration 0013)
   const backendRevocations = new Map<string, FakeRow>(); // the queue filled by the grant-delete trigger (migration 0010)
@@ -51,6 +52,8 @@ export function createFakeDb() {
     const p = params as string[];
 
     // ── suspensions (migration 0016) ── (before the generic "SELECT 1" liveness answer below)
+    // Listed administrators (migration 0024): none unless a test adds one to platformAdmins.
+    if (s.startsWith('SELECT 1 FROM platform_admins a JOIN users u')) return platformAdmins.has(p[0]) ? { rows: [{}], rowCount: 1 } : { rows: [], rowCount: 0 };
     if (s === 'SELECT 1 FROM account_suspensions WHERE user_id = $1') return accountSuspensions.has(p[0]) ? { rows: [{}], rowCount: 1 } : { rows: [], rowCount: 0 };
     if (s === 'SELECT 1 FROM users WHERE id = $1') return users.has(p[0]) ? { rows: [{}], rowCount: 1 } : { rows: [], rowCount: 0 };
     if (s.startsWith('INSERT INTO account_suspensions')) { accountSuspensions.set(p[0], { user_id: p[0], reason: p[1], suspended_by: p[2], suspended_at: nowIso() }); return { rows: [], rowCount: 1 }; }
@@ -857,6 +860,7 @@ export function createFakeDb() {
     emailInvites,
     securityEvents,
     accountSuspensions,
+    platformAdmins,
     keySuspensions,
     keyUsage,
     suppressions,
