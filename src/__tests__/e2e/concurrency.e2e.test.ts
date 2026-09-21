@@ -62,7 +62,12 @@ describe.skipIf(!hasDb)('E2E: simultaneous requests cannot break a rule', () => 
       ]);
       const { rows } = await pool.query("SELECT COUNT(*)::int AS n FROM business_memberships WHERE business_id = $1 AND role = 'owner'", [biz]);
       expect(rows[0].n, `try ${i}: statuses ${r1.statusCode}/${r2.statusCode}`).toBeGreaterThanOrEqual(1);
-      expect([r1.statusCode, r2.statusCode].sort()).toEqual([200, 409].sort().length === 2 && rows[0].n === 1 ? [200, 409] : [200, 200]);
+      // Exactly one removal goes through. The other is refused either by the last-owner rule (409) or, when the first removal
+      // landed before it was looked at, because the person asking is no longer a member at all (404): both leave one owner.
+      const codes = [r1.statusCode, r2.statusCode].sort();
+      expect(rows[0].n, `try ${i}: statuses ${codes}`).toBe(1);
+      expect(codes[0], `try ${i}`).toBe(200);
+      expect([404, 409], `try ${i}`).toContain(codes[1]);
     }
   });
 

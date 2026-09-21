@@ -32,3 +32,5 @@ scripts/delete-test-accounts.mjs
 sbom.cdx.json
 openapi-out/
 .oa_tmp/
+coverage-unit/
+coverage-e2e/

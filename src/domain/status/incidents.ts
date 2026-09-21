@@ -50,7 +50,7 @@ export async function openIncident(input: { title: string; severity: IncidentSev
   try {
     await client.query('BEGIN');
     await client.query(`INSERT INTO incidents (id, title, severity, status) VALUES ($1, $2, $3, 'investigating')`, [id, input.title, input.severity]);
-    await client.query(`INSERT INTO incident_updates (id, incident_id, status, message) VALUES ($1, $2, 'investigating', $3)`, [randomUUID(), id, input.message]);
+    await client.query(`INSERT INTO incident_updates (id, incident_id, status, message, created_at) VALUES ($1, $2, 'investigating', $3, $4)`, [randomUUID(), id, input.message, new Date().toISOString()]);
     await client.query('COMMIT');
   } catch (err) {
     await client.query('ROLLBACK').catch(() => {});
@@ -70,6 +70,7 @@ export async function getIncident(id: string): Promise<Incident | null> {
 export async function addIncidentUpdate(id: string, status: IncidentStatus, message: string): Promise<Incident | null> {
   const { rows } = await pool.query(`UPDATE incidents SET status = $2, resolved_at = CASE WHEN $2 = 'resolved' THEN to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') ELSE NULL END WHERE id = $1 RETURNING id`, [id, status]);
   if (!rows[0]) return null;
-  await pool.query(`INSERT INTO incident_updates (id, incident_id, status, message) VALUES ($1, $2, $3, $4)`, [randomUUID(), id, status, message]);
+  // The time is written with milliseconds (the column default stops at whole seconds), so updates made in quick succession keep their order.
+  await pool.query(`INSERT INTO incident_updates (id, incident_id, status, message, created_at) VALUES ($1, $2, $3, $4, $5)`, [randomUUID(), id, status, message, new Date().toISOString()]);
   return getIncident(id);
 }

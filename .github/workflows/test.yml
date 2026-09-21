@@ -49,7 +49,7 @@ jobs:
         run: npm run lint
 
       - name: Run tests with coverage gate
-        run: npm run test:coverage
+        run: npm run test:coverage:unit
 
       - name: Type check
         run: npm run build
@@ -59,10 +59,13 @@ jobs:
         env:
           DATABASE_URL: postgresql://postgres:postgres@localhost:5432/desk_api_test
 
-      - name: Run E2E tests
-        run: npm run test:e2e
+      - name: Run E2E tests (recording coverage)
+        run: npm run test:coverage:e2e
         env:
           E2E_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/desk_api_test
+
+      - name: Combined coverage gate (unit + real-database tests)
+        run: npm run coverage:gate
 
       - name: Security audit
         run: npm audit --audit-level=high
