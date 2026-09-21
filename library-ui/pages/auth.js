@@ -7,7 +7,7 @@ import {
   registerRoute, navigate, esc, statusMsg, spinnerBtn, eyeIcon, icon, currentEpoch,
   signIn, signUp, sendPasswordResetEmail, sendEmailConfirmation, ApiError, friendlyError,
   submitOnEnter, RESEND_COOLDOWN_SECONDS, AUTH_ERROR_CODES, passwordValidationMessage,
-  reportHandledException, takeReturnPath,
+  reportHandledException, takeReturnPath, state,
 } from '../app.js';
 
 const subtitles = {
@@ -229,6 +229,11 @@ registerRoute('/login', async (app, params) => {
     // Only animate a status message in when its (kind, text) actually
     // differs from what was showing on the previous render — see the
     // `animate` param on statusMsg() in app.js.
+    // One-time explanation when the session ended while the person was using the page (see api() in app.js).
+    if (state.sessionEndedNotice) {
+      state.sessionEndedNotice = false;
+      if (!s.errorMessage && !s.successMessage) s.errorMessage = 'Your session ended, so you were signed out. Sign in again and you will come back to where you were.';
+    }
     const forcedResetText = s.isForcedReset ? 'Your account needs a new password before you can sign in. Enter your email to receive a reset link.' : null;
     const animateForcedReset = forcedResetText !== s._lastForcedReset;
     s._lastForcedReset = forcedResetText;

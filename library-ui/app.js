@@ -124,6 +124,8 @@ export const state = {
   // The page a signed-out visitor originally asked for (e.g. arriving at
   // /developer from the API landing page), so signing in can take them there.
   returnTo: null,
+  // Set when a call was refused because the session ended mid-action; the sign-in page explains it once.
+  sessionEndedNotice: false,
 };
 
 function rememberReturnPath(url) {
@@ -226,7 +228,13 @@ export async function api(path, { method = 'GET', body, headers: extraHeaders = 
 
   if (!res.ok) {
     if (res.status === 401 && wasSignedIn) {
+      // The session ended while the person was in the middle of something (it expired, or was signed out elsewhere):
+      // remember the page they were on, so signing in brings them straight back, and say why they are looking at the
+      // sign-in page instead of just dropping them there.
+      rememberReturnPath(new URL(location.href));
+      state.sessionEndedNotice = true;
       forceSignOutLocally();
+      navigate('/login', { replace: true });
     }
     throw new ApiError(data.error || 'Request failed.', res.status, { requestId: res.headers?.get?.('x-request-id') ?? undefined, errorCode: typeof data.code === 'string' ? data.code : undefined });
   }

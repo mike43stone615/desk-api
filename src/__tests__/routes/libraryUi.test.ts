@@ -44,6 +44,15 @@ describe('API Library web pages (served from api.deskbusiness.co)', () => {
     }
   });
 
+  it('a session that ends mid-action sends the person to sign-in with an explanation and brings them back afterwards', async () => {
+    const appJs = (await app.inject({ method: 'GET', url: '/app.js' })).body;
+    const auth = (await app.inject({ method: 'GET', url: '/pages/auth.js' })).body;
+    expect(appJs).toContain('rememberReturnPath(new URL(location.href));');
+    expect(appJs).toContain("navigate('/login', { replace: true });");
+    expect(auth).toContain('Your session ended, so you were signed out.');
+    expect(auth).toContain("takeReturnPath() || '/developer'");
+  });
+
   it('the sign-in page says "Desk API Library" and, once signed in, leads to the API Library page', async () => {
     const auth = (await app.inject({ method: 'GET', url: '/pages/auth.js' })).body;
     expect(auth).toContain('<span class="brand-business">API Library</span>');
