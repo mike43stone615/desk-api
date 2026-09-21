@@ -1,6 +1,6 @@
 // OAuth 2.0 for third-party apps: a person lets an app read their Desk data without giving it a password or a key.
 //   * authorization code flow with PKCE (S256), required for every client, public or confidential;
-//   * access tokens live one hour, refresh tokens 30 days and are replaced on every use (a refresh token works once);
+//   * access tokens live one hour, refresh tokens 30 days and are replaced on every use (a refresh token works once; presenting a used one again ends the grant);
 //   * scopes are read-only: profile, drafts, businesses (the Desk API's own read scopes) and teams (GraphQL only);
 //   * tokens and client secrets are stored only as SHA-256 hashes; a person can list and revoke every app they authorized.
 // An access token carries the same restrictions as a Desk API key: it can only reach the read routes on the allow-list.
@@ -145,20 +145,13 @@ async function authenticateClient(clientId: string, clientSecret: string | undef
   return client;
 }
 
-async function issueTokens(client: OAuthClient, userId: string, scopes: OAuthScope[], replaceId?: string): Promise<TokenResponse> {
+async function issueTokens(client: OAuthClient, userId: string, scopes: OAuthScope[]): Promise<TokenResponse> {
   const access = token(ACCESS_TOKEN_PREFIX);
   const refresh = token(REFRESH_PREFIX);
-  if (replaceId) {
-    await pool.query(
-      `UPDATE oauth_tokens SET access_hash = $2, refresh_hash = $3, access_expires_at = $4, refresh_expires_at = $5 WHERE id = $1`,
-      [replaceId, sha(access), sha(refresh), later(ACCESS_TTL_MS), later(REFRESH_TTL_MS)],
-    );
-  } else {
-    await pool.query(
-      `INSERT INTO oauth_tokens (id, access_hash, refresh_hash, client_id, user_id, scopes, access_expires_at, refresh_expires_at) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
-      [randomUUID(), sha(access), sha(refresh), client.id, userId, scopes, later(ACCESS_TTL_MS), later(REFRESH_TTL_MS)],
-    );
-  }
+  await pool.query(
+    `INSERT INTO oauth_tokens (id, access_hash, refresh_hash, client_id, user_id, scopes, access_expires_at, refresh_expires_at) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+    [randomUUID(), sha(access), sha(refresh), client.id, userId, scopes, later(ACCESS_TTL_MS), later(REFRESH_TTL_MS)],
+  );
   return { access_token: access, token_type: 'Bearer', expires_in: ACCESS_TTL_MS / 1000, refresh_token: refresh, scope: scopes.join(' ') };
 }
 
@@ -177,13 +170,23 @@ export async function exchangeCode(input: { clientId: string; clientSecret?: str
 
 export async function refreshTokens(input: { clientId: string; clientSecret?: string; refreshToken: string }): Promise<TokenResponse> {
   const client = await authenticateClient(input.clientId, input.clientSecret);
-  const { rows } = await pool.query<{ id: string; user_id: string; scopes: OAuthScope[] }>(
-    `SELECT id, user_id, scopes FROM oauth_tokens WHERE refresh_hash = $1 AND client_id = $2 AND revoked_at IS NULL AND refresh_expires_at > $3`,
-    [sha(input.refreshToken), client.id, now()],
+  const access = token(ACCESS_TOKEN_PREFIX);
+  const refresh = token(REFRESH_PREFIX);
+  // One statement swaps both tokens, so two simultaneous refreshes with the same token cannot both succeed. The token that was
+  // just replaced is remembered (previous_refresh_hash) so that presenting it again can be recognised as a stolen copy.
+  const { rows } = await pool.query<{ scopes: OAuthScope[] }>(
+    `UPDATE oauth_tokens SET previous_refresh_hash = refresh_hash, access_hash = $3, refresh_hash = $4, access_expires_at = $5, refresh_expires_at = $6
+      WHERE refresh_hash = $1 AND client_id = $2 AND revoked_at IS NULL AND refresh_expires_at > $7 RETURNING scopes`,
+    [sha(input.refreshToken), client.id, sha(access), sha(refresh), later(ACCESS_TTL_MS), later(REFRESH_TTL_MS), now()],
   );
   const t = rows[0];
-  if (!t) throw new OAuthError('invalid_grant', 'The refresh token is wrong, expired, already used or revoked.');
-  return issueTokens(client, t.user_id, t.scopes, t.id); // the old refresh token stops working: its hash is replaced
+  if (!t) {
+    // An already-used refresh token coming back means two parties hold it (one of them is not the app). End the grant, so
+    // neither the copy nor the real app keeps working, and the person has to approve the app again.
+    await pool.query(`UPDATE oauth_tokens SET revoked_at = $3 WHERE previous_refresh_hash = $1 AND client_id = $2 AND revoked_at IS NULL`, [sha(input.refreshToken), client.id, now()]);
+    throw new OAuthError('invalid_grant', 'The refresh token is wrong, expired, already used or revoked.');
+  }
+  return { access_token: access, token_type: 'Bearer', expires_in: ACCESS_TTL_MS / 1000, refresh_token: refresh, scope: t.scopes.join(' ') };
 }
 
 /** RFC 7009: always succeeds from the caller's point of view. */

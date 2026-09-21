@@ -125,7 +125,7 @@ describe.skipIf(!hasDb)('E2E: OAuth and GraphQL', () => {
     const second = (await tokenCall({ grant_type: 'refresh_token', refresh_token: first.refresh_token }, basic)).json();
     expect(second.access_token).not.toBe(first.access_token);
     expect((await call('GET', '/v1/auth/session', { authorization: `Bearer ${first.access_token}` })).statusCode).toBe(401); // the old one is gone
-    expect((await tokenCall({ grant_type: 'refresh_token', client_id: client.id, client_secret: clientSecret!, refresh_token: first.refresh_token })).json().error).toBe('invalid_grant'); // and so is the old refresh token
+    // (presenting the old refresh token again is covered in the next test: it ends the whole grant)
     expect((await call('GET', '/v1/setup/businesses', { authorization: `Bearer ${second.access_token}` })).statusCode).toBe(200);
     // revoke (RFC 7009)
     const revoked = await app.inject({ method: 'POST', url: '/v1/oauth/revoke', headers: { 'content-type': 'application/x-www-form-urlencoded', ...ip() }, payload: new URLSearchParams({ token: second.access_token, client_id: client.id, client_secret: clientSecret! }).toString() });
@@ -135,6 +135,26 @@ describe.skipIf(!hasDb)('E2E: OAuth and GraphQL', () => {
     const third = (await tokenCall({ grant_type: 'authorization_code', client_id: client.id, client_secret: clientSecret!, code: await authorize(person, client.id, 'profile', v), redirect_uri: REDIRECT, code_verifier: v })).json();
     expect((await call('DELETE', `/v1/oauth/clients/${client.id}`, dev.headers)).statusCode).toBe(204);
     expect((await call('GET', '/v1/auth/session', { authorization: `Bearer ${third.access_token}` })).statusCode).toBe(401);
+  });
+
+  it('presenting a used refresh token again ends the whole grant (a stolen copy), and two simultaneous refreshes cannot both win', async () => {
+    const dev = await mkUser('dev5');
+    const person = await mkUser('person5');
+    const { client, clientSecret } = await registerApp(dev);
+    const v = verifierFor();
+    const first = (await tokenCall({ grant_type: 'authorization_code', client_id: client.id, client_secret: clientSecret!, code: await authorize(person, client.id, 'profile', v), redirect_uri: REDIRECT, code_verifier: v })).json();
+    const refresh = (rt: string) => tokenCall({ grant_type: 'refresh_token', client_id: client.id, client_secret: clientSecret!, refresh_token: rt });
+    const second = (await refresh(first.refresh_token)).json();
+    expect((await call('GET', '/v1/auth/session', { authorization: `Bearer ${second.access_token}` })).statusCode).toBe(200);
+    // the first (used) token is presented again: refused, and the newest pair stops working too
+    expect((await refresh(first.refresh_token)).json().error).toBe('invalid_grant');
+    expect((await call('GET', '/v1/auth/session', { authorization: `Bearer ${second.access_token}` })).statusCode).toBe(401);
+    expect((await refresh(second.refresh_token)).json().error).toBe('invalid_grant');
+    // the person approves again and the app works normally
+    const again = (await tokenCall({ grant_type: 'authorization_code', client_id: client.id, client_secret: clientSecret!, code: await authorize(person, client.id, 'profile', v), redirect_uri: REDIRECT, code_verifier: v })).json();
+    // two refreshes at the same instant with the same token: exactly one wins
+    const race = await Promise.all([refresh(again.refresh_token), refresh(again.refresh_token)]);
+    expect(race.map((r) => r.statusCode).sort()).toEqual([200, 400]);
   });
 
   it('a public client (no secret) works with PKCE alone; a stranger cannot delete someone else\'s app', async () => {
