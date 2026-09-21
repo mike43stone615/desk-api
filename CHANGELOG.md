@@ -3,6 +3,16 @@
 What changed in the Desk API, newest first. Breaking changes are never made inside `v1` (see docs/API-VERSIONING.md);
 everything below is additive unless it says "safer".
 
+## 2026-09-21: administration page
+
+- **Administration tab** in the API Library (administrators only): flip between the Desk, Registry and Market APIs, and view and edit their
+  data in a table editor (filters, sorting, undo, delete where allowed). Desk's platform tables (teams, plans, subscriptions, invoices,
+  webhooks, apps, incidents, keys, audit log) were added to the editor; numbers, true/false and fixed-choice columns are checked and the
+  database's own rules come back as plain refusals. compliance-os is no longer listed (it is retired).
+- **Who has access:** the owner(s) in the server settings, plus people the owner adds and removes on the "Who has access" screen
+  (`GET/POST /admin/access`, `DELETE /admin/access/{userId}`, `GET /admin/me`). Only an owner can change the list; listed people need a
+  confirmed e-mail address.
+
 ## 2026-09-21: team invitation e-mails
 
 - Inviting someone to a team now e-mails them. An address with no Desk account is kept for 30 days and e-mailed a link to sign up; once
