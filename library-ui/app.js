@@ -673,7 +673,7 @@ export function icon(name) {
 // ---------------- Boot ----------------
 
 registerRoute('/loading', async (app) => {
-  app.innerHTML = '<div class="page" style="display:flex;justify-content:center;padding-top:120px;"><div class="spinner spinner-dark" style="width:28px;height:28px;border-width:3px;"></div></div>';
+  app.innerHTML = '<div class="page" style="display:flex;justify-content:center;padding-top:120px;"><div class="spinner spinner-dark spinner-lg"></div></div>';
 });
 
 // Dynamic (not static) imports: page modules call registerRoute() at their

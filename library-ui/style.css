@@ -1,8 +1,11 @@
-/* Desk web dashboard — hand-written HTML/CSS/JS replacing the Flutter web
-   build (mobile/desktop apps stay on Flutter, untouched). Deliberately kept
-   in sync with lib/theme/app_colors.dart + lib/theme/app_theme.dart (the
-   Flutter app's own theme) and with desk-oracle's public/style.css, which
-   uses the same token set. If any of the three change, update the others. */
+/* Desk API Library dashboard — this file started as a copy of desk_business's
+   web_app/public/style.css (branded for api.deskbusiness.co), which is itself
+   deliberately kept in sync with lib/theme/app_colors.dart + app_theme.dart
+   (the Flutter app's own theme) and with desk-oracle's public/style.css,
+   which uses the same token set. A shared-component change in any of those
+   four (this file included) needs checking against the others -- this file
+   drifting from desk_business's copy is exactly how the spinner ring ended
+   up too thin here after it was fixed there. */
 /* Inter, served from this site (fonts/, SIL Open Font License, see fonts/OFL-Inter-LICENSE.txt) instead of Google's
    servers: no visitor's address is sent to a third party just to draw text, and the page works offline of Google. */
 @font-face {
@@ -191,11 +194,18 @@ a:hover { text-decoration: underline; }
 .btn-link:hover:not(:disabled) { color: var(--ink); background: none; text-decoration: underline; }
 .btn-link:disabled { opacity: .5; cursor: not-allowed; }
 
+/* A thin border on a small circle mostly reads as a moving line/arc rather than a ring, especially for something on
+   screen only briefly (a button spinner or a page load) -- the border-width is deliberately a large fraction of the
+   diameter so the full circle is legible at a glance, not just the bright leading edge. Kept in sync with
+   desk_business's web_app/public/style.css, which this file was copied from. */
 .spinner {
-  width: 15px; height: 15px; border-radius: 50%; border: 2px solid rgba(255,255,255,.4);
+  width: 16px; height: 16px; border-radius: 50%; border: 3px solid rgba(255,255,255,.35);
   border-top-color: #fff; animation: spin .7s linear infinite; flex-shrink: 0;
 }
 .spinner-dark { border-color: var(--line-strong); border-top-color: var(--ink-soft); }
+/* Full-page loads (see the /loading route in app.js): same ring, just bigger and chunkier so it stays legible at a
+   glance instead of shrinking to a hairline. */
+.spinner-lg { width: 32px; height: 32px; border-width: 4px; }
 @keyframes spin { to { transform: rotate(360deg); } }
 
 /* Clamp every animation/transition to effectively instant for anyone with
