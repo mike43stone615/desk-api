@@ -197,9 +197,13 @@ a:hover { text-decoration: underline; }
 /* A thin border on a small circle mostly reads as a moving line/arc rather than a ring, especially for something on
    screen only briefly (a button spinner or a page load) -- the border-width is deliberately a large fraction of the
    diameter so the full circle is legible at a glance, not just the bright leading edge. Kept in sync with
-   desk_business's web_app/public/style.css, which this file was copied from. */
+   desk_business's web_app/public/style.css, which this file was copied from. spinnerBtn() renders this as a <span>,
+   and a plain <span> is display:inline -- width/height are silently ignored on inline elements (the browser still
+   reports the "set" values from getComputedStyle, which is exactly what made this pass an earlier check), so without
+   an explicit display it collapses to just its own border box: a tall, ~5px-wide sliver, not a circle at all.
+   inline-block makes width/height (and this shape) actually apply. */
 .spinner {
-  width: 16px; height: 16px; border-radius: 50%; border: 3px solid rgba(255,255,255,.35);
+  display: inline-block; width: 16px; height: 16px; border-radius: 50%; border: 3px solid rgba(255,255,255,.35);
   border-top-color: #fff; animation: spin .7s linear infinite; flex-shrink: 0;
 }
 .spinner-dark { border-color: var(--line-strong); border-top-color: var(--ink-soft); }
