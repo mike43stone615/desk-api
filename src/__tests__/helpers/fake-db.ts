@@ -41,6 +41,9 @@ export function createFakeDb() {
   const totpBackupCodes: FakeRow[] = []; // migration 0026
   const mfaPendingLogins = new Map<string, FakeRow>(); // migration 0026, keyed by token hash
   const backendRevocations = new Map<string, FakeRow>(); // the queue filled by the grant-delete trigger (migration 0010)
+  const webhookEndpoints = new Map<string, FakeRow>(); // keyed by id
+  const webhookDeliveries: FakeRow[] = [];
+  const statusSubscribers = new Map<string, FakeRow>(); // keyed by id (migration 0028)
 
   function findUserByEmail(email: string): FakeRow | undefined {
     return [...users.values()].find((u) => u.email === email);
@@ -173,6 +176,13 @@ export function createFakeDb() {
     }
     if (s === 'SELECT 1 FROM email_suppressions WHERE email = $1') return suppressions.has(p[0]) ? { rows: [{}], rowCount: 1 } : { rows: [], rowCount: 0 };
     if (s.startsWith('INSERT INTO email_suppressions')) { if (!suppressions.has(p[0])) suppressions.set(p[0], { email: p[0], reason: p[1] }); return { rows: [], rowCount: 1 }; }
+    // gateway-key business restriction (migration 0027): a specific WHERE clause on business_memberships, so — like the
+    // 2FA queries above — this must be checked before the generic "SELECT 1" liveness catch-all just below, or every
+    // business would look like a match.
+    if (s === 'SELECT 1 FROM business_memberships WHERE business_id = $1 AND user_id = $2 AND accepted_at IS NOT NULL') {
+      const has = [...memberships.values()].some((m) => m.business_id === p[0] && m.user_id === p[1] && m.accepted_at);
+      return has ? { rows: [{ '?column?': 1 }], rowCount: 1 } : { rows: [], rowCount: 0 };
+    }
     if (s.startsWith('SELECT 1')) return { rows: [{ '?column?': 1 }], rowCount: 1 };
 
     // ── users ──────────────────────────────────────────────────────────────
@@ -601,10 +611,6 @@ export function createFakeDb() {
       }
       return { rows: [], rowCount: 1 };
     }
-    if (s === 'SELECT 1 FROM business_memberships WHERE business_id = $1 AND user_id = $2 AND accepted_at IS NOT NULL') {
-      const has = [...memberships.values()].some((m) => m.business_id === p[0] && m.user_id === p[1] && m.accepted_at);
-      return has ? { rows: [{ '?column?': 1 }], rowCount: 1 } : { rows: [], rowCount: 0 };
-    }
     if (
       s.startsWith(
         'SELECT id, role FROM business_memberships WHERE business_id = $1 AND user_id = $2',
@@ -868,6 +874,106 @@ export function createFakeDb() {
     if (s.includes('FROM plans WHERE active')) return { rows: [], rowCount: 0 };
     if (s.startsWith('SELECT team_id FROM gateway_api_keys WHERE id = $1')) { const k = gatewayKeys.get(p[0]); return { rows: k ? [{ team_id: k.team_id ?? null }] : [], rowCount: k ? 1 : 0 }; }
     if (s.startsWith('SELECT id FROM webhook_endpoints WHERE active')) return { rows: [], rowCount: 0 };
+    // ── outbound webhooks (migration; see domain/webhooks/webhooks.ts) ─────
+    if (s.startsWith('SELECT COUNT(*) AS n FROM webhook_endpoints WHERE')) {
+      const teamScoped = s.includes('WHERE team_id = $1');
+      const n = [...webhookEndpoints.values()].filter((e) => (teamScoped ? e.team_id === p[0] : e.owner_user_id === p[0] && !e.team_id)).length;
+      return { rows: [{ n: String(n) }], rowCount: 1 };
+    }
+    if (s.startsWith('INSERT INTO webhook_endpoints')) {
+      const [id, owner_user_id, team_id, url, secret_enc, events] = p as unknown as [string, string, string | null, string, string, string[]];
+      const row: FakeRow = { id, owner_user_id, team_id: team_id ?? null, url, secret_enc, events, active: true, disabled_reason: null, created_at: nowIso(), consecutive_failures: 0 };
+      webhookEndpoints.set(id, row);
+      return { rows: [row], rowCount: 1 };
+    }
+    if (s.startsWith('SELECT id, url, events, team_id, active, disabled_reason, created_at, consecutive_failures FROM webhook_endpoints WHERE team_id = $1')) {
+      const rows = [...webhookEndpoints.values()].filter((e) => e.team_id === p[0]);
+      return { rows, rowCount: rows.length };
+    }
+    if (s.startsWith('SELECT id, url, events, team_id, active, disabled_reason, created_at, consecutive_failures FROM webhook_endpoints WHERE owner_user_id = $1')) {
+      const rows = [...webhookEndpoints.values()].filter((e) => e.owner_user_id === p[0] && !e.team_id);
+      return { rows, rowCount: rows.length };
+    }
+    if (s.startsWith('SELECT id, url, events, team_id, active, disabled_reason, created_at, consecutive_failures, owner_user_id, secret_enc FROM webhook_endpoints WHERE id = $1')) {
+      const e = webhookEndpoints.get(p[0]);
+      return { rows: e ? [e] : [], rowCount: e ? 1 : 0 };
+    }
+    if (s.startsWith('DELETE FROM webhook_endpoints WHERE id = $1')) {
+      const existed = webhookEndpoints.delete(p[0]);
+      return { rows: [], rowCount: existed ? 1 : 0 };
+    }
+    if (s.startsWith('UPDATE webhook_endpoints SET secret_enc = $2')) {
+      const e = webhookEndpoints.get(p[0]);
+      if (!e) return { rows: [], rowCount: 0 };
+      e.secret_enc = p[1];
+      e.active = true;
+      e.consecutive_failures = 0;
+      e.disabled_reason = null;
+      return { rows: [], rowCount: 1 };
+    }
+    if (s.startsWith("UPDATE webhook_deliveries SET status = 'pending', attempts = 0, next_attempt_at = $3")) {
+      const d = webhookDeliveries.find((x) => x.id === p[0] && x.endpoint_id === p[1] && x.status === 'failed');
+      if (!d) return { rows: [], rowCount: 0 };
+      d.status = 'pending';
+      d.attempts = 0;
+      d.next_attempt_at = p[2];
+      return { rows: [{ id: d.id }], rowCount: 1 };
+    }
+    if (s.startsWith('UPDATE webhook_endpoints SET active = TRUE, consecutive_failures = 0, disabled_reason = NULL WHERE id = $1')) {
+      const e = webhookEndpoints.get(p[0]);
+      if (e) {
+        e.active = true;
+        e.consecutive_failures = 0;
+        e.disabled_reason = null;
+      }
+      return { rows: [], rowCount: e ? 1 : 0 };
+    }
+    if (s.startsWith('SELECT id, event_id, event_type, status, attempts, last_status, last_error, created_at, delivered_at FROM webhook_deliveries WHERE endpoint_id = $1')) {
+      const rows = webhookDeliveries.filter((d) => d.endpoint_id === p[0]);
+      return { rows, rowCount: rows.length };
+    }
+    // ── status-page e-mail subscriptions (migration 0028) ──────────────────
+    if (s === 'SELECT confirmed_at, created_at FROM status_subscribers WHERE email = $1') {
+      const row = [...statusSubscribers.values()].find((r) => r.email === p[0]);
+      return row ? { rows: [{ confirmed_at: row.confirmed_at ?? null, created_at: row.created_at }], rowCount: 1 } : { rows: [], rowCount: 0 };
+    }
+    if (s === 'SELECT unsubscribe_token FROM status_subscribers WHERE email = $1') {
+      const row = [...statusSubscribers.values()].find((r) => r.email === p[0]);
+      return row ? { rows: [{ unsubscribe_token: row.unsubscribe_token }], rowCount: 1 } : { rows: [], rowCount: 0 };
+    }
+    if (s.startsWith('INSERT INTO status_subscribers')) {
+      const [id, email, confirm_token_hash, confirm_expires_at, unsubscribe_token] = p as unknown as [string, string, string, string, string];
+      const existing = [...statusSubscribers.values()].find((r) => r.email === email);
+      if (existing) {
+        existing.confirm_token_hash = confirm_token_hash;
+        existing.confirm_expires_at = confirm_expires_at;
+        existing.created_at = nowIso();
+      } else {
+        statusSubscribers.set(id, { id, email, confirm_token_hash, confirm_expires_at, unsubscribe_token, confirmed_at: null, created_at: nowIso() });
+      }
+      return { rows: [], rowCount: 1 };
+    }
+    if (s.startsWith('UPDATE status_subscribers SET confirmed_at =')) {
+      const [confirmTokenHash, notBefore] = p as unknown as [string, string];
+      const row = [...statusSubscribers.values()].find((r) => r.confirm_token_hash === confirmTokenHash && !r.confirmed_at && (r.confirm_expires_at as string) > notBefore);
+      if (!row) return { rows: [], rowCount: 0 };
+      row.confirmed_at = nowIso();
+      return { rows: [{ id: row.id }], rowCount: 1 };
+    }
+    if (s.startsWith('DELETE FROM status_subscribers WHERE unsubscribe_token = $1')) {
+      const row = [...statusSubscribers.entries()].find(([, r]) => r.unsubscribe_token === p[0]);
+      if (row) statusSubscribers.delete(row[0]);
+      return { rows: [], rowCount: row ? 1 : 0 };
+    }
+    if (s === 'SELECT email, unsubscribe_token FROM status_subscribers WHERE confirmed_at IS NOT NULL') {
+      const rows = [...statusSubscribers.values()].filter((r) => r.confirmed_at).map((r) => ({ email: r.email, unsubscribe_token: r.unsubscribe_token }));
+      return { rows, rowCount: rows.length };
+    }
+    if (s.startsWith('DELETE FROM status_subscribers WHERE confirmed_at IS NULL')) {
+      const toDelete = [...statusSubscribers.entries()].filter(([, r]) => !r.confirmed_at && (r.confirm_expires_at as string) < (p[0] as string));
+      for (const [id] of toDelete) statusSubscribers.delete(id);
+      return { rows: [], rowCount: toDelete.length };
+    }
     if (s.startsWith('SELECT s.id AS sid, s.status') || s.includes("FROM plans WHERE id = 'free'")) return { rows: [], rowCount: 0 };
     if (s.startsWith('SELECT k.rate_limit_per_minute, k.team_id, t.rate_limit_per_minute AS team_limit')) {
       const k = [...gatewayKeys.values()].find((x) => x.key_hash === p[0]);
@@ -945,6 +1051,9 @@ export function createFakeDb() {
     gatewayKeys,
     gatewayGrants,
     backendRevocations,
+    webhookEndpoints,
+    webhookDeliveries,
+    statusSubscribers,
     emailInvites,
     securityEvents,
     accountSuspensions,

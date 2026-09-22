@@ -463,7 +463,10 @@ export async function buildApp(options: { logStream?: { write: (line: string) =>
       });
       app.get('/status/subscribe/confirm', async (req, reply) => {
         const token = (req.query as { token?: string }).token;
-        const ok = typeof token === 'string' && token && (await confirmStatusSubscription(token));
+        // The confirmation e-mail's link carries "<confirmToken>.<unsubscribeToken>" (see subscribers.subscribe) so the
+        // route only needs one query param; only the part before the dot is the actual confirm token.
+        const confirmToken = typeof token === 'string' ? token.split('.')[0] : undefined;
+        const ok = typeof confirmToken === 'string' && confirmToken && (await confirmStatusSubscription(confirmToken));
         return reply.redirect(ok ? '/status?banner=confirmed' : '/status?banner=subscribe_error');
       });
       app.get('/status/subscribe/unsubscribe', async (req, reply) => {
