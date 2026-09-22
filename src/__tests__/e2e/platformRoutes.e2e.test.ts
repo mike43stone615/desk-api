@@ -328,9 +328,28 @@ describe.skipIf(!hasDb)('E2E: status, changelog, billing, GraphQL and webhook re
     await deleteExpiredEmailInvites();
     expect((await pool.query('SELECT COUNT(*)::int n FROM team_email_invites WHERE team_id = $1', [team.id])).rows[0].n).toBe(0);
 
+    // the inviter sees who is waiting to sign up, and can withdraw the invitation; the team's developers see nothing of it
+    const outsider = await mkUser('inv-outsider');
+    const waitingAddress = `waiting-${rid()}@example.com`;
+    await call('POST', `/v1/teams/${team.id}/members`, owner, { email: waitingAddress, role: 'viewer' });
+    await call('POST', `/v1/teams/${team.id}/members`, owner, { email: `adminwait-${rid()}@example.com`, role: 'admin' });
+    const seen = (await call('GET', `/v1/teams/${team.id}`, owner)).json();
+    expect(seen.emailInvites.map((i: { email: string }) => i.email)).toContain(waitingAddress);
+    expect(seen.emailInvites.find((i: { email: string }) => i.email === waitingAddress)).toMatchObject({ role: 'viewer' });
+    await pool.query(`UPDATE team_members SET role = 'admin', accepted_at = now()::text WHERE team_id = $1 AND user_id = $2`, [team.id, dev.id]); // dev becomes an admin
+    const adminInviteId = seen.emailInvites.find((i: { role: string }) => i.role === 'admin').id as string;
+    const waitingId = seen.emailInvites.find((i: { email: string }) => i.email === waitingAddress).id as string;
+    expect((await call('DELETE', `/v1/teams/${team.id}/email-invites/${adminInviteId}`, dev)).statusCode).toBe(403); // an admin may not withdraw an admin's invitation
+    expect((await call('DELETE', `/v1/teams/${team.id}/email-invites/${waitingId}`, outsider)).statusCode).toBe(404);
+    expect((await call('DELETE', `/v1/teams/${team.id}/email-invites/${waitingId}`, dev)).statusCode).toBe(204);
+    expect((await call('DELETE', `/v1/teams/${team.id}/email-invites/${waitingId}`, dev)).statusCode).toBe(404);
+    expect((await call('DELETE', `/v1/teams/${team.id}/email-invites/${adminInviteId}`, owner)).statusCode).toBe(204);
+    await pool.query(`UPDATE team_members SET role = 'developer' WHERE team_id = $1 AND user_id = $2`, [team.id, dev.id]);
+    expect((await call('GET', `/v1/teams/${team.id}`, dev)).json().emailInvites).toEqual([]); // a developer cannot see who is waiting
+
     // only an admin or owner may invite, and only an owner may invite an admin
     expect((await call('POST', `/v1/teams/${team.id}/members`, dev, { email: `x-${rid()}@example.com`, role: 'viewer' })).statusCode).toBeGreaterThanOrEqual(403);
-    expect(mail.signup).toHaveLength(2); // the newcomer and the one that expired; the refused invitation sent nothing
+    expect(mail.signup).toHaveLength(4); // the newcomer, the one that expired and the two waiting ones; the refused invitation sent nothing
   });
 
   it('administrator access: the owner manages a list; listed people get the data tables, not the list; removal takes effect at once', async () => {

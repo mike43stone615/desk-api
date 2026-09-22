@@ -610,6 +610,7 @@ describe('PATCH /setup/drafts/:id and POST /setup/drafts/:id/complete', () => {
     const business = JSON.parse(complete.body).business;
     expect(business.name).toBe('Acme Bakery');
     expect(business.role).toBe('Owner');
+    expect(business.roleKey).toBe('owner'); // the lowercase value, in the same style as team roles
 
     // Draft was deleted after completion.
     expect(fakeDb.drafts.has(draftId)).toBe(false);

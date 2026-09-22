@@ -61,6 +61,10 @@ function parseMemberRole(raw: string | undefined): BusinessMemberRole {
   return 'member';
 }
 
+/**
+ * The display form of a business role ("Owner"). This is what `role` has always carried in the answers; the stored, lowercase value
+ * ("owner", the same style team roles use) is now also given as `roleKey`, so an app can compare it without knowing the wording.
+ */
 function formatRole(role: BusinessMemberRole): string {
   switch (role) {
     case 'owner':
@@ -97,6 +101,7 @@ function formatMemberRow(row: Record<string, unknown>) {
     businessId: row.business_id,
     userId: row.user_id,
     role: formatRole(parseMemberRole(String(row.role ?? ''))),
+    roleKey: parseMemberRole(String(row.role ?? '')),
     invitedByUserId: row.invited_by_user_id,
     invitedAt: row.invited_at,
     acceptedAt: row.accepted_at,
@@ -287,7 +292,7 @@ export async function completeDraftHandler(request: FastifyRequest, reply: Fasti
   }
 
   return reply.send({
-    business: { id: businessId, name, industry, role: 'Owner', isSetupComplete: true },
+    business: { id: businessId, name, industry, role: 'Owner', roleKey: 'owner', isSetupComplete: true },
   });
 }
 
@@ -313,6 +318,7 @@ export async function listBusinessesHandler(request: FastifyRequest, reply: Fast
       name: row.name,
       industry: row.industry,
       role: formatRole(row.role),
+      roleKey: row.role,
       isSetupComplete: true,
     })),
   });
@@ -341,13 +347,13 @@ export async function listBusinessMembersHandler(request: FastifyRequest, reply:
 
   // Invitations to addresses that have no account yet are shown to the people who can manage access, so a mistyped
   // address can be removed (with DELETE .../members/:id, the same as any other member).
-  let emailInvites: Array<{ id: string; email: string; role: string; invitedAt: string }> = [];
+  let emailInvites: Array<{ id: string; email: string; role: string; roleKey?: string; invitedAt: string }> = [];
   if (canManageMembers(requester.role)) {
     const { rows: waiting } = await pool.query<{ id: string; email: string; role: BusinessMemberRole; invited_at: string }>(
       `SELECT id, email, role, invited_at FROM business_email_invites WHERE business_id = $1 ORDER BY invited_at DESC, id`,
       [businessId],
     );
-    emailInvites = waiting.map((w) => ({ id: w.id, email: w.email, role: formatRole(parseMemberRole(w.role)), invitedAt: w.invited_at }));
+    emailInvites = waiting.map((w) => ({ id: w.id, email: w.email, role: formatRole(parseMemberRole(w.role)), roleKey: parseMemberRole(w.role), invitedAt: w.invited_at }));
   }
   return reply.send({ hasMore, members: rows.map(formatMemberRow), emailInvites });
 }
@@ -469,6 +475,7 @@ export async function listPendingInvitesHandler(request: FastifyRequest, reply: 
       businessId: row.business_id,
       businessName: row.business_name,
       role: formatRole(parseMemberRole(String(row.role ?? ''))),
+      roleKey: parseMemberRole(String(row.role ?? '')),
       invitedAt: row.invited_at,
       invitedByUserId: row.invited_by_user_id ?? null,
       invitedBy: {

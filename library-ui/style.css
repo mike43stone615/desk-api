@@ -627,3 +627,14 @@ table.admin-table td.admin-actions-cell { white-space: nowrap; }
 .plain-table { width: 100%; border-collapse: collapse; font-size: 0.9rem; }
 .plain-table th, .plain-table td { text-align: left; padding: var(--sp-sm) var(--sp-md); border-bottom: 1px solid var(--line); vertical-align: top; }
 .plain-table .num { text-align: right; white-space: nowrap; }
+
+/* API keys: per-key details, switched-off marker */
+.key-block { margin-bottom: var(--sp-md); }
+.key-block .state-card { margin-bottom: 0; }
+.key-actions { display: flex; gap: var(--sp-xs); flex-wrap: wrap; justify-content: flex-end; }
+.key-detail { margin-top: var(--sp-xs); }
+.key-usage-days { margin-top: var(--sp-sm); }
+.meta-chip.warn { border-color: var(--warning, #b26a00); color: var(--warning, #b26a00); }
+.chip-x { background: none; border: none; color: inherit; cursor: pointer; padding: 0 0 0 4px; font: inherit; opacity: .7; }
+.chip-x:hover:not(:disabled) { opacity: 1; }
+@media (max-width: 520px) { .key-card { flex-wrap: wrap; } .key-actions { justify-content: flex-start; width: 100%; } }

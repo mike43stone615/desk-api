@@ -17,6 +17,9 @@ export const MAX_MEMBERS_PER_TEAM = 50;
 export const MAX_EMAIL_INVITES_PER_TEAM = 50;
 
 /** What the route should do after an invitation: e-mail an existing account, e-mail an address to sign up, or nothing. */
+/** An invitation to an address that has no Desk account yet (kept until that address signs up and confirms it). */
+export interface TeamEmailInvite { id: string; email: string; role: TeamRole; invitedAt: string; invitedByUserId: string | null }
+
 export interface TeamInviteOutcome { teamName: string; notify: 'existing' | 'signup' | null }
 
 export type TeamErrorCode =
@@ -126,7 +129,7 @@ export const teams = {
   },
 
   /** One team and its members. Any accepted member may look. Pending invitations are shown to admins and owners only. */
-  async get(teamId: string, userId: string): Promise<{ team: TeamSummary; members: TeamMemberRow[] }> {
+  async get(teamId: string, userId: string): Promise<{ team: TeamSummary; members: TeamMemberRow[]; emailInvites: TeamEmailInvite[] }> {
     const role = await requireRole(teamId, userId, 'viewer');
     const team = (await this.list(userId)).find((t) => t.id === teamId);
     if (!team) throw new TeamError('not_found', 'Team not found.');
@@ -138,8 +141,16 @@ export const teams = {
       [teamId],
     );
     const seePending = atLeast(role, 'admin');
+    // Invitations to addresses with no account yet: only people who can invite may see who is waiting.
+    const emailInvites: TeamEmailInvite[] = seePending
+      ? (await pool.query<{ id: string; email: string; role: TeamRole; invited_at: string; invited_by_user_id: string | null }>(
+          `SELECT id, email, role, invited_at, invited_by_user_id FROM team_email_invites WHERE team_id = $1 ORDER BY invited_at DESC`,
+          [teamId],
+        )).rows.map((r) => ({ id: r.id, email: r.email, role: r.role, invitedAt: r.invited_at, invitedByUserId: r.invited_by_user_id }))
+      : [];
     return {
       team,
+      emailInvites,
       members: rows.filter((r) => r.accepted_at || seePending).map((r) => ({
         id: r.id,
         teamId: r.team_id,
@@ -198,6 +209,15 @@ export const teams = {
       return { teamName, notify: null };
     }
     return { teamName, notify: rows[0] ? 'signup' : null };
+  },
+
+  /** Withdraws an invitation that was sent to an address with no account. Same rule as inviting: only an owner may touch admin/owner invitations. */
+  async withdrawEmailInvite(teamId: string, actorId: string, inviteId: string): Promise<void> {
+    const mine = await requireRole(teamId, actorId, 'admin');
+    const { rows } = await pool.query<{ role: TeamRole }>(`SELECT role FROM team_email_invites WHERE id = $1 AND team_id = $2`, [inviteId, teamId]);
+    if (!rows[0]) throw new TeamError('not_found', 'No such invitation.');
+    if ((rows[0].role === 'owner' || rows[0].role === 'admin') && mine !== 'owner') throw new TeamError('forbidden', 'Only an owner can withdraw an invitation for an admin or another owner.');
+    await pool.query(`DELETE FROM team_email_invites WHERE id = $1 AND team_id = $2`, [inviteId, teamId]);
   },
 
   /** Invitations waiting for the person. */

@@ -121,6 +121,7 @@ import {
   listTeamInvitesHandler,
   listTeamsHandler,
   removeTeamMemberHandler,
+  withdrawTeamEmailInviteHandler,
 } from './routes/teams';
 import { gatewayMarketProxyHandler, gatewayRegistryProxyHandler } from './routes/gatewayProxy';
 import { registerLibraryUi } from './routes/libraryUi';
@@ -611,6 +612,7 @@ async function registerLegacyAndVersionedRoutes(instance: FastifyInstance) {
   // ── Teams: people sharing keys and one allowance (session-only) ──────────
   instance.post('/teams', small, createTeamHandler);
   instance.get('/teams', listTeamsHandler);
+  instance.delete('/teams/:id/email-invites/:inviteId', withdrawTeamEmailInviteHandler);
   instance.get('/teams/invites', listTeamInvitesHandler);
   instance.post('/teams/invites/:membershipId/accept', small, acceptTeamInviteHandler);
   instance.delete('/teams/invites/:membershipId', declineTeamInviteHandler);

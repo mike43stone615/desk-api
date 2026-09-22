@@ -31,7 +31,7 @@ registerRoute('/developer/teams', async (app) => {
     invites: [],
     services: [],
     selectedId: null,
-    detail: null, // { team, members }
+    detail: null, // { team, members, emailInvites }
     keys: [],
     newName: '',
     isCreatingTeam: false,
@@ -47,7 +47,7 @@ registerRoute('/developer/teams', async (app) => {
     keyError: null,
     keyAttempt: null,
     revealed: null,
-    confirm: null, // { kind: 'revokeKey' | 'removeMember' | 'leave' | 'deleteTeam', ... }
+    confirm: null, // { kind: 'revokeKey' | 'removeMember' | 'withdrawInvite' | 'leave' | 'deleteTeam', ... }
     isBusy: false,
     _lastKeyError: null,
     _lastTeamError: null,
@@ -180,6 +180,14 @@ registerRoute('/developer/teams', async (app) => {
     }, 'Could not remove that person.');
   }
 
+  async function withdrawInvite(inviteId) {
+    await guarded('withdrawTeamEmailInvite', async () => {
+      await api(`/teams/${encodeURIComponent(s.selectedId)}/email-invites/${encodeURIComponent(inviteId)}`, { method: 'DELETE' });
+      await loadDetail();
+      toast('Invitation withdrawn.');
+    }, 'Could not withdraw that invitation.');
+  }
+
   async function revokeKey(id) {
     await guarded('revokeTeamKey', async () => {
       await api(`/gateway/api-keys/${encodeURIComponent(id)}`, { method: 'DELETE' });
@@ -276,8 +284,10 @@ registerRoute('/developer/teams', async (app) => {
     const roleCell = !me && manageable && accepted && roleOptions.length
       ? `<select class="team-select" data-role-for="${esc(m.id)}" aria-label="Role of ${esc(m.user.email)}">${ROLES.filter((r) => roleOptions.includes(r) || r === m.role).map((r) => `<option value="${r}" ${r === m.role ? 'selected' : ''} ${roleOptions.includes(r) ? '' : 'disabled'}>${esc(ROLE_LABELS[r])}</option>`).join('')}</select>`
       : `<span class="meta-chip">${esc(ROLE_LABELS[m.role] || m.role)}</span>`;
+    // The last owner cannot leave (the server refuses): say so instead of offering a button that can only fail.
+    const lastOwner = m.role === 'owner' && s.detail.members.filter((x) => x.role === 'owner' && x.acceptedAt !== null).length === 1;
     const action = me
-      ? `<button type="button" class="btn btn-sm" data-leave="${esc(m.id)}">Leave</button>`
+      ? (lastOwner ? `<span class="biz-sub" title="Make someone else an owner, or delete the team">Last owner</span>` : `<button type="button" class="btn btn-sm" data-leave="${esc(m.id)}">Leave</button>`)
       : manageable ? `<button type="button" class="btn btn-sm" data-remove-member="${esc(m.id)}" data-email="${esc(m.user.email)}" aria-label="${accepted ? 'Remove' : 'Withdraw invitation for'} ${esc(m.user.email)}">${accepted ? 'Remove' : 'Withdraw'}</button>` : '';
     return `
       <div class="state-card key-card">
@@ -288,6 +298,22 @@ registerRoute('/developer/teams', async (app) => {
         </div>
         ${roleCell}
         ${action}
+      </div>`;
+  }
+
+  /** An invitation to an address with no Desk account yet: waits (30 days) for that address to sign up and confirm it. */
+  function emailInviteRowHtml(inv) {
+    const canWithdraw = grantableRoles(myRole()).includes(inv.role);
+    const left = Math.max(0, Math.ceil((Date.parse(inv.invitedAt) + 30 * 86_400_000 - Date.now()) / 86_400_000));
+    return `
+      <div class="state-card key-card">
+        <div class="biz-icon neutral">${icon('mail_outline')}</div>
+        <div class="biz-body">
+          <div class="biz-title">${esc(inv.email)}</div>
+          <div class="biz-sub">No Desk account yet · invitation waits ${left} more ${left === 1 ? 'day' : 'days'} for them to sign up with this address</div>
+        </div>
+        <span class="meta-chip">${esc(ROLE_LABELS[inv.role] || inv.role)}</span>
+        ${canWithdraw ? `<button type="button" class="btn btn-sm" data-withdraw-invite="${esc(inv.id)}" data-email="${esc(inv.email)}" aria-label="Withdraw invitation for ${esc(inv.email)}">Withdraw</button>` : ''}
       </div>`;
   }
 
@@ -307,6 +333,7 @@ registerRoute('/developer/teams', async (app) => {
 
   function detailHtml() {
     const { team, members } = s.detail;
+    const emailInvites = s.detail.emailInvites || [];
     const role = team.role;
     const roles = grantableRoles(role);
     const catalog = teamKeyServices(s.services);
@@ -331,6 +358,7 @@ registerRoute('/developer/teams', async (app) => {
         </div>` : ''}
       <h2 class="biz-section-title">People</h2>
       ${members.map(memberRowHtml).join('')}
+      ${emailInvites.map(emailInviteRowHtml).join('')}
       ${roles.length ? `
         <div class="card" style="margin:var(--sp-lg) 0;">
           <h3 class="biz-section-title">Invite someone</h3>
@@ -400,10 +428,11 @@ registerRoute('/developer/teams', async (app) => {
     const text = {
       revokeKey: `Revoke "${c.label}"? Anything using it stops working immediately. This cannot be undone.`,
       removeMember: `Remove ${c.email} from the team? Keys they made stay with the team.`,
+      withdrawInvite: `Withdraw the invitation for ${c.email}? They will not be able to join with it.`,
       leave: 'Leave this team? Keys you made stay with the team.',
       deleteTeam: 'Delete this team? Every key of the team is revoked and stops working at once. This cannot be undone.',
     }[c.kind];
-    const button = { revokeKey: 'Revoke', removeMember: 'Remove', leave: 'Leave', deleteTeam: 'Delete' }[c.kind];
+    const button = { revokeKey: 'Revoke', removeMember: 'Remove', withdrawInvite: 'Withdraw', leave: 'Leave', deleteTeam: 'Delete' }[c.kind];
     return `
       <div class="modal-backdrop" id="team-modal-backdrop">
         <div class="modal" role="dialog" aria-modal="true" aria-labelledby="team-modal-title">
@@ -458,6 +487,7 @@ registerRoute('/developer/teams', async (app) => {
     }
     app.querySelectorAll('[data-role-for]').forEach((sel) => sel.addEventListener('change', () => changeRole(sel.dataset.roleFor, sel.value)));
     app.querySelectorAll('[data-remove-member]').forEach((b) => b.addEventListener('click', () => { s.confirm = { kind: 'removeMember', id: b.dataset.removeMember, email: b.dataset.email }; render(); }));
+    app.querySelectorAll('[data-withdraw-invite]').forEach((b) => b.addEventListener('click', () => { s.confirm = { kind: 'withdrawInvite', id: b.dataset.withdrawInvite, email: b.dataset.email }; render(); }));
     app.querySelectorAll('[data-leave]').forEach((b) => b.addEventListener('click', () => { s.confirm = { kind: 'leave', id: b.dataset.leave }; render(); }));
     app.querySelectorAll('[data-revoke-key]').forEach((b) => b.addEventListener('click', () => { s.confirm = { kind: 'revokeKey', id: b.dataset.revokeKey, label: b.dataset.label }; render(); }));
     const del = $('delete-team-btn'); if (del) del.addEventListener('click', () => { s.confirm = { kind: 'deleteTeam' }; render(); });
@@ -476,6 +506,7 @@ registerRoute('/developer/teams', async (app) => {
       const c = s.confirm;
       if (c.kind === 'revokeKey') revokeKey(c.id);
       else if (c.kind === 'removeMember') removeMember(c.id, false);
+      else if (c.kind === 'withdrawInvite') withdrawInvite(c.id);
       else if (c.kind === 'leave') removeMember(c.id, true);
       else if (c.kind === 'deleteTeam') deleteTeam();
     });

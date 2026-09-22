@@ -76,6 +76,19 @@ export async function inviteTeamMemberHandler(request: FastifyRequest, reply: Fa
   }
 }
 
+/** Withdraws an invitation made to an address with no account (see GET /teams/:id -> emailInvites). */
+export async function withdrawTeamEmailInviteHandler(request: FastifyRequest, reply: FastifyReply) {
+  await requireAuth(request, reply);
+  const { id, inviteId } = request.params as { id: string; inviteId: string };
+  try {
+    await teams.withdrawEmailInvite(id, request.currentUser!.id, inviteId);
+    audit(request, 'team_email_invite_withdrawn', { userId: request.currentUser!.id, teamId: id, inviteId });
+    return reply.status(204).send();
+  } catch (err) {
+    return teamFailure(err);
+  }
+}
+
 export async function listTeamInvitesHandler(request: FastifyRequest, reply: FastifyReply) {
   await requireAuth(request, reply);
   return reply.send({ hasMore: false, invites: await teams.pendingFor(request.currentUser!.id) });

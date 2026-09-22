@@ -35,6 +35,9 @@ exception, and each is listed in the API description.
 - A pending invitation looks the same for a business and for a team: `id`, the thing's id and name (`businessId` and
   `businessName`, `teamId` and `teamName`), `role`, `invitedAt`, `invitedByUserId`, `invitedBy`. A member looks the same too:
   `id`, the thing's id, `userId`, `role`, `invitedByUserId`, `invitedAt`, `acceptedAt`, `createdAt`, and the person under `user`.
+  **Role wording:** team roles are lowercase (`owner`). A business's `role` is the display form (`Owner`) it has always had; every business
+  answer that carries one now also has `roleKey`, the lowercase value (`owner`, `admin`, `member`, `accountant`), to compare against.
+  Changing `role` itself would break existing apps, so it stays as it is inside v1.
 - The same thing has the same name everywhere: a member's person is under `user` (`email`, `firstName`, `lastName`), and an
   invitation carries both `invitedBy` (the person) and `invitedByUserId` (their id).
 - Text is stored in Unicode NFC form (an accented letter is one character however it was typed).
