@@ -3,6 +3,16 @@
 What changed in the Desk API, newest first. Breaking changes are never made inside `v1` (see docs/API-VERSIONING.md);
 everything below is additive unless it says "safer".
 
+## 2026-09-21: keys screen, waiting invitations, role keys
+
+- **API keys screen:** when creating a key you can now choose a sandbox key, which parts of the Desk API it may read, and an expiry. Each
+  key has a Details view (calls and errors per day, its limits, the APIs on it, add or remove an API) and can be switched off and on.
+- **Teams:** `GET /teams/{id}` lists `emailInvites` (invitations sent to addresses with no Desk account yet) for admins and owners, and
+  `DELETE /teams/{id}/email-invites/{inviteId}` withdraws one. The Teams screen shows and withdraws them, and no longer offers "Leave"
+  to the last owner.
+- **Business roles:** answers that carry a business `role` ("Owner") now also carry `roleKey` ("owner"), in the same lowercase style as
+  team roles and GraphQL. `role` itself is unchanged.
+
 ## 2026-09-21: end-to-end check fixes
 
 - **OAuth:** presenting an already-used refresh token again now ends the whole grant (a stolen copy can no longer keep working

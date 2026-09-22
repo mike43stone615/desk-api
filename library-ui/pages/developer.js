@@ -281,8 +281,8 @@ registerRoute('/developer', async (app) => {
     const u = d.usage;
     const max = Math.max(1, ...u.daily.map((x) => x.calls));
     return `
-      <div class="biz-sub"><b>${Number(u.totals.calls).toLocaleString('en-US')}</b> calls and <b>${Number(u.totals.errors).toLocaleString('en-US')}</b> errors in the last ${esc(u.days)} days${u.sharedWithTeam ? ' (shared with the team)' : ''}.</div>
-      ${u.daily.length ? `<div class="key-usage-days" aria-label="Calls per day">${u.daily.slice(0, 14).map((x) => `<div class="usage-row"><span>${esc(x.day)}</span><span>${Number(x.calls).toLocaleString('en-US')}${x.errors ? ` · ${Number(x.errors).toLocaleString('en-US')} errors` : ''}</span></div><div class="usage-bar" aria-hidden="true"><div class="usage-fill" style="width:${Math.max(2, Math.round((x.calls / max) * 100))}%"></div></div>`).join('')}</div>` : `<div class="biz-sub">No calls yet.</div>`}
+      <div class="biz-sub"><b>${Number(u.totals.calls).toLocaleString('en-US')}</b> ${u.totals.calls === 1 ? 'call' : 'calls'} and <b>${Number(u.totals.errors).toLocaleString('en-US')}</b> ${u.totals.errors === 1 ? 'error' : 'errors'} in the last ${esc(u.days)} days${u.sharedWithTeam ? ' (shared with the team)' : ''}.</div>
+      ${u.daily.length ? `<div class="key-usage-days" aria-label="Calls per day">${u.daily.slice(0, 14).map((x) => `<div class="usage-row"><span>${esc(x.day)}</span><span>${Number(x.calls).toLocaleString('en-US')}${x.errors ? ` · ${Number(x.errors).toLocaleString('en-US')} ${x.errors === 1 ? 'error' : 'errors'}` : ''}</span></div><div class="usage-bar" aria-hidden="true"><div class="usage-fill" style="width:${Math.max(2, Math.round((x.calls / max) * 100))}%"></div></div>`).join('')}</div>` : `<div class="biz-sub">No calls yet.</div>`}
       <div class="biz-sub" style="margin-top:var(--sp-sm);">${(u.limits || []).filter((l) => (k.services || []).includes(l.service)).map((l) => esc(l.note)).join('<br>')}</div>
       ${u.idleExpiryDays ? `<div class="biz-sub">A key that is not used for ${esc(u.idleExpiryDays)} days is revoked automatically.</div>` : ''}`;
   }
