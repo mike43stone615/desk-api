@@ -614,8 +614,14 @@ table.admin-table td.admin-actions-cell { white-space: nowrap; }
 .page-tab:hover { color: var(--accent); }
 .page-tab.active { color: var(--accent); border-bottom-color: var(--accent); }
 .page-tab:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-.team-select { font: inherit; padding: var(--sp-sm) var(--sp-md); border: 1px solid var(--line); border-radius: 8px; background: var(--surface); color: inherit; max-width: 100%; }
-.team-select:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+/* Every <select>/<textarea> in this app used this instead of the plain, unclassed element the shared
+   `input, select, textarea` rule below is meant to style for everyone -- it duplicated that rule's job but got the
+   values wrong (8px radius instead of the shared 12px, --surface instead of --input-bg for the background, no
+   explicit width so it sized to its content instead of filling the row like every field-float input beside it), so
+   every dropdown and textarea in the app looked visibly different from web_app's equivalents and from this app's own
+   text fields. Now it only adds what's actually special here (capped at the container's width, e.g. inside a table
+   cell) and leaves color/spacing/shape/width to that shared rule, same as web_app's bare selects. */
+.team-select { max-width: 100%; }
 
 /* The consent screen's list of what an app asks for. */
 .consent-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--sp-sm); }
