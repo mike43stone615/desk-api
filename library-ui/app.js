@@ -690,6 +690,8 @@ registerRoute('/loading', async (app) => {
 (async function boot() {
   await Promise.all([
     import('./pages/auth.js'),
+    import('./pages/confirm-email.js'),
+    import('./pages/reset-password.js'),
     import('./pages/developer.js'),
     import('./pages/teams.js'),
     import('./pages/webhooks.js'),

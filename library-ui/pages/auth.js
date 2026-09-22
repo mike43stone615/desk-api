@@ -75,11 +75,34 @@ registerRoute('/login', async (app, params) => {
       if (currentEpoch() !== myEpoch) { clearInterval(cooldownTimers[field]); return; }
       s[field] = cooldownSecondsRemaining(field);
       if (s[field] <= 0) clearInterval(cooldownTimers[field]);
-      render();
+      updateCooldownUI();
     }, 1000);
   }
   if (s.resetCooldown > 0) tickCooldown('resetCooldown');
   if (s.confirmationCooldown > 0) tickCooldown('confirmationCooldown');
+
+  // The tick only ever changes one of two buttons' text/disabled state -- a full render() here would rebuild the
+  // whole form for that, which (while a cooldown from an earlier request is still counting down) tears down and
+  // recreates whatever field the person is mid-typing into once a second: it steals focus, and for a type="email"
+  // field specifically (which can't have its cursor position restored afterward -- setSelectionRange throws on
+  // that input type) it scrambles what they've typed so far, since new characters land wherever the cursor
+  // defaulted to rather than where they left off. Updates just the element that actually needs it instead.
+  function updateCooldownUI() {
+    if (s.mode === 'resetPassword' && !s.isLoading) {
+      const submitBtn = document.querySelector('#auth-form button[type="submit"]');
+      if (submitBtn) {
+        submitBtn.disabled = s.resetCooldown > 0;
+        submitBtn.innerHTML = `${icon(primaryIcon())} ${primaryLabel()}`;
+      }
+    }
+    if (s.showResendConfirmation && !s.isResendingConfirmation) {
+      const resendBtn = document.getElementById('resend-confirmation-btn');
+      if (resendBtn) {
+        resendBtn.disabled = s.confirmationCooldown > 0;
+        resendBtn.innerHTML = `${icon('mark_email_unread_outlined')} ${s.confirmationCooldown > 0 ? `Resend confirmation email in ${s.confirmationCooldown}s` : 'Resend confirmation email'}`;
+      }
+    }
+  }
 
   // Callers always render() again themselves right after calling this (in
   // their own finally block) — no render() here, since an immediate one
@@ -93,11 +116,9 @@ registerRoute('/login', async (app, params) => {
   }
 
   function setMode(mode) {
-    // Leaving the mode that owns the active cooldown: stop its ticking
-    // render() (it would otherwise rebuild #app every second and steal
-    // focus from whatever field the user is now typing in) — but the
-    // counter itself isn't reset; it's still backed by the stored deadline
-    // and resumes correctly if this mode is entered again.
+    // Leaving the mode that owns the active cooldown: no point still ticking a countdown for a button this mode
+    // no longer shows -- but the counter itself isn't reset; it's still backed by the stored deadline and resumes
+    // correctly if this mode is entered again.
     Object.values(cooldownTimers).forEach(clearInterval);
     s.mode = mode;
     s.errorMessage = null;

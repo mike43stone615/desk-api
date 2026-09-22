@@ -172,7 +172,7 @@ a:hover { text-decoration: underline; }
   padding: var(--sp-sm) var(--sp-lg); border-radius: var(--r-md); font-size: .88rem; font-weight: 700;
   transition: background .12s ease, border-color .12s ease, opacity .12s ease; font-family: inherit;
 }
-.btn:hover { background: var(--surface-2); }
+.btn:hover:not(:disabled) { background: var(--surface-2); }
 .btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 .btn:disabled { opacity: .5; cursor: not-allowed; }
 .btn-primary { background: var(--accent); border-color: var(--accent); color: #ffffff; }

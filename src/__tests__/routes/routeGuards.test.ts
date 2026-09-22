@@ -75,6 +75,8 @@ const PUBLIC: Record<string, string> = {
   'GET /style.css': 'API Library web asset',
   'GET /desk_logo.png': 'API Library web asset',
   'GET /pages/auth.js': 'API Library web asset',
+  'GET /pages/confirm-email.js': 'API Library web asset',
+  'GET /pages/reset-password.js': 'API Library web asset',
   'GET /pages/developer.js': 'API Library web asset',
   'GET /pages/teams.js': 'API Library web asset',
   'GET /team-rules.js': 'API Library web asset',

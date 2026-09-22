@@ -58,6 +58,8 @@ describe('API Library web pages (served from api.deskbusiness.co)', () => {
     const expected: Record<string, RegExp> = {
       '/app.js': /javascript/,
       '/pages/auth.js': /javascript/,
+      '/pages/confirm-email.js': /javascript/,
+      '/pages/reset-password.js': /javascript/,
       '/pages/developer.js': /javascript/,
       '/pages/teams.js': /javascript/,
       '/pages/webhooks.js': /javascript/,
@@ -113,7 +115,7 @@ describe('API Library web pages (served from api.deskbusiness.co)', () => {
   it('exposes nothing beyond the listed files: no traversal, no repo files, no direct index.html', async () => {
     for (const url of [
       '/package.json', '/src/config.ts', '/.env', '/library-ui/app.js', '/index.html', '/pages/',
-      '/pages/../package.json', '/pages/%2e%2e/package.json', '/%2e%2e/.env', '/pages/reset-password.js',
+      '/pages/../package.json', '/pages/%2e%2e/package.json', '/%2e%2e/.env', '/pages/sessions.js',
     ]) {
       const res = await app.inject({ method: 'GET', url });
       expect(res.statusCode, url).toBe(404);

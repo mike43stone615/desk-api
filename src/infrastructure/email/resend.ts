@@ -52,7 +52,7 @@ export async function sendEmailConfirmationEmail(
     subject: 'Confirm your Desk email',
     html: themedEmailHtml({
       title: 'Confirm your email',
-      body: 'Welcome to Desk. Confirm this email address before opening your business workspace.',
+      body: "Welcome to Desk. Confirm this email address to continue with Desk's products.",
       actionLabel: 'Confirm email',
       actionUrl: confirmationUrl,
       note: 'If you did not create a Desk account, you can safely ignore this email.',
