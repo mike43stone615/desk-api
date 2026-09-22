@@ -183,6 +183,64 @@ function libraryBase(): string {
   return (process.env.API_PUBLIC_URL || 'https://api.deskbusiness.co').replace(/\/+$/, '');
 }
 
+/** This month's metered use just crossed 80% or 100% of the plan's included amount. */
+export async function sendUsageThresholdEmail(config: AppConfig, to: string, percent: number, used: number, included: number, requestId = 'usage-threshold'): Promise<void> {
+  const atCap = percent >= 100;
+  await sendEmail(config, {
+    to,
+    subject: atCap ? "You've used this month's included analyses" : "You're near this month's included analyses",
+    html: themedEmailHtml({
+      title: atCap ? "You've reached this month's included amount" : `You've used ${percent}% of this month's included amount`,
+      body: `${used.toLocaleString('en-US')} of ${included.toLocaleString('en-US')} included market analyses used this month.${atCap ? ' Further analyses may cost extra or be refused, depending on your plan.' : ''}`,
+      actionLabel: 'View your plan and usage',
+      actionUrl: `${libraryBase()}/developer/billing`,
+      note: 'This is sent once per threshold each month, not on every call.',
+    }),
+    requestId,
+    skippedEvent: 'usage_threshold_email_skipped',
+    failedEvent: 'usage_threshold_email_failed',
+    sentEvent: 'usage_threshold_email_sent',
+  });
+}
+
+/** Confirms an address wants status-page updates (double opt-in: nobody is subscribed, or e-mailed again, without clicking this). */
+export async function sendStatusSubscribeConfirmEmail(config: AppConfig, to: string, confirmToken: string, requestId = 'status-subscribe'): Promise<void> {
+  await sendEmail(config, {
+    to,
+    subject: 'Confirm: Desk status updates',
+    html: themedEmailHtml({
+      title: 'Confirm you want Desk status updates',
+      body: 'Click below to start getting an e-mail when something changes on the Desk status page. If you did not ask for this, ignore it: nothing happens unless you confirm.',
+      actionLabel: 'Confirm subscription',
+      actionUrl: `${libraryBase()}/status/subscribe/confirm?token=${encodeURIComponent(confirmToken)}`,
+      note: 'This link expires in 7 days.',
+    }),
+    requestId,
+    skippedEvent: 'status_subscribe_email_skipped',
+    failedEvent: 'status_subscribe_email_failed',
+    sentEvent: 'status_subscribe_email_sent',
+  });
+}
+
+/** One incident update, to one confirmed subscriber (their own unsubscribe link at the bottom). */
+export async function sendIncidentNoticeEmail(config: AppConfig, to: string, unsubscribeToken: string, title: string, status: string, message: string, requestId = 'status-incident'): Promise<void> {
+  await sendEmail(config, {
+    to,
+    subject: `Desk status: ${title} (${status})`,
+    html: themedEmailHtml({
+      title,
+      body: `${status[0].toUpperCase()}${status.slice(1)}: ${message}`,
+      actionLabel: 'View the status page',
+      actionUrl: `${libraryBase()}/status`,
+      note: `You get this because you subscribed to Desk status updates. <a href="${libraryBase()}/status/subscribe/unsubscribe?token=${encodeURIComponent(unsubscribeToken)}">Unsubscribe</a>.`,
+    }),
+    requestId,
+    skippedEvent: 'status_incident_email_skipped',
+    failedEvent: 'status_incident_email_failed',
+    sentEvent: 'status_incident_email_sent',
+  });
+}
+
 export async function sendAccountAlreadyExistsEmail(
   config: AppConfig,
   to: string,

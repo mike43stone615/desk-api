@@ -18,6 +18,7 @@ import { HttpError, problemBody } from '../middleware/http-error';
 import { config } from '../config';
 import { gatewayApiKeys, looksLikeGatewayKey } from '../domain/gateway/keys';
 import { bindAuthToLog, expiredKeyError } from '../middleware/auth';
+import { getClientIp } from '../middleware/api-protection';
 import type { BrokeredService } from '../domain/gateway/services';
 import { sandboxAnswer, SANDBOX_HEADER } from '../domain/gateway/sandbox';
 import { abortWhenClientLeaves, callUpstream } from '../domain/upstream/client';
@@ -110,6 +111,9 @@ async function forward(service: BrokeredService, request: FastifyRequest, reply:
   if (!verified) throw new HttpError(401, 'Invalid or revoked API key.', 'invalid_api_key');
   if (verified.timeProblem) throw expiredKeyError(verified.timeProblem);
   if (verified.suspended) throw new HttpError(403, 'This API key is suspended.', 'api_key_suspended');
+  if (verified.allowedIps && verified.allowedIps.length > 0 && !verified.allowedIps.includes(getClientIp(request))) {
+    throw new HttpError(403, 'This API key is not accepted from this address.', 'api_key_ip_not_allowed');
+  }
   request.gatewayKey = verified;
   bindAuthToLog(request, reply, { auth: 'key', keyId: verified.id, userId: verified.ownerUserId, service });
   if (!verified.services.has(service)) throw new HttpError(403, 'This API key is not enabled for this API.', 'api_key_service_not_enabled');

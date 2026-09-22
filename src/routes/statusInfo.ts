@@ -7,6 +7,10 @@ import { requireAdmin, requireAuth } from '../middleware/auth';
 import { recordSecurityEvent } from '../modules/audit/security-events';
 import { changelogAtom, loadChangelog } from '../domain/status/changelog';
 import { addIncidentUpdate, INCIDENT_SEVERITIES, INCIDENT_STATUSES, listIncidents, openIncident } from '../domain/status/incidents';
+import { confirmedSubscribers } from '../domain/status/subscribers';
+import { sendIncidentNoticeEmail } from '../infrastructure/email/resend';
+import { config } from '../config';
+
 
 export async function incidentsHandler(_request: FastifyRequest, reply: FastifyReply) {
   return reply.header('Cache-Control', 'public, max-age=30').send(await listIncidents());
@@ -40,6 +44,7 @@ export async function openIncidentHandler(request: FastifyRequest, reply: Fastif
   if (!parsed.success) throw validationError(parsed.error);
   const incident = await openIncident(parsed.data);
   recordSecurityEvent(request, 'incident_opened', 'ok', { incidentId: incident.id, severity: incident.severity });
+  notifySubscribers(incident.title, 'investigating', parsed.data.message);
   return reply.status(201).header('Location', `/v1/status/incidents`).send({ incident });
 }
 
@@ -51,5 +56,15 @@ export async function updateIncidentHandler(request: FastifyRequest, reply: Fast
   const incident = await addIncidentUpdate(id, parsed.data.status, parsed.data.message);
   if (!incident) throw new HttpError(404, 'No such incident.', 'not_found');
   recordSecurityEvent(request, 'incident_updated', 'ok', { incidentId: id, status: parsed.data.status });
+  notifySubscribers(incident.title, parsed.data.status, parsed.data.message);
   return reply.send({ incident });
+}
+
+/** Never awaited by the route: a slow or failing e-mail must not hold up posting the update. */
+function notifySubscribers(title: string, status: string, message: string): void {
+  void (async () => {
+    for (const s of await confirmedSubscribers()) {
+      await sendIncidentNoticeEmail(config, s.email, s.unsubscribeToken, title, status, message).catch(() => {});
+    }
+  })().catch(() => {});
 }

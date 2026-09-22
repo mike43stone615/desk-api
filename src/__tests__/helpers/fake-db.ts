@@ -38,6 +38,8 @@ export function createFakeDb() {
   const platformAdmins = new Set<string>(); // migration 0024: user ids on the administrator list
   const keySuspensions = new Map<string, FakeRow>(); // migration 0016, keyed by key id
   const emailInvites = new Map<string, FakeRow>(); // keyed by id (migration 0013)
+  const totpBackupCodes: FakeRow[] = []; // migration 0026
+  const mfaPendingLogins = new Map<string, FakeRow>(); // migration 0026, keyed by token hash
   const backendRevocations = new Map<string, FakeRow>(); // the queue filled by the grant-delete trigger (migration 0010)
 
   function findUserByEmail(email: string): FakeRow | undefined {
@@ -52,6 +54,74 @@ export function createFakeDb() {
     const p = params as string[];
 
     // ── suspensions (migration 0016) ── (before the generic "SELECT 1" liveness answer below)
+    // ── two-factor auth (migration 0026) — specific WHERE clauses on `users`, so these must be checked before the
+    // generic "SELECT 1" liveness catch-all a little further down (a plain startsWith('SELECT 1') would otherwise treat
+    // every one of these as a health check and always answer "yes").
+    if (s === 'SELECT 1 AS n FROM users WHERE id = $1 AND totp_enabled_at IS NOT NULL') {
+      const row = users.get(p[0]);
+      return row?.totp_enabled_at ? { rows: [{ n: '1' }], rowCount: 1 } : { rows: [], rowCount: 0 };
+    }
+    if (s === 'SELECT totp_enabled_at FROM users WHERE id = $1') {
+      const row = users.get(p[0]);
+      return row ? { rows: [{ totp_enabled_at: row.totp_enabled_at ?? null }], rowCount: 1 } : { rows: [], rowCount: 0 };
+    }
+    if (s === 'SELECT totp_secret_enc, totp_enabled_at FROM users WHERE id = $1') {
+      const row = users.get(p[0]);
+      return row ? { rows: [{ totp_secret_enc: row.totp_secret_enc ?? null, totp_enabled_at: row.totp_enabled_at ?? null }], rowCount: 1 } : { rows: [], rowCount: 0 };
+    }
+    if (s === 'SELECT totp_secret_enc FROM users WHERE id = $1 AND totp_enabled_at IS NOT NULL') {
+      const row = users.get(p[0]);
+      return row?.totp_enabled_at ? { rows: [{ totp_secret_enc: row.totp_secret_enc ?? null }], rowCount: 1 } : { rows: [], rowCount: 0 };
+    }
+    if (s === 'UPDATE users SET totp_secret_enc = $2 WHERE id = $1') {
+      const row = users.get(p[0]);
+      if (row) row.totp_secret_enc = p[1];
+      return { rows: [], rowCount: row ? 1 : 0 };
+    }
+    if (s.startsWith('UPDATE users SET totp_enabled_at = ')) {
+      const row = users.get(p[0]);
+      if (row) row.totp_enabled_at = nowIso();
+      return { rows: [], rowCount: row ? 1 : 0 };
+    }
+    if (s === 'UPDATE users SET totp_secret_enc = NULL, totp_enabled_at = NULL WHERE id = $1') {
+      const row = users.get(p[0]);
+      if (row) { row.totp_secret_enc = null; row.totp_enabled_at = null; }
+      return { rows: [], rowCount: row ? 1 : 0 };
+    }
+    if (s === 'DELETE FROM totp_backup_codes WHERE user_id = $1') {
+      let n = 0;
+      for (let i = totpBackupCodes.length - 1; i >= 0; i--) if (totpBackupCodes[i].user_id === p[0]) { totpBackupCodes.splice(i, 1); n++; }
+      return { rows: [], rowCount: n };
+    }
+    if (s === 'INSERT INTO totp_backup_codes (id, user_id, code_hash) VALUES ($1, $2, $3)') {
+      totpBackupCodes.push({ id: p[0], user_id: p[1], code_hash: p[2], used_at: null, created_at: nowIso() });
+      return { rows: [], rowCount: 1 };
+    }
+    if (s.startsWith('SELECT COUNT(*)::text AS n FROM totp_backup_codes WHERE user_id = $1')) {
+      const n = totpBackupCodes.filter((c) => c.user_id === p[0] && !c.used_at).length;
+      return { rows: [{ n: String(n) }], rowCount: 1 };
+    }
+    if (s.startsWith('UPDATE totp_backup_codes SET used_at = ') && s.includes('WHERE user_id = $1 AND code_hash = $2 AND used_at IS NULL')) {
+      const code = totpBackupCodes.find((c) => c.user_id === p[0] && c.code_hash === p[1] && !c.used_at);
+      if (!code) return { rows: [], rowCount: 0 };
+      code.used_at = nowIso();
+      return { rows: [{ id: code.id }], rowCount: 1 };
+    }
+    if (s === 'INSERT INTO mfa_pending_logins (id, user_id, token_hash, ip_address, user_agent, expires_at) VALUES ($1, $2, $3, $4, $5, $6)') {
+      mfaPendingLogins.set(p[2] as string, { id: p[0], user_id: p[1], token_hash: p[2], ip_address: p[3], user_agent: p[4], expires_at: p[5] });
+      return { rows: [], rowCount: 1 };
+    }
+    if (s === 'DELETE FROM mfa_pending_logins WHERE token_hash = $1 RETURNING user_id, expires_at') {
+      const row = mfaPendingLogins.get(p[0]);
+      if (row) mfaPendingLogins.delete(p[0]);
+      return { rows: row ? [{ user_id: row.user_id, expires_at: row.expires_at }] : [], rowCount: row ? 1 : 0 };
+    }
+    if (s === 'DELETE FROM mfa_pending_logins WHERE expires_at < $1') {
+      let n = 0;
+      for (const [k, v] of mfaPendingLogins) if (String(v.expires_at) < p[0]) { mfaPendingLogins.delete(k); n++; }
+      return { rows: [], rowCount: n };
+    }
+
     // Listed administrators (migration 0024): none unless a test adds one to platformAdmins.
     if (s.startsWith('SELECT 1 FROM platform_admins a JOIN users u')) return platformAdmins.has(p[0]) ? { rows: [{}], rowCount: 1 } : { rows: [], rowCount: 0 };
     if (s === 'SELECT 1 FROM account_suspensions WHERE user_id = $1') return accountSuspensions.has(p[0]) ? { rows: [{}], rowCount: 1 } : { rows: [], rowCount: 0 };
@@ -405,8 +475,9 @@ export function createFakeDb() {
     }
     if (s.startsWith('SELECT b.id, b.name, b.industry, bm.role')) {
       const userId = p[0];
+      const restrictedTo = s.includes('AND b.id = $4') ? p[3] : undefined;
       const rows = [...memberships.values()]
-        .filter((m) => m.user_id === userId && m.accepted_at)
+        .filter((m) => m.user_id === userId && m.accepted_at && (!restrictedTo || m.business_id === restrictedTo))
         .map((m) => {
           const b = businesses.get(m.business_id as string)!;
           return { id: b.id, name: b.name, industry: b.industry, role: m.role };
@@ -529,6 +600,10 @@ export function createFakeDb() {
         });
       }
       return { rows: [], rowCount: 1 };
+    }
+    if (s === 'SELECT 1 FROM business_memberships WHERE business_id = $1 AND user_id = $2 AND accepted_at IS NOT NULL') {
+      const has = [...memberships.values()].some((m) => m.business_id === p[0] && m.user_id === p[1] && m.accepted_at);
+      return has ? { rows: [{ '?column?': 1 }], rowCount: 1 } : { rows: [], rowCount: 0 };
     }
     if (
       s.startsWith(
@@ -694,9 +769,10 @@ export function createFakeDb() {
       return { rows: [{ count: String(n) }], rowCount: 1 };
     }
     if (s.startsWith('INSERT INTO gateway_api_keys')) {
-      const [id, owner_user_id, label, key_hash, key_prefix, expires_at, desk_scopes, team_id, sandbox] = p;
+      const [id, owner_user_id, label, key_hash, key_prefix, expires_at, desk_scopes, team_id, sandbox, allowed_ips, restricted_business_id] = p as unknown as [string, string, string, string, string, string | null, string[], string | null, boolean, string[] | null, string | null];
       const row: FakeRow = {
         id, owner_user_id, label, key_hash, key_prefix, expires_at: expires_at ?? null, desk_scopes: desk_scopes ?? ['profile', 'drafts', 'businesses'], rate_limit_per_minute: null, team_id: team_id ?? null, sandbox: Boolean(sandbox),
+        allowed_ips: allowed_ips ?? null, restricted_business_id: restricted_business_id ?? null,
         created_at: nowIso(), last_used_at: null, revoked_at: null,
       };
       gatewayKeys.set(id, row);
@@ -711,6 +787,18 @@ export function createFakeDb() {
       const k = gatewayKeys.get(p[0]);
       const row = k && k.owner_user_id === p[1] ? [{ id: k.id, revoked_at: k.revoked_at, team_id: k.team_id ?? null, sandbox: k.sandbox === true }] : [];
       return { rows: row, rowCount: row.length };
+    }
+    if (s.startsWith('SELECT k.id, k.revoked_at, k.team_id, k.desk_scopes FROM gateway_api_keys k WHERE k.id = $1 AND k.owner_user_id = $2')) {
+      const k = gatewayKeys.get(p[0]);
+      const row = k && k.owner_user_id === p[1] ? [{ id: k.id, revoked_at: k.revoked_at, team_id: k.team_id ?? null, desk_scopes: k.desk_scopes ?? ['profile', 'drafts', 'businesses'] }] : [];
+      return { rows: row, rowCount: row.length };
+    }
+    if (s.startsWith('UPDATE gateway_api_keys SET allowed_ips = $2, restricted_business_id = $3 WHERE id = $1')) {
+      const k = gatewayKeys.get(p[0]);
+      if (!k) return { rows: [], rowCount: 0 };
+      k.allowed_ips = p[1] ?? null;
+      k.restricted_business_id = p[2] ?? null;
+      return { rows: [{ ...k }], rowCount: 1 };
     }
     if (s.startsWith('SELECT owner_user_id, team_id FROM gateway_api_keys WHERE id = $1')) {
       const k = gatewayKeys.get(p[0]);
@@ -803,9 +891,9 @@ export function createFakeDb() {
       k.rate_limit_per_minute = p[1];
       return { rows: [], rowCount: 1 };
     }
-    if (s.startsWith('SELECT id, owner_user_id, revoked_at, created_at, last_used_at, expires_at, desk_scopes, rate_limit_per_minute, team_id, sandbox FROM gateway_api_keys WHERE key_hash = $1')) {
+    if (s.startsWith('SELECT id, owner_user_id, revoked_at, created_at, last_used_at, expires_at, desk_scopes, rate_limit_per_minute, team_id, sandbox, allowed_ips, restricted_business_id FROM gateway_api_keys WHERE key_hash = $1')) {
       const k = [...gatewayKeys.values()].find((x) => x.key_hash === p[0]);
-      const rows = k ? [{ id: k.id, owner_user_id: k.owner_user_id, revoked_at: k.revoked_at, created_at: k.created_at, last_used_at: k.last_used_at, expires_at: k.expires_at ?? null, desk_scopes: k.desk_scopes, rate_limit_per_minute: k.rate_limit_per_minute ?? null, team_id: k.team_id ?? null, sandbox: k.sandbox === true }] : [];
+      const rows = k ? [{ id: k.id, owner_user_id: k.owner_user_id, revoked_at: k.revoked_at, created_at: k.created_at, last_used_at: k.last_used_at, expires_at: k.expires_at ?? null, desk_scopes: k.desk_scopes, rate_limit_per_minute: k.rate_limit_per_minute ?? null, team_id: k.team_id ?? null, sandbox: k.sandbox === true, allowed_ips: k.allowed_ips ?? null, restricted_business_id: k.restricted_business_id ?? null }] : [];
       return { rows, rowCount: rows.length };
     }
     if (s.startsWith('SELECT service FROM gateway_api_key_grants WHERE api_key_id = $1')) {

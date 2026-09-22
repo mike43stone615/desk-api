@@ -301,14 +301,23 @@ export async function listBusinessesHandler(request: FastifyRequest, reply: Fast
   await requireConfirmedEmail(request, reply);
   const user = request.currentUser!;
   const page = parsePage(request.query);
+  // A key restricted to one business (see domain/gateway/keys.ts) sees at most that one, whatever else its owner belongs to.
+  const restricted = request.gatewayKey?.restrictedBusinessId ?? null;
   const { rows: fetched } = await pool.query<{ id: string; name: string; industry: string | null; role: BusinessMemberRole }>(
-    `SELECT b.id, b.name, b.industry, bm.role
-     FROM businesses b
-     INNER JOIN business_memberships bm ON bm.business_id = b.id
-     WHERE bm.user_id = $1 AND bm.accepted_at IS NOT NULL
-     ORDER BY b.updated_at DESC, b.id
-     LIMIT $2 OFFSET $3`,
-    [user.id, page.limit + 1, page.offset],
+    restricted
+      ? `SELECT b.id, b.name, b.industry, bm.role
+         FROM businesses b
+         INNER JOIN business_memberships bm ON bm.business_id = b.id
+         WHERE bm.user_id = $1 AND bm.accepted_at IS NOT NULL AND b.id = $4
+         ORDER BY b.updated_at DESC, b.id
+         LIMIT $2 OFFSET $3`
+      : `SELECT b.id, b.name, b.industry, bm.role
+         FROM businesses b
+         INNER JOIN business_memberships bm ON bm.business_id = b.id
+         WHERE bm.user_id = $1 AND bm.accepted_at IS NOT NULL
+         ORDER BY b.updated_at DESC, b.id
+         LIMIT $2 OFFSET $3`,
+    restricted ? [user.id, page.limit + 1, page.offset, restricted] : [user.id, page.limit + 1, page.offset],
   );
   const { rows, hasMore } = slicePage(fetched, page);
   return reply.send({
@@ -329,6 +338,8 @@ export async function listBusinessMembersHandler(request: FastifyRequest, reply:
   await requireConfirmedEmail(request, reply);
   const user = request.currentUser!;
   const { id: businessId } = request.params as { id: string };
+  const restricted = request.gatewayKey?.restrictedBusinessId;
+  if (restricted && restricted !== businessId) throw new HttpError(404, 'Business not found.', 'business_not_found');
   const requester = await requireBusinessMembership(businessId, user.id);
   const page = parsePage(request.query);
 

@@ -26,6 +26,8 @@ export interface AuthService {
   // enumeration-safe pattern requestPasswordReset() already uses.
   signUp(email: string, password: string, firstName: string, lastName: string): Promise<SignupResult | null>;
   signIn(email: string, password: string, meta?: SessionMeta): Promise<AuthResult | null>;
+  /** A real session for an account that has already proven who it is by some other means (here: a second factor). */
+  createSessionForVerifiedUser(userId: string, meta?: SessionMeta): Promise<string>;
   verifySession(token: string): Promise<User | null>;
   revokeSession(token: string): Promise<void>;
   requestPasswordReset(email: string): Promise<string | null>;

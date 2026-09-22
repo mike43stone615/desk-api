@@ -47,3 +47,20 @@ export const DeleteAccountSchema = z.object({
   password: z.string().min(1, 'password is required').max(128, 'password must be at most 128 characters'),
 });
 export type UpdatePasswordRequest = z.infer<typeof UpdatePasswordSchema>;
+
+export const TwoFactorVerifySchema = z.object({
+  mfaToken: z.string().min(1, 'mfaToken is required').max(200, 'mfaToken is not valid'),
+  code: z.string().min(1, 'code is required').max(20, 'code is not valid'),
+});
+export type TwoFactorVerifyRequest = z.infer<typeof TwoFactorVerifySchema>;
+
+export const TwoFactorCodeSchema = z.object({
+  code: z.string().min(1, 'code is required').max(20, 'code is not valid'),
+});
+export type TwoFactorCodeRequest = z.infer<typeof TwoFactorCodeSchema>;
+
+export const TwoFactorDisableSchema = z.object({
+  password: z.string().min(1, 'password is required').max(128, 'password must be at most 128 characters'),
+  code: z.string().min(1, 'code is required').max(20, 'code is not valid'),
+});
+export type TwoFactorDisableRequest = z.infer<typeof TwoFactorDisableSchema>;

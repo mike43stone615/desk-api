@@ -87,3 +87,13 @@ export async function webhookDeliveriesHandler(request: FastifyRequest, reply: F
   if (!rows) throw new HttpError(404, 'No such webhook endpoint.', 'webhook_not_found');
   return reply.send({ hasMore: false, deliveries: rows });
 }
+
+/** Puts one failed delivery back in line right now, with a fresh set of tries; switches the endpoint back on if it had been disabled. */
+export async function retryWebhookDeliveryHandler(request: FastifyRequest, reply: FastifyReply) {
+  await requireAuth(request, reply);
+  const { id, deliveryId } = request.params as { id: string; deliveryId: string };
+  const ok = await webhooks.retryDelivery(request.currentUser!.id, id, deliveryId);
+  if (!ok) throw new HttpError(404, 'No such webhook endpoint, or that delivery has not failed.', 'webhook_delivery_not_found');
+  audit(request, 'webhook_delivery_retried', { userId: request.currentUser!.id, endpointId: id, deliveryId });
+  return reply.status(202).send({ ok: true, message: 'Queued to try again.' });
+}

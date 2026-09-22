@@ -24,6 +24,8 @@ import { deleteExpiredIdempotencyKeys } from '../middleware/idempotency';
 import { deleteExpiredOAuthRows } from '../domain/oauth/oauth';
 import { deleteExpiredSecurityEvents } from '../modules/audit/security-events';
 import { deleteExpiredAuditRows } from '../modules/audit/mutation-audit';
+import { deleteExpiredUnconfirmed as deleteExpiredStatusSubscribers } from '../domain/status/subscribers';
+import { deleteExpiredPendingLogins } from '../domain/auth/twoFactor';
 import { revokeExpiredKeys } from '../domain/gateway/expiry';
 import { config } from '../config';
 import { deleteOldDeliveries, processDueDeliveries } from '../domain/webhooks/webhooks';
@@ -166,6 +168,8 @@ export async function runCleanup(log: FastifyBaseLogger): Promise<void> {
     await deleteExpiredIdempotencyKeys();
     await deleteExpiredOAuthRows();
     await deleteExpiredAuditRows();
+    await deleteExpiredStatusSubscribers();
+    await deleteExpiredPendingLogins();
     await revokeExpiredKeys(log);
     cronTicksTotal.inc({ job: 'auth_cleanup', outcome: 'ok' });
     log.info({ event: 'cron_auth_cleanup' }, 'auth cleanup tick completed');

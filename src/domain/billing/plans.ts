@@ -6,6 +6,9 @@
 // anyone until they are moved to another plan.
 import { randomUUID } from 'node:crypto';
 import { pool } from '../../db';
+import { config } from '../../config';
+import { emitWebhookEvent } from '../webhooks/webhooks';
+import { sendUsageThresholdEmail } from '../../infrastructure/email/resend';
 
 export type SubjectType = 'user' | 'team';
 
@@ -113,13 +116,37 @@ export async function assignPlan(subjectType: SubjectType, subjectId: string, pl
 
 /** Counts one market analysis for the person, or for the team when the key belongs to one. Fire-and-forget. */
 export function meterAnalysis(subjectType: SubjectType, subjectId: string): void {
-  Promise.resolve(
-    pool.query(
+  void (async () => {
+    const { rows } = await pool.query<{ quantity: number }>(
       `INSERT INTO usage_meter (subject_type, subject_id, month, metric, quantity) VALUES ($1, $2, $3, 'market_analyses', 1)
-       ON CONFLICT (subject_type, subject_id, month, metric) DO UPDATE SET quantity = usage_meter.quantity + 1`,
+       ON CONFLICT (subject_type, subject_id, month, metric) DO UPDATE SET quantity = usage_meter.quantity + 1
+       RETURNING quantity`,
       [subjectType, subjectId, monthKey()],
-    ),
-  ).catch(() => {});
+    );
+    const used = rows[0]?.quantity;
+    if (used !== undefined) await checkUsageThreshold(subjectType, subjectId, used);
+  })().catch(() => {});
+}
+
+/**
+ * A daily-metered analysis just pushed this month's count to exactly the 80% or the 100% mark of the plan's included
+ * amount (checked against the exact new total, so this fires once per threshold, not on every call afterward). Tells
+ * whoever should know: a webhook event, and an e-mail to the account (or every accepted owner/admin of a team).
+ */
+async function checkUsageThreshold(subjectType: SubjectType, subjectId: string, used: number): Promise<void> {
+  const { plan } = await subscriptionFor(subjectType, subjectId);
+  if (plan.includedAnalyses <= 0) return;
+  const eightyPercent = Math.ceil(plan.includedAnalyses * 0.8);
+  const percent = used === plan.includedAnalyses ? 100 : used === eightyPercent && eightyPercent < plan.includedAnalyses ? 80 : null;
+  if (percent === null) return;
+  emitWebhookEvent(subjectType === 'team' ? { teamId: subjectId } : { userId: subjectId }, 'usage.threshold_reached', { percent, used, included: plan.includedAnalyses, month: monthKey() });
+  const recipients = subjectType === 'user'
+    ? (await pool.query<{ email: string }>(`SELECT email FROM users WHERE id = $1`, [subjectId])).rows.map((r) => r.email)
+    : (await pool.query<{ email: string }>(
+        `SELECT u.email FROM team_members tm JOIN users u ON u.id = tm.user_id WHERE tm.team_id = $1 AND tm.role IN ('owner', 'admin') AND tm.accepted_at IS NOT NULL`,
+        [subjectId],
+      )).rows.map((r) => r.email);
+  for (const email of recipients) sendUsageThresholdEmail(config, email, percent, used, plan.includedAnalyses).catch(() => {});
 }
 
 export async function analysesInMonth(subjectType: SubjectType, subjectId: string, month = monthKey()): Promise<number> {

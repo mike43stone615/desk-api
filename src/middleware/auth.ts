@@ -10,7 +10,7 @@ import { gatewayApiKeys, looksLikeGatewayKey, type DeskScope, type VerifiedGatew
 import { LEGACY_SESSION_COOKIE_NAME, sessionCookieName } from '../infrastructure/auth/session-cookie';
 import { config } from '../config';
 import { enforceUserRouteLimit, routeKey } from './route-limits';
-import { checkRateBucket, USER_BUCKET_FACTOR } from './api-protection';
+import { checkRateBucket, USER_BUCKET_FACTOR, getClientIp } from './api-protection';
 import { ACCESS_TOKEN_PREFIX, verifyAccessToken, type VerifiedOAuthToken } from '../domain/oauth/oauth';
 import { isUserSuspended } from '../domain/suspension';
 import { isListedAdmin } from '../domain/admins';
@@ -81,6 +81,9 @@ async function authenticateWithGatewayKey(request: FastifyRequest, apiKey: strin
   if (!verified) throw new HttpError(401, 'Invalid or revoked API key.', 'invalid_api_key');
   if (verified.timeProblem) throw expiredKeyError(verified.timeProblem);
   if (verified.suspended) throw new HttpError(403, 'This API key is suspended.', 'api_key_suspended');
+  if (verified.allowedIps && verified.allowedIps.length > 0 && !verified.allowedIps.includes(getClientIp(request))) {
+    throw new HttpError(403, 'This API key is not accepted from this address.', 'api_key_ip_not_allowed');
+  }
   if (!verified.services.has('desk_api')) {
     throw new HttpError(403, 'This API key is not enabled for the Desk API.', 'api_key_service_not_enabled');
   }

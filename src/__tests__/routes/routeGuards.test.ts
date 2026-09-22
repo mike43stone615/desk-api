@@ -34,6 +34,10 @@ const PUBLIC: Record<string, string> = {
   'POST /auth/email-confirmation/confirm': 'pre-sign-in flow; authorised by the emailed token',
   'POST /auth/password-reset/request': 'pre-sign-in flow; answers identically for every address',
   'POST /auth/password-reset/confirm': 'pre-sign-in flow; authorised by the emailed token',
+  'POST /auth/2fa/verify': 'step 2 of signing in to a 2FA account; authorised by the pending-login token from /auth/signin, not a session',
+  'POST /status/subscribe': 'anyone may ask to be e-mailed about status changes; double opt-in (nothing happens until the link is clicked)',
+  'GET /status/subscribe/confirm': 'confirms a subscription; authorised by the emailed token',
+  'GET /status/subscribe/unsubscribe': 'one-click unsubscribe; authorised by its own (non-secret) token',
   'POST /webhooks/resend': 'the mail provider calls this; authorised by its signature only (404 until configured, 401 for a bad signature)',
   'GET /status': 'the public status page (operational / degraded / down per part; no detail)',
   'GET /errors': 'catalogue of error codes (documentation only)',
@@ -117,7 +121,7 @@ describe('route guards', () => {
   it('every public route that changes data is one of the pre-sign-in account routes', () => {
     const mutating = Object.keys(PUBLIC).filter((k) => !k.startsWith('GET '));
     // ...plus the one signature-authorised webhook (404 until configured, 401 unless correctly signed).
-    expect(mutating.every((k) => k.startsWith('POST /auth/') || k === 'POST /webhooks/resend' || k === 'POST /oauth/token' || k === 'POST /oauth/revoke')).toBe(true);
+    expect(mutating.every((k) => k.startsWith('POST /auth/') || k === 'POST /webhooks/resend' || k === 'POST /oauth/token' || k === 'POST /oauth/revoke' || k === 'POST /status/subscribe')).toBe(true);
   });
 
   it('the routes an API Library key may call all exist and are read-only', () => {

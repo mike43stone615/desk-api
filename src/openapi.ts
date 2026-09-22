@@ -362,6 +362,57 @@ const BASE_SPEC = {
     '/auth/password-reset/confirm': {
       post: { tags: ['Auth'], summary: 'Confirm a password reset using a token', responses: { '200': { description: 'OK' }, '400': { description: 'Invalid or expired token' } } },
     },
+    '/auth/2fa/verify': {
+      post: {
+        tags: ['Auth'],
+        summary: 'Step 2 of signing in to an account with two-factor authentication on',
+        description: 'Body: { "mfaToken": string (from /auth/signin), "code": string (a 6-digit authenticator code, or a backup code) }. Answers exactly like /auth/signin on success.',
+        requestBody: { required: true, content: { 'application/json': { schema: { type: 'object', required: ['mfaToken', 'code'], properties: { mfaToken: { type: 'string' }, code: { type: 'string' } } } } } },
+        responses: { '200': { description: 'OK' }, '401': { description: 'The pending sign-in expired, or the code is wrong' } },
+      },
+    },
+    '/auth/2fa': {
+      get: { tags: ['Auth'], summary: 'Whether two-factor authentication is on, and how many backup codes are unused', security: [{ SessionToken: [] }], responses: { '200': { description: 'OK' } } },
+    },
+    '/auth/2fa/setup': {
+      post: {
+        tags: ['Auth'],
+        summary: 'Starts two-factor setup: a fresh secret and an otpauth:// URI for an authenticator app',
+        description: 'Not turned on until confirmed with a real code at /auth/2fa/enable.',
+        security: [{ SessionToken: [] }],
+        responses: { '200': { description: 'OK' }, '503': { description: 'Not available right now' } },
+      },
+    },
+    '/auth/2fa/enable': {
+      post: {
+        tags: ['Auth'],
+        summary: 'Confirms setup with a code from the app just configured; turns 2FA on',
+        description: 'Body: { "code": string }. Returns ten backup codes, shown exactly once.',
+        security: [{ SessionToken: [] }],
+        requestBody: { required: true, content: { 'application/json': { schema: { type: 'object', required: ['code'], properties: { code: { type: 'string' } } } } } },
+        responses: { '201': { description: 'Enabled; backup codes in the body' }, '400': { description: 'The code is wrong' }, '409': { description: 'Already enabled, or setup was never started' } },
+      },
+    },
+    '/auth/2fa/disable': {
+      post: {
+        tags: ['Auth'],
+        summary: 'Turns two-factor authentication off',
+        description: 'Body: { "password": string, "code": string }. Needs the current password and a current code.',
+        security: [{ SessionToken: [] }],
+        requestBody: { required: true, content: { 'application/json': { schema: { type: 'object', required: ['password', 'code'], properties: { password: { type: 'string' }, code: { type: 'string' } } } } } },
+        responses: { '200': { description: 'OK' }, '400': { description: 'The code is wrong' }, '409': { description: 'Not enabled' } },
+      },
+    },
+    '/auth/2fa/backup-codes': {
+      post: {
+        tags: ['Auth'],
+        summary: 'New backup codes; the old ones stop working',
+        description: 'Body: { "code": string }. Needs a current code (TOTP or an unused backup code).',
+        security: [{ SessionToken: [] }],
+        requestBody: { required: true, content: { 'application/json': { schema: { type: 'object', required: ['code'], properties: { code: { type: 'string' } } } } } },
+        responses: { '200': { description: 'OK; backup codes in the body' }, '400': { description: 'The code is wrong' }, '409': { description: 'Not enabled' } },
+      },
+    },
     '/auth/password': {
       post: {
         tags: ['Auth'],
@@ -379,6 +430,17 @@ const BASE_SPEC = {
     },
     '/gateway/api-keys/{id}/services/{service}': {
       delete: { tags: ['API Library'], summary: 'Remove an API from one of your keys (at least one must stay)', security: [{ SessionToken: [] }], parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }, { name: 'service', in: 'path', required: true, schema: { type: 'string' } }], responses: { '200': { description: 'The key with its APIs' }, '404': { description: 'Not your key' }, '409': { description: 'A key needs at least one API' } } },
+    },
+    '/gateway/api-keys/{id}/restrictions': {
+      patch: {
+        tags: ['API Library'],
+        summary: 'Restrict one of your keys to an IP allowlist and/or one business',
+        description: 'Body: { "allowedIps"?: string[] | null, "businessId"?: string | null }. Omit a field to leave it unchanged; null clears it. A business restriction needs the Desk API with the "businesses" scope, and is not available on a team key.',
+        security: [{ SessionToken: [] }],
+        parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }],
+        requestBody: { required: false, content: { 'application/json': { schema: { type: 'object', properties: { allowedIps: { type: 'array', items: { type: 'string' } }, businessId: { type: 'string' } } } } } },
+        responses: { '200': { description: 'The key with its restrictions' }, '400': { description: 'Not eligible for a business restriction' }, '404': { description: 'Not your key, or no such business' } },
+      },
     },
     '/gateway/api-keys/{id}/suspend': {
       post: { tags: ['API Library'], summary: 'Switch one of your own keys off without revoking it', security: [{ SessionToken: [] }], parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }], responses: { '200': { description: 'Suspended' }, '404': { description: 'Not your key, or already revoked' } } },
@@ -453,6 +515,9 @@ const BASE_SPEC = {
     '/gateway/webhooks/{id}/deliveries': {
       get: { tags: ['Webhooks'], summary: 'The last 50 deliveries to an endpoint, with their results', security: [{ SessionToken: [] }], parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }], responses: { '200': { description: 'The deliveries' }, '404': { description: 'Not your endpoint' } } },
     },
+    '/gateway/webhooks/{id}/deliveries/{deliveryId}/retry': {
+      post: { tags: ['Webhooks'], summary: 'Puts one failed delivery back in line right now, with a fresh set of tries', security: [{ SessionToken: [] }], parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }, { name: 'deliveryId', in: 'path', required: true, schema: { type: 'string' } }], responses: { '202': { description: 'Queued' }, '404': { description: 'Not your endpoint, or that delivery has not failed' } } },
+    },
     '/graphql': {
       post: { tags: ['GraphQL'], summary: 'Read-only GraphQL over your own data: one request instead of several. Limits: 8,000 characters, depth 6, 150 fields, 10 aliases; no mutations', security: [{ SessionToken: [] }, { ApiLibraryKey: [] }], requestBody: { required: true, content: { 'application/json': { schema: { type: 'object', required: ['query'], properties: { query: { type: 'string' }, variables: { type: 'object' }, operationName: { type: 'string' } } } } } }, responses: { '200': { description: 'The GraphQL answer ({data, errors}); a resolver error is a normal answer with errors' }, '400': { description: 'A malformed, too large, too deep or too costly query, or a mutation (extensions.code says which)' } } },
     },
@@ -486,6 +551,21 @@ const BASE_SPEC = {
     },
     '/.well-known/oauth-authorization-server': {
       get: { tags: ['OAuth'], summary: 'OAuth discovery document (RFC 8414)', responses: { '200': { description: 'Endpoints, grant types and scopes' } } },
+    },
+    '/status/subscribe': {
+      post: {
+        tags: ['System'],
+        summary: 'Ask to be e-mailed when the status page changes (public; double opt-in)',
+        description: 'Form or JSON body: { "email": string }. Always redirects to /status with a banner; the answer is the same whether or not the address was already subscribed.',
+        requestBody: { required: true, content: { 'application/x-www-form-urlencoded': { schema: { type: 'object', required: ['email'], properties: { email: { type: 'string' } } } }, 'application/json': { schema: { type: 'object', required: ['email'], properties: { email: { type: 'string' } } } } } },
+        responses: { '302': { description: 'Redirects to /status?banner=subscribed (or subscribe_error for a bad address)' } },
+      },
+    },
+    '/status/subscribe/confirm': {
+      get: { tags: ['System'], summary: 'Confirms a status subscription from its emailed link (public)', parameters: [{ name: 'token', in: 'query', required: true, schema: { type: 'string' } }], responses: { '302': { description: 'Redirects to /status?banner=confirmed (or subscribe_error)' } } },
+    },
+    '/status/subscribe/unsubscribe': {
+      get: { tags: ['System'], summary: 'One-click unsubscribe from status e-mails (public; the link in every notice)', parameters: [{ name: 'token', in: 'query', required: true, schema: { type: 'string' } }], responses: { '302': { description: 'Redirects to /status?banner=unsubscribed' } } },
     },
     '/status/incidents': {
       get: { tags: ['System'], summary: 'Open incidents and the last 30 days of resolved ones (public)', responses: { '200': { description: 'active and recent incidents, each with its updates' } } },

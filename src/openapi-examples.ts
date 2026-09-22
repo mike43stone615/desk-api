@@ -801,6 +801,38 @@ export const GATEWAY_EXAMPLES: Record<string, { status: number; request: unknown
       }
     }
   },
+  "PATCH /v1/gateway/api-keys/{id}/restrictions": {
+    "status": 200,
+    "request": {
+      "allowedIps": [
+        "203.0.113.9"
+      ]
+    },
+    "response": {
+      "apiKey": {
+        "id": "3f1c2c0e-7a51-4f6e-9a0b-6b0c1f7e2d11",
+        "label": "my server",
+        "keyPrefix": "deskgw_a1b2c",
+        "createdAt": "2026-09-01T12:00:00Z",
+        "lastUsedAt": "2026-09-19T08:30:00Z",
+        "expiresAt": null,
+        "deskScopes": [
+          "profile",
+          "drafts",
+          "businesses"
+        ],
+        "rateLimitPerMinute": null,
+        "services": [
+          "desk_api"
+        ],
+        "suspended": false,
+        "allowedIps": [
+          "203.0.113.9"
+        ],
+        "restrictedBusinessId": null
+      }
+    }
+  },
   "DELETE /v1/gateway/api-keys/{id}/services/{service}": {
     "status": 200,
     "request": null,
@@ -1026,6 +1058,14 @@ export const GATEWAY_EXAMPLES: Record<string, { status: number; request: unknown
           "deliveredAt": "2026-09-21T15:00:02Z"
         }
       ]
+    }
+  },
+  "POST /v1/gateway/webhooks/{id}/deliveries/{deliveryId}/retry": {
+    "status": 202,
+    "request": null,
+    "response": {
+      "ok": true,
+      "message": "Queued to try again."
     }
   },
   "POST /v1/graphql": {

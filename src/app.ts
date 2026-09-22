@@ -39,6 +39,12 @@ import { metricsRegistry, httpRequestsTotal, httpRequestDurationMs, routeLabel, 
 import {
   signUpHandler,
   signInHandler,
+  twoFactorVerifyHandler,
+  twoFactorSetupHandler,
+  twoFactorEnableHandler,
+  twoFactorDisableHandler,
+  twoFactorBackupCodesHandler,
+  twoFactorStatusHandler,
   signOutHandler,
   listSessionsHandler,
   activityHandler,
@@ -98,15 +104,17 @@ import {
   libraryOpenApiHandler,
   keyUsageHandler,
   resumeGatewayKeyHandler,
-  suspendGatewayKeyHandler, addKeyServiceHandler, removeKeyServiceHandler,
+  suspendGatewayKeyHandler, addKeyServiceHandler, removeKeyServiceHandler, setKeyRestrictionsHandler,
   listGatewayKeysHandler,
   listGatewayServicesHandler,
   revokeGatewayKeyHandler,
 } from './routes/gateway';
-import { createWebhookHandler, deleteWebhookHandler, listWebhookEventsHandler, listWebhooksHandler, rotateWebhookSecretHandler, testWebhookHandler, webhookDeliveriesHandler } from './routes/webhooksOut';
+import { createWebhookHandler, deleteWebhookHandler, listWebhookEventsHandler, listWebhooksHandler, rotateWebhookSecretHandler, testWebhookHandler, webhookDeliveriesHandler, retryWebhookDeliveryHandler } from './routes/webhooksOut';
 import { authorizeDecisionHandler, authorizeHandler, authorizeInfoHandler, createClientHandler, deleteClientHandler, discoveryHandler, listAuthorizationsHandler, listClientsHandler, registerOAuthTokenRoutes, revokeAuthorizationHandler } from './routes/oauth';
 import { graphqlHandler } from './routes/graphql';
 import { changelogAtomHandler, changelogHandler, incidentsHandler, openIncidentHandler, updateIncidentHandler } from './routes/statusInfo';
+import { subscribe as subscribeToStatus, confirm as confirmStatusSubscription, unsubscribe as unsubscribeFromStatus } from './domain/status/subscribers';
+import { sendStatusSubscribeConfirmEmail } from './infrastructure/email/resend';
 import { listIncidents } from './domain/status/incidents';
 import { invoicesHandler, listPlansHandler, subscriptionHandler } from './routes/billing';
 import { adminAccessAddHandler, adminAccessListHandler, adminAccessRemoveHandler, adminMeHandler } from './routes/adminAccess';
@@ -429,12 +437,41 @@ export async function buildApp(options: { logStream?: { write: (line: string) =>
       // The HTML page and the JSON share an address: a browser gets the page, a program (Accept: application/json) the data.
       if (base === '' && typeof req.headers.accept === 'string' && req.headers.accept.includes('text/html')) {
         reply.header('Content-Type', 'text/html; charset=utf-8').header('Cache-Control', 'no-store');
-        applyHtmlCsp(reply, "default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'");
-        return reply.status(view.status === 'down' ? 503 : 200).send(statusHtml(view));
+        applyHtmlCsp(reply, "default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'");
+        const banner = (req.query as { banner?: string }).banner;
+        const validBanner = banner === 'subscribed' || banner === 'confirmed' || banner === 'unsubscribed' || banner === 'subscribe_error' ? banner : undefined;
+        return reply.status(view.status === 'down' ? 503 : 200).send(statusHtml(view, validBanner));
       }
       reply.header('Cache-Control', 'no-store');
       return reply.status(view.status === 'down' ? 503 : 200).send(view);
     });
+    if (base === '') {
+      // A plain HTML <form> posts application/x-www-form-urlencoded, which Fastify does not parse by default; scoped here
+      // (like registerOAuthTokenRoutes) so nothing else in the API is affected.
+      void app.register(async (scope) => {
+        scope.addContentTypeParser('application/x-www-form-urlencoded', { parseAs: 'string', bodyLimit: 2_048 }, (_req, body, done) => {
+          try { done(null, Object.fromEntries(new URLSearchParams(body as string))); } catch (err) { done(err as Error); }
+        });
+        scope.post('/status/subscribe', { bodyLimit: 2_048 }, async (req, reply) => {
+          const body = req.body as { email?: string } | undefined;
+          const email = typeof body?.email === 'string' ? body.email.trim() : '';
+          if (!email || email.length > 254 || !/.+@.+\..+/.test(email)) return reply.redirect('/status?banner=subscribe_error');
+          const { confirmToken } = await subscribeToStatus(email);
+          if (confirmToken) await sendStatusSubscribeConfirmEmail(config, email, confirmToken);
+          return reply.redirect('/status?banner=subscribed');
+        });
+      });
+      app.get('/status/subscribe/confirm', async (req, reply) => {
+        const token = (req.query as { token?: string }).token;
+        const ok = typeof token === 'string' && token && (await confirmStatusSubscription(token));
+        return reply.redirect(ok ? '/status?banner=confirmed' : '/status?banner=subscribe_error');
+      });
+      app.get('/status/subscribe/unsubscribe', async (req, reply) => {
+        const token = (req.query as { token?: string }).token;
+        if (typeof token === 'string' && token) await unsubscribeFromStatus(token);
+        return reply.redirect('/status?banner=unsubscribed');
+      });
+    }
     app.get(`${base}/status/incidents`, incidentsHandler);
     app.get(`${base}/changelog`, changelogHandler);
     app.get(`${base}/changelog.atom`, changelogAtomHandler);
@@ -504,6 +541,12 @@ async function registerLegacyAndVersionedRoutes(instance: FastifyInstance) {
   // ── Auth ──────────────────────────────────────────────────────────────────
   instance.post('/auth/signup', small, signUpHandler);
   instance.post('/auth/signin', small, signInHandler);
+  instance.post('/auth/2fa/verify', small, twoFactorVerifyHandler);
+  instance.get('/auth/2fa', twoFactorStatusHandler);
+  instance.post('/auth/2fa/setup', small, twoFactorSetupHandler);
+  instance.post('/auth/2fa/enable', small, twoFactorEnableHandler);
+  instance.post('/auth/2fa/disable', small, twoFactorDisableHandler);
+  instance.post('/auth/2fa/backup-codes', small, twoFactorBackupCodesHandler);
   instance.post('/auth/signout', signOutHandler);
   instance.get('/auth/sessions', listSessionsHandler);
   instance.get('/auth/activity', activityHandler);
@@ -603,6 +646,7 @@ async function registerLegacyAndVersionedRoutes(instance: FastifyInstance) {
   instance.post('/gateway/webhooks/:id/rotate-secret', small, rotateWebhookSecretHandler);
   instance.post('/gateway/webhooks/:id/test', small, testWebhookHandler);
   instance.get('/gateway/webhooks/:id/deliveries', webhookDeliveriesHandler);
+  instance.post('/gateway/webhooks/:id/deliveries/:deliveryId/retry', small, retryWebhookDeliveryHandler);
 
   // ── Plans and billing ────────────────────────────────────────────────────
   instance.get('/billing/plans', listPlansHandler);
@@ -630,6 +674,7 @@ async function registerLegacyAndVersionedRoutes(instance: FastifyInstance) {
   instance.get('/gateway/api-keys/:id/usage', keyUsageHandler);
   instance.post('/gateway/api-keys/:id/services', small, addKeyServiceHandler);
   instance.delete('/gateway/api-keys/:id/services/:service', removeKeyServiceHandler);
+  instance.patch('/gateway/api-keys/:id/restrictions', small, setKeyRestrictionsHandler);
   instance.post('/gateway/api-keys/:id/suspend', small, suspendGatewayKeyHandler);
   instance.post('/gateway/api-keys/:id/resume', small, resumeGatewayKeyHandler);
 

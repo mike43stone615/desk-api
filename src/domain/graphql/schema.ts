@@ -15,6 +15,8 @@ export interface GraphQLContext {
   user: { id: string; email: string; firstName: string; lastName: string; emailConfirmedAt: string | null };
   /** null = a signed-in session (everything); otherwise the scopes this key or app was given. */
   scopes: ReadonlySet<string> | null;
+  /** A gateway key restricted to one business (see gateway/keys.ts): businesses() and its members are limited to it. */
+  restrictedBusinessId?: string | null;
 }
 
 const MAX_LIST = 50;
@@ -68,10 +70,14 @@ const root = {
   },
   businesses: async ({ first }: { first?: number }, ctx: GraphQLContext) => {
     need(ctx, 'businesses');
+    const restricted = ctx.restrictedBusinessId;
     const { rows } = await pool.query<BizRow>(
-      `SELECT b.id, b.name, b.industry, bm.role FROM businesses b JOIN business_memberships bm ON bm.business_id = b.id
-        WHERE bm.user_id = $1 AND bm.accepted_at IS NOT NULL ORDER BY b.updated_at DESC, b.id LIMIT $2`,
-      [ctx.user.id, clamp(first, 20)],
+      restricted
+        ? `SELECT b.id, b.name, b.industry, bm.role FROM businesses b JOIN business_memberships bm ON bm.business_id = b.id
+            WHERE bm.user_id = $1 AND bm.accepted_at IS NOT NULL AND b.id = $3 ORDER BY b.updated_at DESC, b.id LIMIT $2`
+        : `SELECT b.id, b.name, b.industry, bm.role FROM businesses b JOIN business_memberships bm ON bm.business_id = b.id
+            WHERE bm.user_id = $1 AND bm.accepted_at IS NOT NULL ORDER BY b.updated_at DESC, b.id LIMIT $2`,
+      restricted ? [ctx.user.id, clamp(first, 20), restricted] : [ctx.user.id, clamp(first, 20)],
     );
     return rows.map((b) => ({ id: b.id, name: b.name, industry: b.industry, role: b.role, isSetupComplete: true, members: ({ first: f }: { first?: number }) => membersOf(b.id, ctx.user.id, clamp(f, 20)) }));
   },

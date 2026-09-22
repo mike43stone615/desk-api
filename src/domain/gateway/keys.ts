@@ -63,6 +63,10 @@ export interface GatewayKeySummary {
   teamId?: string | null;
   /** A sandbox key answers with fixed sample data and calls no backend (see sandbox.ts). */
   sandbox?: boolean;
+  /** Refused from any other address when set (empty/undefined = usable from anywhere). */
+  allowedIps?: string[] | null;
+  /** With the "businesses" Desk scope: the one business this key may see, instead of every business its owner belongs to. */
+  restrictedBusinessId?: string | null;
 }
 
 export interface CreatedGatewayKey extends GatewayKeySummary {
@@ -83,6 +87,8 @@ export interface VerifiedGatewayKey {
   /** The team the key belongs to (its allowance is the team's), or null. */
   teamId: string | null;
   sandbox: boolean;
+  allowedIps: string[] | null;
+  restrictedBusinessId: string | null;
 }
 
 export function looksLikeGatewayKey(value: unknown): value is string {
@@ -106,6 +112,8 @@ interface KeyRow {
   rate_limit_per_minute?: number | null;
   team_id?: string | null;
   sandbox?: boolean;
+  allowed_ips?: string[] | null;
+  restricted_business_id?: string | null;
 }
 
 /** How often a key's "last used" time is refreshed while it is in use. */
@@ -134,6 +142,8 @@ function toSummary(row: KeyRow, services: GatewayService[]): GatewayKeySummary {
     rateLimitPerMinute: row.rate_limit_per_minute ?? null,
     teamId: row.team_id ?? null,
     sandbox: row.sandbox ?? false,
+    allowedIps: row.allowed_ips ?? null,
+    restrictedBusinessId: row.restricted_business_id ?? null,
   };
 }
 
@@ -152,7 +162,7 @@ export const gatewayApiKeys = {
     const scope = teamId ? `k.team_id = $1` : `k.owner_user_id = $1 AND k.team_id IS NULL`;
     const param = teamId ?? ownerUserId;
     const { rows } = await pool.query<KeyRow>(
-      `SELECT k.id, k.label, k.key_prefix, k.created_at, k.last_used_at, k.expires_at, k.desk_scopes, k.rate_limit_per_minute, k.team_id, k.sandbox
+      `SELECT k.id, k.label, k.key_prefix, k.created_at, k.last_used_at, k.expires_at, k.desk_scopes, k.rate_limit_per_minute, k.team_id, k.sandbox, k.allowed_ips, k.restricted_business_id
        FROM gateway_api_keys k
        WHERE k.revoked_at IS NULL AND ${scope}
        ORDER BY k.created_at DESC`,
@@ -199,9 +209,18 @@ export const gatewayApiKeys = {
    * services are minted first; if anything after that fails, whatever was
    * already minted is revoked again so no orphaned live credentials remain.
    */
-  async create(ownerUserId: string, label: string, requested: GatewayService[], expiresInDays?: number, deskScopes: DeskScope[] = [...DESK_SCOPES], teamId?: string, sandbox = false): Promise<CreatedGatewayKey> {
+  async create(
+    ownerUserId: string, label: string, requested: GatewayService[], expiresInDays?: number, deskScopes: DeskScope[] = [...DESK_SCOPES],
+    teamId?: string, sandbox = false, allowedIps?: string[], restrictedBusinessId?: string,
+  ): Promise<CreatedGatewayKey> {
     const services = orderServices(requested);
     if (services.length === 0) throw new GatewayKeyError('service_unavailable', 'Choose at least one API.');
+    if (restrictedBusinessId) {
+      if (teamId) throw new GatewayKeyError('sandbox_desk_api', 'A team key cannot be restricted to one business.');
+      if (!services.includes('desk_api') || !deskScopes.includes('businesses')) throw new GatewayKeyError('sandbox_desk_api', 'Restricting to one business needs the Desk API with the "businesses" scope.');
+      const { rows: member } = await pool.query(`SELECT 1 FROM business_memberships WHERE business_id = $1 AND user_id = $2 AND accepted_at IS NOT NULL`, [restrictedBusinessId, ownerUserId]);
+      if (!member[0]) throw new GatewayKeyError('not_found', 'No such business.');
+    }
 
     const catalog = new Map(getServiceCatalog().map((e) => [e.service, e]));
     for (const service of services) {
@@ -256,10 +275,10 @@ export const gatewayApiKeys = {
       try {
         await client.query('BEGIN');
         const inserted = await client.query<KeyRow>(
-          `INSERT INTO gateway_api_keys (id, owner_user_id, label, key_hash, key_prefix, expires_at, desk_scopes, team_id, sandbox)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-           RETURNING id, label, key_prefix, created_at, last_used_at, expires_at, desk_scopes, rate_limit_per_minute, team_id, sandbox`,
-          [id, ownerUserId, label, keyHash, keyPrefix, expiresInDays ? new Date(Date.now() + expiresInDays * 86_400_000).toISOString() : null, deskScopes, teamId ?? null, sandbox],
+          `INSERT INTO gateway_api_keys (id, owner_user_id, label, key_hash, key_prefix, expires_at, desk_scopes, team_id, sandbox, allowed_ips, restricted_business_id)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+           RETURNING id, label, key_prefix, created_at, last_used_at, expires_at, desk_scopes, rate_limit_per_minute, team_id, sandbox, allowed_ips, restricted_business_id`,
+          [id, ownerUserId, label, keyHash, keyPrefix, expiresInDays ? new Date(Date.now() + expiresInDays * 86_400_000).toISOString() : null, deskScopes, teamId ?? null, sandbox, allowedIps && allowedIps.length ? allowedIps : null, restrictedBusinessId ?? null],
         );
         row = inserted.rows[0];
         for (const service of services) {
@@ -283,6 +302,33 @@ export const gatewayApiKeys = {
       await undoMinted();
       throw err;
     }
+  },
+
+  /**
+   * Changes a key's IP allowlist and/or its one-business restriction (owner only). Pass an empty array / null to clear
+   * a restriction. Adding a business restriction validates it exactly as creating a key with one does.
+   */
+  async setRestrictions(ownerUserId: string, keyId: string, allowedIps: string[] | null | undefined, restrictedBusinessId: string | null | undefined): Promise<GatewayKeySummary> {
+    const { rows } = await pool.query<{ id: string; revoked_at: string | null; team_id: string | null; desk_scopes: DeskScope[] }>(
+      `SELECT k.id, k.revoked_at, k.team_id, k.desk_scopes FROM gateway_api_keys k WHERE k.id = $1 AND k.owner_user_id = $2`,
+      [keyId, ownerUserId],
+    );
+    const row = rows[0];
+    if (!row) throw new GatewayKeyError('not_found', 'API key not found.');
+    if (row.revoked_at) throw new GatewayKeyError('already_revoked', 'This API key has been revoked.');
+    if (restrictedBusinessId) {
+      if (row.team_id) throw new GatewayKeyError('sandbox_desk_api', 'A team key cannot be restricted to one business.');
+      if (!(row.desk_scopes ?? DESK_SCOPES).includes('businesses')) throw new GatewayKeyError('sandbox_desk_api', 'Restricting to one business needs the "businesses" scope.');
+      const { rows: member } = await pool.query(`SELECT 1 FROM business_memberships WHERE business_id = $1 AND user_id = $2 AND accepted_at IS NOT NULL`, [restrictedBusinessId, ownerUserId]);
+      if (!member[0]) throw new GatewayKeyError('not_found', 'No such business.');
+    }
+    const { rows: updated } = await pool.query<KeyRow>(
+      `UPDATE gateway_api_keys SET allowed_ips = $2, restricted_business_id = $3 WHERE id = $1
+       RETURNING id, label, key_prefix, created_at, last_used_at, expires_at, desk_scopes, rate_limit_per_minute, team_id, sandbox, allowed_ips, restricted_business_id`,
+      [keyId, allowedIps && allowedIps.length ? allowedIps : null, restrictedBusinessId || null],
+    );
+    const { rows: grants } = await pool.query<{ service: GatewayService }>(`SELECT service FROM gateway_api_key_grants WHERE api_key_id = $1`, [keyId]);
+    return toSummary(updated[0], orderServices(grants.map((g) => g.service)));
   },
 
   /**
@@ -355,15 +401,15 @@ export const gatewayApiKeys = {
   async verify(plaintext: string): Promise<VerifiedGatewayKey | null> {
     if (!looksLikeGatewayKey(plaintext)) return null;
     try {
-      const { rows } = await pool.query<{ id: string; owner_user_id: string; revoked_at: string | null; created_at: string; last_used_at: string | null; desk_scopes: DeskScope[]; rate_limit_per_minute: number | null; expires_at: string | null; team_id: string | null; sandbox: boolean }>(
-        `SELECT id, owner_user_id, revoked_at, created_at, last_used_at, expires_at, desk_scopes, rate_limit_per_minute, team_id, sandbox FROM gateway_api_keys WHERE key_hash = $1`,
+      const { rows } = await pool.query<{ id: string; owner_user_id: string; revoked_at: string | null; created_at: string; last_used_at: string | null; desk_scopes: DeskScope[]; rate_limit_per_minute: number | null; expires_at: string | null; team_id: string | null; sandbox: boolean; allowed_ips: string[] | null; restricted_business_id: string | null }>(
+        `SELECT id, owner_user_id, revoked_at, created_at, last_used_at, expires_at, desk_scopes, rate_limit_per_minute, team_id, sandbox, allowed_ips, restricted_business_id FROM gateway_api_keys WHERE key_hash = $1`,
         [hashGatewayKey(plaintext)],
       );
       const key = rows[0];
       if (!key || key.revoked_at) return null;
       // An expired or idle key is refused with its own reason (see verifyOrExplain in the routes).
       const timeProblem = keyTimeProblem(key);
-      if (timeProblem) return { id: key.id, ownerUserId: key.owner_user_id, services: new Set(), suspended: false, timeProblem, deskScopes: new Set(key.desk_scopes ?? DESK_SCOPES), rateLimitPerMinute: key.rate_limit_per_minute ?? null, teamId: key.team_id ?? null, sandbox: key.sandbox === true };
+      if (timeProblem) return { id: key.id, ownerUserId: key.owner_user_id, services: new Set(), suspended: false, timeProblem, deskScopes: new Set(key.desk_scopes ?? DESK_SCOPES), rateLimitPerMinute: key.rate_limit_per_minute ?? null, teamId: key.team_id ?? null, sandbox: key.sandbox === true, allowedIps: key.allowed_ips ?? null, restrictedBusinessId: key.restricted_business_id ?? null };
       const { rows: grants } = await pool.query<{ service: GatewayService }>(
         `SELECT service FROM gateway_api_key_grants WHERE api_key_id = $1`,
         [key.id],
@@ -378,7 +424,7 @@ export const gatewayApiKeys = {
         `SELECT 1 FROM key_suspensions WHERE api_key_id = $1 UNION ALL SELECT 1 FROM account_suspensions WHERE user_id = $2`,
         [key.id, key.owner_user_id],
       );
-      return { id: key.id, ownerUserId: key.owner_user_id, services: new Set(grants.map((g) => g.service)), suspended: off.length > 0, deskScopes: new Set(key.desk_scopes ?? DESK_SCOPES), rateLimitPerMinute: key.rate_limit_per_minute ?? null, teamId: key.team_id ?? null, sandbox: key.sandbox === true };
+      return { id: key.id, ownerUserId: key.owner_user_id, services: new Set(grants.map((g) => g.service)), suspended: off.length > 0, deskScopes: new Set(key.desk_scopes ?? DESK_SCOPES), rateLimitPerMinute: key.rate_limit_per_minute ?? null, teamId: key.team_id ?? null, sandbox: key.sandbox === true, allowedIps: key.allowed_ips ?? null, restrictedBusinessId: key.restricted_business_id ?? null };
     } catch {
       return null;
     }

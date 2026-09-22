@@ -97,6 +97,11 @@ export class DeskAuthService implements AuthService {
     return { token, user: toPublicUser(user) };
   }
 
+  /** A real session for an account that has already proven who it is by some other means (here: a second factor). */
+  async createSessionForVerifiedUser(userId: string, meta?: SessionMeta): Promise<string> {
+    return this.createSessionToken(userId, meta);
+  }
+
   async verifySession(token: string): Promise<User | null> {
     const session = await this.db.findSessionByToken(token);
     if (!session) return null;

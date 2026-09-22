@@ -66,7 +66,7 @@ export async function graphqlHandler(request: FastifyRequest, reply: FastifyRepl
 
   const user = request.currentUser!;
   const scopes = request.gatewayKey ? new Set<string>(request.gatewayKey.deskScopes) : request.oauth ? new Set<string>(request.oauth.scopes) : null;
-  const contextValue: GraphQLContext = { user: { id: user.id, email: user.email, firstName: user.firstName, lastName: user.lastName, emailConfirmedAt: user.emailConfirmedAt ?? null }, scopes };
+  const contextValue: GraphQLContext = { user: { id: user.id, email: user.email, firstName: user.firstName, lastName: user.lastName, emailConfirmedAt: user.emailConfirmedAt ?? null }, scopes, restrictedBusinessId: request.gatewayKey?.restrictedBusinessId ?? null };
   const result = await execute({
     schema,
     document: doc,

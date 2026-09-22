@@ -15,7 +15,7 @@ import { decryptSecret, encryptSecret } from '../gateway/crypto';
 import { subscriptionFor } from '../billing/plans';
 import { atLeast, roleIn } from '../teams/teams';
 
-export const WEBHOOK_EVENTS = ['key.created', 'key.revoked', 'team.member_joined', 'team.member_removed', 'plan.changed', 'oauth.app_authorized', 'usage.cap_reached', 'webhook.test'] as const;
+export const WEBHOOK_EVENTS = ['key.created', 'key.revoked', 'team.member_joined', 'team.member_removed', 'plan.changed', 'oauth.app_authorized', 'usage.cap_reached', 'usage.threshold_reached', 'webhook.test'] as const;
 export type WebhookEvent = (typeof WEBHOOK_EVENTS)[number];
 
 const BACKOFF_SECONDS = [60, 300, 1800, 7200, 21600];
@@ -165,6 +165,24 @@ export const webhooks = {
   async sendTest(userId: string, id: string): Promise<boolean> {
     if (!(await this.manageable(userId, id))) return false;
     await queue([id], 'webhook.test', { message: 'This is a test event from Desk.' });
+    return true;
+  },
+
+  /**
+   * Puts one failed delivery back in line for right now instead of waiting for its automatic backoff (which can be
+   * hours away by the time an endpoint is fixed). It gets a fresh set of tries (attempts reset to 0), and switches
+   * the endpoint back on if it had been disabled after repeated failures — trying again IS the developer saying it is
+   * fixed. Only a delivery that has actually failed can be retried (a pending one is already in line).
+   */
+  async retryDelivery(userId: string, endpointId: string, deliveryId: string): Promise<boolean> {
+    if (!(await this.manageable(userId, endpointId))) return false;
+    const { rows } = await pool.query<{ id: string }>(
+      `UPDATE webhook_deliveries SET status = 'pending', attempts = 0, next_attempt_at = $3
+        WHERE id = $1 AND endpoint_id = $2 AND status = 'failed' RETURNING id`,
+      [deliveryId, endpointId, new Date().toISOString()],
+    );
+    if (!rows[0]) return false;
+    await pool.query(`UPDATE webhook_endpoints SET active = TRUE, consecutive_failures = 0, disabled_reason = NULL WHERE id = $1`, [endpointId]);
     return true;
   },
 };

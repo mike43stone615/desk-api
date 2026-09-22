@@ -20,7 +20,7 @@ import { config } from '../config';
 import { KEY_BUCKET_FACTOR, TEAM_BUCKET_FACTOR } from '../middleware/api-protection';
 import { BrokerError } from '../domain/gateway/broker';
 import { getServiceCatalog } from '../domain/gateway/services';
-import { AddKeyServiceSchema, CreateGatewayKeySchema } from '../validators/gateway';
+import { AddKeyServiceSchema, CreateGatewayKeySchema, SetKeyRestrictionsSchema } from '../validators/gateway';
 import { GATEWAY_SERVICES, type GatewayService } from '../domain/gateway/services';
 import { LIBRARY_OPENAPI_SPEC } from '../openapi';
 
@@ -66,7 +66,7 @@ export async function createGatewayKeyHandler(request: FastifyRequest, reply: Fa
   try {
     // A team key needs the developer role or higher in that team.
     if (parsed.data.teamId) await teamsDomain.requireMember(parsed.data.teamId, user.id, 'developer');
-    const created = await gatewayApiKeys.create(user.id, parsed.data.label, parsed.data.services, parsed.data.expiresInDays, [...new Set(parsed.data.deskScopes)], parsed.data.teamId, parsed.data.sandbox === true);
+    const created = await gatewayApiKeys.create(user.id, parsed.data.label, parsed.data.services, parsed.data.expiresInDays, [...new Set(parsed.data.deskScopes)], parsed.data.teamId, parsed.data.sandbox === true, parsed.data.allowedIps, parsed.data.businessId);
     auditKey(request, 'gateway_key_created', {
       userId: user.id,
       keyId: created.id,
@@ -97,6 +97,22 @@ function keyServiceError(err: unknown): never {
   }
   if (err instanceof BrokerError) throw new HttpError(502, 'Could not set up access to that API. Nothing was changed; please try again.', 'upstream_provisioning_failed');
   throw err;
+}
+
+/** Changes a key's IP allowlist and/or its one-business restriction. Pass null (or an empty array for allowedIps) to clear one. */
+export async function setKeyRestrictionsHandler(request: FastifyRequest, reply: FastifyReply) {
+  await requireAuth(request, reply);
+  const { id } = request.params as { id: string };
+  const parsed = SetKeyRestrictionsSchema.safeParse(request.body ?? {});
+  if (!parsed.success) throw validationError(parsed.error);
+  const user = request.currentUser!;
+  try {
+    const key = await gatewayApiKeys.setRestrictions(user.id, id, parsed.data.allowedIps, parsed.data.businessId);
+    auditKey(request, 'gateway_key_restrictions_changed', { userId: user.id, keyId: id, allowedIps: (parsed.data.allowedIps ?? []).join(','), businessId: parsed.data.businessId ?? '' });
+    return reply.send({ apiKey: key });
+  } catch (err) {
+    return keyServiceError(err);
+  }
 }
 
 /** Adds an API to one of the caller's own keys (the key and its secret stay the same). */

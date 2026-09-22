@@ -36,7 +36,7 @@ export async function isNewSignInDevice(userId: string, ip: string, userAgent: s
   }
 }
 
-export type SecurityNotice = 'new_sign_in' | 'password_changed' | 'password_reset' | 'api_key_created' | 'account_deleted';
+export type SecurityNotice = 'new_sign_in' | 'password_changed' | 'password_reset' | 'api_key_created' | 'account_deleted' | 'two_factor_enabled' | 'two_factor_disabled';
 
 function describe(kind: SecurityNotice, request: FastifyRequest, extra: string | undefined): { title: string; body: string } {
   const ua = request.headers['user-agent'];
@@ -52,6 +52,10 @@ function describe(kind: SecurityNotice, request: FastifyRequest, extra: string |
       return { title: 'Your Desk account was deleted', body: `Your Desk account was deleted ${where}. Your sessions, API keys and the businesses only you owned were removed. If this was not you, reply to this email straight away.` };
     case 'api_key_created':
       return { title: 'A new API key was created', body: `An API key${extra ? ` named "${extra}"` : ''} was created for your Desk account ${where}.` };
+    case 'two_factor_enabled':
+      return { title: 'Two-factor authentication turned on', body: `Two-factor authentication was turned on for your Desk account ${where}. A code from your authenticator app is now needed to sign in.` };
+    case 'two_factor_disabled':
+      return { title: 'Two-factor authentication turned off', body: `Two-factor authentication was turned off for your Desk account ${where}. Signing in now needs only your password. If this was not you, turn it back on and change your password right away.` };
   }
 }
 

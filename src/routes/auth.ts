@@ -13,13 +13,14 @@ import { HttpError, validationError } from '../middleware/http-error';
 import { isUserSuspended } from '../domain/suspension';
 import { pool } from '../db';
 import { gatewayApiKeys } from '../domain/gateway/keys';
-import { authService } from '../infrastructure/auth';
+import { authService, authDb } from '../infrastructure/auth';
 import { AuthError } from '../infrastructure/auth/auth-service';
 import { requireAuth, extractSessionToken } from '../middleware/auth';
 import { setSessionCookie, clearSessionCookie } from '../infrastructure/auth/session-cookie';
 import { getClientIp } from '../middleware/api-protection';
 import { emailFingerprint } from '../middleware/log-redaction';
 import { isNewSignInDevice, notifySecurityEvent } from '../domain/auth/security-notices';
+import * as twoFactor from '../domain/auth/twoFactor';
 import { listSecurityEvents, recordSecurityEvent } from '../modules/audit/security-events';
 import { emailLinkBase } from '../domain/email/link-base';
 import { checkSignupDomainLimit, checkSignupRateLimit } from '../middleware/signup-limiter';
@@ -39,6 +40,9 @@ import {
   PasswordResetConfirmSchema,
   UpdatePasswordSchema,
   DeleteAccountSchema,
+  TwoFactorVerifySchema,
+  TwoFactorCodeSchema,
+  TwoFactorDisableSchema,
 } from '../validators/auth';
 
 /** AuthError -> RFC 7807 status/message mapping, ported from the original's api/middleware/errors.ts. */
@@ -129,6 +133,15 @@ export async function signInHandler(request: FastifyRequest, reply: FastifyReply
     throw new HttpError(403, 'This account is suspended.', 'account_suspended');
   }
 
+  // The password is right, but that alone is not enough for an account with a second factor: the session made above
+  // is thrown away unused, and a short-lived pending token takes its place until POST /auth/2fa/verify supplies a code.
+  if (await twoFactor.isEnabled(result.user.id)) {
+    await authService.revokeSession(result.token);
+    const mfaToken = await twoFactor.createPendingLogin(result.user.id, sessionMeta(request));
+    audit(request, 'signin_password_verified_awaiting_2fa', 'ok', { userId: result.user.id });
+    return reply.send({ mfaRequired: true, mfaToken });
+  }
+
   // Decided before this sign-in is recorded, or it would always look familiar.
   const uaHeader = request.headers['user-agent'];
   const newDevice = await isNewSignInDevice(result.user.id, ip, typeof uaHeader === 'string' && uaHeader ? uaHeader.slice(0, 255) : null);
@@ -140,6 +153,105 @@ export async function signInHandler(request: FastifyRequest, reply: FastifyReply
   // this header and still receive the token exactly as before.
   if (request.headers['x-session-transport'] === 'cookie') return reply.send({ user: result.user });
   return reply.send({ token: result.token, user: result.user });
+}
+
+/** Step 2 of signing in to an account with 2FA on: the pending token from /auth/signin, plus a 6-digit code (or a backup code). */
+export async function twoFactorVerifyHandler(request: FastifyRequest, reply: FastifyReply) {
+  const parsed = TwoFactorVerifySchema.safeParse(request.body ?? {});
+  if (!parsed.success) throw validationError(parsed.error);
+  const pending = await twoFactor.claimPendingLogin(parsed.data.mfaToken);
+  if (!pending) throw new HttpError(401, 'That sign-in has expired. Please sign in again.', 'mfa_token_invalid');
+  if (!(await twoFactor.verifyCode(pending.userId, parsed.data.code))) {
+    audit(request, 'signin_2fa_failed', 'error', { userId: pending.userId });
+    throw new HttpError(401, 'That code is wrong.', 'invalid_2fa_code');
+  }
+  const user = await authDb.findUserById(pending.userId);
+  if (!user) throw new HttpError(401, 'That sign-in has expired. Please sign in again.', 'mfa_token_invalid');
+  if (await isUserSuspended(user.id)) throw new HttpError(403, 'This account is suspended.', 'account_suspended');
+  const token = await authService.createSessionForVerifiedUser(user.id, sessionMeta(request));
+  const uaHeader = request.headers['user-agent'];
+  const newDevice = await isNewSignInDevice(user.id, getClientIp(request), typeof uaHeader === 'string' && uaHeader ? uaHeader.slice(0, 255) : null);
+  audit(request, 'signin_success', 'ok', { userId: user.id });
+  if (newDevice) notifySecurityEvent(request, user.email, 'new_sign_in');
+  const publicUser = { id: user.id, email: user.email, firstName: user.firstName, lastName: user.lastName, emailConfirmedAt: user.emailConfirmedAt };
+  setSessionCookie(reply, token);
+  if (request.headers['x-session-transport'] === 'cookie') return reply.send({ user: publicUser });
+  return reply.send({ token, user: publicUser });
+}
+
+/** Starts setup: a fresh secret and the otpauth:// URI/secret to add to an authenticator app. Not on until confirmed. */
+export async function twoFactorSetupHandler(request: FastifyRequest, reply: FastifyReply) {
+  await requireAuth(request, reply);
+  const user = request.currentUser!;
+  try {
+    const { secret, otpauthUri } = await twoFactor.beginSetup(user.id, user.email);
+    return reply.header('Cache-Control', 'no-store').send({ secret, otpauthUri });
+  } catch (err) {
+    return twoFactorFailure(err);
+  }
+}
+
+/** Confirms setup with a real code from the app just configured; turns 2FA on and returns backup codes (shown once). */
+export async function twoFactorEnableHandler(request: FastifyRequest, reply: FastifyReply) {
+  await requireAuth(request, reply);
+  const parsed = TwoFactorCodeSchema.safeParse(request.body ?? {});
+  if (!parsed.success) throw validationError(parsed.error);
+  const user = request.currentUser!;
+  try {
+    const backupCodes = await twoFactor.confirmSetup(user.id, parsed.data.code);
+    audit(request, '2fa_enabled', 'ok', { userId: user.id });
+    notifySecurityEvent(request, user.email, 'two_factor_enabled');
+    return reply.status(201).header('Cache-Control', 'no-store').send({ enabled: true, backupCodes });
+  } catch (err) {
+    return twoFactorFailure(err);
+  }
+}
+
+/** Turns 2FA off: needs the current password (proof at the keyboard) and a current code (proof the app still works). */
+export async function twoFactorDisableHandler(request: FastifyRequest, reply: FastifyReply) {
+  await requireAuth(request, reply);
+  const parsed = TwoFactorDisableSchema.safeParse(request.body ?? {});
+  if (!parsed.success) throw validationError(parsed.error);
+  const user = request.currentUser!;
+  await requireCurrentPassword(request, reply, user, parsed.data.password, '2fa_disable');
+  try {
+    await twoFactor.disable(user.id, parsed.data.code);
+    audit(request, '2fa_disabled', 'ok', { userId: user.id });
+    notifySecurityEvent(request, user.email, 'two_factor_disabled');
+    return reply.send({ enabled: false });
+  } catch (err) {
+    return twoFactorFailure(err);
+  }
+}
+
+/** New backup codes (the old ones stop working): for when the ones on hand are lost or mostly used up. */
+export async function twoFactorBackupCodesHandler(request: FastifyRequest, reply: FastifyReply) {
+  await requireAuth(request, reply);
+  const parsed = TwoFactorCodeSchema.safeParse(request.body ?? {});
+  if (!parsed.success) throw validationError(parsed.error);
+  const user = request.currentUser!;
+  try {
+    const backupCodes = await twoFactor.regenerateBackupCodes(user.id, parsed.data.code);
+    audit(request, '2fa_backup_codes_regenerated', 'ok', { userId: user.id });
+    return reply.header('Cache-Control', 'no-store').send({ backupCodes });
+  } catch (err) {
+    return twoFactorFailure(err);
+  }
+}
+
+export async function twoFactorStatusHandler(request: FastifyRequest, reply: FastifyReply) {
+  await requireAuth(request, reply);
+  const user = request.currentUser!;
+  const enabled = await twoFactor.isEnabled(user.id);
+  return reply.header('Cache-Control', 'no-store').send({ enabled, unusedBackupCodes: enabled ? await twoFactor.unusedBackupCodeCount(user.id) : 0 });
+}
+
+function twoFactorFailure(err: unknown): never {
+  if (err instanceof twoFactor.TwoFactorError) {
+    const status = err.code === 'invalid_code' ? 400 : err.code === 'not_configured' ? 503 : 409;
+    throw new HttpError(status, err.message, `mfa_${err.code}`);
+  }
+  throw err;
 }
 
 export async function signUpHandler(request: FastifyRequest, reply: FastifyReply) {
