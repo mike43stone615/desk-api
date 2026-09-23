@@ -2635,7 +2635,9 @@ function fallbackBusinessPlanSections(
   market: MarketValidation,
   body: Record<string, unknown>,
 ): BusinessPlanSection[] {
-  const city = String(body.formationCity ?? '').trim() || '[Launch city]';
+  // formationCity is the full place-search description ("Austin, TX, USA"), because that's also what the client's
+  // search box displays -- take just the city segment so "${city}, ${state}" below doesn't double the state.
+  const city = String(body.formationCity ?? '').trim().split(',')[0].trim() || '[Launch city]';
   const state = String(body.formationState ?? '').trim() || '[State]';
   const partners = body.hasPartners
     ? `${Number(body.numberOfPartners ?? 1)} partner(s)`
