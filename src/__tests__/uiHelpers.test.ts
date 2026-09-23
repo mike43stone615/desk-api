@@ -58,7 +58,7 @@ describe('parseLines', () => {
 
 describe('labels', () => {
   it('names every webhook event and scope in plain English', () => {
-    expect(Object.keys(EVENT_LABELS)).toHaveLength(7);
+    expect(Object.keys(EVENT_LABELS)).toHaveLength(9);
     expect(Object.keys(SCOPE_LABELS).sort()).toEqual(['businesses', 'drafts', 'profile', 'teams']);
   });
   it('says what happened to a delivery', () => {

@@ -54,10 +54,16 @@ export function etagMatches(header: string | string[] | undefined, etag: string)
   return value.split(',').some((tag) => tag.trim().replace(/^W\//, '') === etag);
 }
 
+// Cloudflare-only infrastructure files that live in library-ui/ for the edge deployment (worker.js, its config, and the
+// .assetsignore that hides them from Cloudflare's own static assets) but are not pages of the app: .assetsignore has no
+// effect on this Fastify-side scan, so without this exclusion they'd otherwise be served here as real, unauthenticated
+// routes (worker.js in particular would leak the Worker's proxy target, api-origin.deskbusiness.co).
+const NOT_A_PAGE = new Set(['worker.js', 'wrangler.jsonc', '.assetsignore']);
+
 function listFiles(dir: string, prefix = ''): string[] {
-  return readdirSync(dir, { withFileTypes: true }).flatMap((entry) =>
-    entry.isDirectory() ? listFiles(join(dir, entry.name), `${prefix}${entry.name}/`) : [`${prefix}${entry.name}`],
-  );
+  return readdirSync(dir, { withFileTypes: true })
+    .filter((entry) => prefix !== '' || !NOT_A_PAGE.has(entry.name))
+    .flatMap((entry) => (entry.isDirectory() ? listFiles(join(dir, entry.name), `${prefix}${entry.name}/`) : [`${prefix}${entry.name}`]));
 }
 
 export function registerLibraryUi(app: FastifyInstance): void {
