@@ -31,10 +31,13 @@ export const EVENT_LABELS = {
   'plan.changed': 'A plan changes',
   'oauth.app_authorized': 'An app is authorized',
   'usage.cap_reached': 'A daily usage cap is reached',
+  'usage.threshold_reached': 'Monthly usage reaches 80% or 100% of the plan',
+  'webhook.test': 'Test event', // not offered as a subscribable event (see WEBHOOK_EVENTS.filter in webhooks.js) -- this only
+  // labels it where a test delivery can still show up: the deliveries history table.
 };
 
 export const SCOPE_LABELS = {
-  profile: 'Your name and e-mail address',
+  profile: 'Your name and email address',
   drafts: 'Unfinished business setups',
   businesses: 'Businesses and their members',
   teams: 'Teams and their keys (GraphQL)',

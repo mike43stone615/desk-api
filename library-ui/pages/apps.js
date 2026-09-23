@@ -36,7 +36,7 @@ registerRoute('/developer/apps', async (app) => {
   async function createClient(e) {
     e.preventDefault();
     const uris = parseLines(s.redirects);
-    if (!s.name.trim()) { s.formError = 'Give the app a name people will recognise.'; render(); return; }
+    if (!s.name.trim()) { s.formError = 'Give the app a name people will recognize.'; render(); return; }
     if (uris.length === 0) { s.formError = 'Add at least one redirect address.'; render(); return; }
     if (s.chosen.size === 0) { s.formError = 'Choose at least one thing the app may read.'; render(); return; }
     s.isCreating = true; s.formError = null; render();

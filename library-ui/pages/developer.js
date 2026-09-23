@@ -14,7 +14,7 @@ const MAX_LABEL_LENGTH = 64;
 
 /** The parts of the Desk API a key may be limited to (the server's DESK_SCOPES), in plain words. */
 const KEY_SCOPES = [
-  ['profile', 'Your name and e-mail address'],
+  ['profile', 'Your name and email address'],
   ['drafts', 'Unfinished business setups'],
   ['businesses', 'Businesses and their members'],
 ];

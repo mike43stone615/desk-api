@@ -147,7 +147,7 @@ registerRoute('/developer/teams', async (app) => {
 
   async function invite(e) {
     e.preventDefault();
-    if (!s.inviteEmail.trim()) { s.inviteError = 'Enter an e-mail address.'; s.inviteMessage = null; render(); return; }
+    if (!s.inviteEmail.trim()) { s.inviteError = 'Enter an email address.'; s.inviteMessage = null; render(); return; }
     s.isInviting = true; s.inviteError = null; s.inviteMessage = null; render();
     try {
       const res = await post(`/teams/${encodeURIComponent(s.selectedId)}/members`, { email: s.inviteEmail.trim(), role: s.inviteRole });
@@ -362,7 +362,7 @@ registerRoute('/developer/teams', async (app) => {
       ${roles.length ? `
         <div class="card" style="margin:var(--sp-lg) 0;">
           <h3 class="biz-section-title">Invite someone</h3>
-          <p class="biz-sub" style="margin-bottom:var(--sp-md);">We e-mail them. If they have no Desk account yet, the invitation waits 30 days for them to sign up with this address; either way they accept it on this page.</p>
+          <p class="biz-sub" style="margin-bottom:var(--sp-md);">We email them. If they have no Desk account yet, the invitation waits 30 days for them to sign up with this address; either way they accept it on this page.</p>
           <form id="invite-form" novalidate>
             <div class="field-float has-icon">
               <span class="field-icon">${icon('mail_outline')}</span>

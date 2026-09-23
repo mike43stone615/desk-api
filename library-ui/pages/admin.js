@@ -256,7 +256,7 @@ registerRoute('/developer/admin', async (app) => {
   async function addAdminPerson(e) {
     e.preventDefault();
     if (s.isAdding) return;
-    if (!s.addEmail.trim()) { s.addError = 'Enter the e-mail address of a Desk account.'; render(); return; }
+    if (!s.addEmail.trim()) { s.addError = 'Enter the email address of a Desk account.'; render(); return; }
     s.isAdding = true; s.addError = null; render();
     try {
       await api('/admin/access', { method: 'POST', body: { email: s.addEmail.trim(), note: s.addNote.trim() || undefined } });
@@ -290,7 +290,7 @@ registerRoute('/developer/admin', async (app) => {
     return `
       <div class="card" style="margin-bottom:var(--sp-lg);">
         <h2 class="biz-section-title">Who can see this page</h2>
-        <p class="biz-sub">Administrators can view and edit the data of every API here and use the other administrator tools. Only an owner can change this list. A person needs a Desk account with a confirmed e-mail address, and must have signed in within the last 24 hours to use the tools.</p>
+        <p class="biz-sub">Administrators can view and edit the data of every API here and use the other administrator tools. Only an owner can change this list. A person needs a Desk account with a confirmed email address, and must have signed in within the last 24 hours to use the tools.</p>
         <div class="field-header"><label>Owners (set in the server settings, cannot be removed here)</label></div>
         ${a.owners.map((o) => `<div class="state-card key-card"><div class="biz-icon neutral">${icon('lock')}</div><div class="biz-body"><div class="biz-title">${esc(o)}</div><div class="biz-sub">Owner</div></div></div>`).join('') || '<p class="biz-sub">None set.</p>'}
       </div>
@@ -309,7 +309,7 @@ registerRoute('/developer/admin', async (app) => {
       ${isOwner ? `
         <div class="card">
           <h2 class="biz-section-title">Add someone</h2>
-          <p class="biz-sub" style="margin-bottom:var(--sp-md);">They must already have a Desk account (with a confirmed e-mail address). Nobody is e-mailed.</p>
+          <p class="biz-sub" style="margin-bottom:var(--sp-md);">They must already have a Desk account (with a confirmed email address). Nobody is emailed.</p>
           <form id="add-admin-form" novalidate>
             <div class="field-float has-icon"><span class="field-icon">${icon('person_add')}</span><label>E-mail address</label><input name="email" type="email" placeholder=" " value="${esc(s.addEmail)}" autocomplete="off" /></div>
             <div class="field-float has-icon"><span class="field-icon">${icon('group')}</span><label>Note (optional, only you see it)</label><input name="note" placeholder=" " maxlength="200" value="${esc(s.addNote)}" autocomplete="off" /></div>

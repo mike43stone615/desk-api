@@ -9,7 +9,7 @@ import { formatMoney, monthLabel, usageShare } from '../format.js';
 
 const num = (n) => Number(n).toLocaleString('en-US');
 const limitText = (n, unit) => (n == null ? `No ${unit} limit` : `${num(n)} ${unit}`);
-const INVOICE_STATUS = { draft: 'Draft', open: 'Open', paid: 'Paid', void: 'Cancelled' };
+const INVOICE_STATUS = { draft: 'Draft', open: 'Open', paid: 'Paid', void: 'Canceled' };
 
 registerRoute('/developer/billing', async (app) => {
   const myEpoch = currentEpoch();
@@ -87,7 +87,7 @@ registerRoute('/developer/billing', async (app) => {
         <div class="card" style="margin-bottom:var(--sp-lg);">
           <h2 class="biz-section-title">Your plan: ${esc(s.sub.plan.name)}</h2>
           ${s.teams.length ? `<div class="field-header"><label for="bill-scope">Showing</label></div><select id="bill-scope" class="team-select" style="margin-bottom:var(--sp-md);"><option value="">Me</option>${s.teams.map((t) => `<option value="${esc(t.id)}" ${s.scope === t.id ? 'selected' : ''}>Team: ${esc(t.name)}</option>`).join('')}</select>` : ''}
-          <p class="biz-sub">${paused ? `This plan is ${esc(s.sub.status === 'past_due' ? 'past due' : 'cancelled')}. ` : ''}The current period runs ${esc(new Date(s.sub.periodStart).toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' }))} to ${esc(new Date(s.sub.periodEnd).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', timeZone: 'UTC' }))}.</p>
+          <p class="biz-sub">${paused ? `This plan is ${esc(s.sub.status === 'past_due' ? 'past due' : 'canceled')}. ` : ''}The current period runs ${esc(new Date(s.sub.periodStart).toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' }))} to ${esc(new Date(s.sub.periodEnd).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', timeZone: 'UTC' }))}.</p>
           ${usageHtml()}
         </div>
         <h2 class="biz-section-title">Plans</h2>
