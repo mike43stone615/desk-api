@@ -34,3 +34,8 @@ openapi-out/
 .oa_tmp/
 coverage-unit/
 coverage-e2e/
+
+# wrangler files
+.wrangler
+.dev.vars*
+!.dev.vars.example

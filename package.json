@@ -36,7 +36,9 @@
     "scan:logs": "node scripts/scan-logs.mjs",
     "traces": "node scripts/slow-traces.mjs",
     "mutation:lite": "node scripts/mutation-lite.mjs",
-    "preview:check": "node scripts/preview-check.mjs"
+    "preview:check": "node scripts/preview-check.mjs",
+    "deploy": "wrangler deploy",
+    "preview": "wrangler dev"
   },
   "dependencies": {
     "@fastify/cookie": "^11.1.2",
@@ -76,6 +78,7 @@
     "tsx": "^4.19.0",
     "typescript": "^5.9.0",
     "typescript-eslint": "^8.65.0",
-    "vitest": "^4.1.11"
+    "vitest": "^4.1.11",
+    "wrangler": "^4.136.3"
   }
 }
