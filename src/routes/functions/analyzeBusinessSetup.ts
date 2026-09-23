@@ -2620,8 +2620,12 @@ function fallbackMarketValidation(
     competitors: `Likely alternatives include local incumbents, online providers, do-it-yourself options, and adjacent ${classification.industry} businesses serving the same customer need.`,
     validationPlan:
       'Interview 10-20 likely customers, compare competitor pricing and reviews, test one simple offer, and track interest, objections, willingness to pay, and repeat-use signals.',
+    // Careful: market-validation-api's priceRelevanceMultiplier scans this text for words like "budget"/"affordable"/
+    // "cheap" to guess pricing positioning -- this boilerplate stand-in (shown before the user has entered any real
+    // pricing hypothesis) used to say "customer budget" and got misread as a real budget-positioning signal, scoring
+    // Revenue down for a reason the user never actually said.
     pricingHypothesis:
-      'Start with a simple price tied to the main customer outcome, then validate against competitor pricing, delivery cost, customer budget, and target margin.',
+      'Start with a simple price tied to the main customer outcome, then validate against competitor pricing, delivery cost, what customers are willing to pay, and target margin.',
   };
 }
 

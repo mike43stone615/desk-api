@@ -5,7 +5,7 @@ import { z } from 'zod';
 export const MAX_EMAIL_LENGTH = 254;
 export const MAX_NAME_LENGTH = 100;
 export const MAX_TOKEN_LENGTH = 200;
-const emailField = z.string().min(1, 'email is required').max(MAX_EMAIL_LENGTH, `email must be at most ${MAX_EMAIL_LENGTH} characters`);
+export const emailField = z.string().min(1, 'email is required').max(MAX_EMAIL_LENGTH, `email must be at most ${MAX_EMAIL_LENGTH} characters`);
 
 export const SignUpSchema = z.object({
   email: emailField.email('email must be a valid email address'),

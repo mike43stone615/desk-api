@@ -29,6 +29,7 @@ import { gatewayApiKeys } from '../domain/gateway/keys';
 import { config } from '../config';
 import { logMutation, requestIp, requestUserAgent } from '../modules/audit/mutation-audit';
 import { timingSafeEqualString } from '../utils/timing-safe-compare';
+import { emailField } from '../validators/auth';
 
 type AdminSource = 'desk' | 'registry' | 'market' | 'compliance';
 
@@ -142,6 +143,10 @@ const BUSINESS_INDUSTRIES = [
 ] as const;
 
 const TEAM_ROLES = ['owner', 'admin', 'developer', 'viewer'] as const;
+// Same 4 roles as the DB CHECK constraint (migrations/0004_business_memberships.sql) and validators/setup.ts's
+// BusinessMemberRole -- kept as a literal here rather than imported since this file's TABLES config is deliberately
+// self-contained (see TEAM_ROLES above, which does the same for team_members).
+const BUSINESS_MEMBERSHIP_ROLES = ['owner', 'admin', 'member', 'accountant'] as const;
 
 const TABLES = {
   users: {
@@ -210,6 +215,7 @@ const TABLES = {
     ],
     editable: ['role', 'invited_at', 'accepted_at'],
     secret: [],
+    options: { role: BUSINESS_MEMBERSHIP_ROLES },
     deletable: true,
   },
   // ── the platform tables (teams, plans and billing, webhooks, apps, status page, audit) ──
@@ -435,6 +441,11 @@ export function validateEditableValue(
       throw new HttpError(400, 'Industry must match a supported Desk industry.');
     }
     return industry;
+  }
+  if (tableName === 'users' && column === 'email') {
+    const result = emailField.email('email must be a valid email address').safeParse(value);
+    if (!result.success) throw new HttpError(400, result.error.issues[0]?.message ?? 'email is invalid.', 'invalid_value');
+    return result.data;
   }
   const table: AdminTableConfig = TABLES[tableName];
   // A column with a fixed list of choices accepts only those.
@@ -742,10 +753,19 @@ export async function adminTableUpdateRowHandler(request: FastifyRequest, reply:
   );
   const before = beforeResult.rows[0] ?? null;
 
-  const assignments = validatedEntries
+  // Changing a user's email through the table editor used to leave email_confirmed_at untouched, so the row kept
+  // showing "confirmed" for an address nobody actually confirmed -- reset it in the same UPDATE whenever the email
+  // is genuinely changing (not just resaved to its current value).
+  const finalEntries = [...validatedEntries];
+  if (tableName === 'users') {
+    const emailEntry = finalEntries.find(([column]) => column === 'email');
+    if (emailEntry && before && emailEntry[1] !== before.email) finalEntries.push(['email_confirmed_at', null]);
+  }
+
+  const assignments = finalEntries
     .map(([column], index) => `${quoteIdentifier(column)} = $${index + 1}`)
     .join(', ');
-  const params = validatedEntries.map(([, value]) => normalizeValue(value));
+  const params = finalEntries.map(([, value]) => normalizeValue(value));
   params.push(id);
   try {
     await pool.query(
