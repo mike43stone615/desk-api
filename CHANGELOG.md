@@ -3,6 +3,35 @@
 What changed in the Desk API, newest first. Breaking changes are never made inside `v1` (see docs/API-VERSIONING.md);
 everything below is additive unless it says "safer".
 
+## 2026-09-23: API Library pages now load from the edge; a sign-in bug from that change, fixed the same day
+
+- **Resilience:** the API Library's pages (sign-in, keys, webhooks, teams, apps, billing) are now served from Cloudflare's edge network
+  instead of directly from this API's own server, the same way app.deskbusiness.co already was. If this server is ever unreachable (a
+  restart, a network blip), the pages themselves still load; only calls that need real account data are affected. Actual API traffic is
+  unchanged — same server, same behavior.
+- **Fixed the same day:** that change briefly broke signing in (and every other action that changes something) on the API Library pages
+  with a 403 "Requests from this origin are not allowed." — an origin-check rule didn't yet know about the new edge layer in front of it.
+  Caught and fixed within hours of the rollout; no account data was exposed, the failure mode was simply refusing the request.
+- **Webhooks:** a delivery event (`usage.threshold_reached`, `webhook.test`) could show up unlabeled (the raw event code twice) instead of
+  a plain-English description. The OAuth consent screen ("Authorize app") now shows the actual signed-in email instead of the placeholder
+  text "Signed in as you." Assorted copy fixes (spelling, a couple of colors that didn't match the theme).
+
+## 2026-09-21: two-factor authentication, per-key restrictions, webhook redelivery, usage alerts, status subscriptions
+
+- **Two-factor authentication:** an authenticator app (TOTP) as a second sign-in step, with 10 backup codes for when the device isn't
+  available. `GET/POST /auth/2fa`, `/auth/2fa/setup`, `/auth/2fa/enable`, `/auth/2fa/disable`, `/auth/2fa/backup-codes`. Turning it on
+  changes how sign-in answers: a password match alone now returns a short-lived pending-sign-in token instead of a session; `POST
+  /auth/2fa/verify` exchanges it (with a TOTP or backup code) for the real session.
+- **Per-key IP allowlist and single-business restriction:** `PATCH /gateway/api-keys/{id}/restrictions` limits a key to specific caller IP
+  addresses, or (Desk API keys with the `businesses` scope) to one business you belong to — for Desk API, GraphQL, and the Registry/Market
+  proxy alike.
+- **Manual webhook redelivery:** `POST /gateway/webhooks/{id}/deliveries/{deliveryId}/retry` puts a failed delivery back in line right
+  away (a fresh set of attempts) instead of waiting for its automatic backoff, and switches the endpoint back on if it had been disabled.
+- **Usage-threshold alerts:** a `usage.threshold_reached` webhook event and an email fire once, automatically, when a plan's monthly usage
+  crosses 80% and again at 100% of its included analyses.
+- **Status-page email subscriptions:** anyone can subscribe on the public status page to get an email when something changes there —
+  double opt-in, one-click unsubscribe, no account required.
+
 ## 2026-09-21: keys screen, waiting invitations, role keys
 
 - **API keys screen:** when creating a key you can now choose a sandbox key, which parts of the Desk API it may read, and an expiry. Each
