@@ -1,7 +1,7 @@
 // The consent screen of "Sign in with Desk": a third-party app asked to read part of the signed-in person's account. Reached
 // from GET /oauth/authorize (which has already checked the request). Approve sends the browser back to the app with a
 // one-time code; Deny sends it back with an error. Nothing is granted until Approve.
-import { registerRoute, api, esc, icon, spinnerBtn, statusMsg, friendlyError, reportHandledException, currentEpoch } from '../app.js';
+import { registerRoute, api, esc, icon, spinnerBtn, statusMsg, friendlyError, reportHandledException, currentEpoch, state } from '../app.js';
 
 const KEYS = ['response_type', 'client_id', 'redirect_uri', 'scope', 'state', 'code_challenge', 'code_challenge_method'];
 
@@ -32,7 +32,7 @@ registerRoute('/developer/authorize', async (app) => {
           </div>
         </div>`;
     }
-    app.innerHTML = `<div class="page"><div class="page-head-row"><div class="head-text"><h1>Authorize app</h1><p>Signed in as you. Only approve apps you trust.</p></div></div>${body}</div>`;
+    app.innerHTML = `<div class="page"><div class="page-head-row"><div class="head-text"><h1>Authorize app</h1><p>Signed in as ${esc(state.user?.email ?? 'you')}. Only approve apps you trust.</p></div></div>${body}</div>`;
     const decide = (approve) => async () => {
       s.deciding = approve ? 'approve' : 'deny';
       s.decisionError = null;
