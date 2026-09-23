@@ -14,9 +14,18 @@ import { HttpError } from './http-error';
 
 const UNSAFE = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
 
+// api-origin.deskbusiness.co is not a real origin a browser ever sends: it's the internal-only hostname the
+// api.deskbusiness.co Cloudflare Worker (desk-api/library-ui/worker.js) proxies real backend traffic through, so it
+// doesn't recurse into itself now that it's the thing api.deskbusiness.co's DNS points at. A request arriving with
+// that Host still carries the *browser's* real Origin (api.deskbusiness.co, or another allowed one) -- only the Host
+// changed in transit -- so it needs its own case here rather than the plain self-reference check below.
+const INTERNAL_PROXY_HOST = 'api-origin.deskbusiness.co';
+const PUBLIC_HOST_FOR_PROXY = 'api.deskbusiness.co';
+
 export function isAllowedOrigin(origin: string, host: string | undefined, allowed: readonly string[]): boolean {
   if (allowed.includes(origin)) return true;
   if (!host) return false;
+  if (host === INTERNAL_PROXY_HOST) host = PUBLIC_HOST_FOR_PROXY;
   try {
     // This site calling itself (the API Library pages are served from the same host as the API).
     return new URL(origin).host === host;

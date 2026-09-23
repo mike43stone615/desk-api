@@ -57,6 +57,14 @@ describe('cookie-authenticated writes', () => {
     expect((await createDraft({ origin: 'https://api.deskbusiness.co', 'sec-fetch-site': 'same-origin' })).statusCode).toBe(201);
   });
 
+  it('are allowed when proxied through the api-origin.deskbusiness.co internal Worker hostname (the browser Origin is still the real one)', async () => {
+    const res = await app.inject({
+      method: 'POST', url: '/setup/drafts',
+      headers: { cookie, host: 'api-origin.deskbusiness.co', origin: 'https://api.deskbusiness.co', 'sec-fetch-site': 'same-origin' },
+    });
+    expect(res.statusCode).toBe(201);
+  });
+
   it('are allowed with no Origin at all (servers and native apps)', async () => {
     expect((await createDraft()).statusCode).toBe(201);
   });
@@ -98,6 +106,9 @@ describe('isAllowedOrigin', () => {
     ['null', 'api.deskbusiness.co', false],
     ['https://api.deskbusiness.co', undefined, false],
     ['not a url', 'api.deskbusiness.co', false],
+    ['https://api.deskbusiness.co', 'api-origin.deskbusiness.co', true],
+    ['https://evil.example', 'api-origin.deskbusiness.co', false],
+    ['https://app.deskbusiness.co', 'api-origin.deskbusiness.co', true],
   ])('%s with host %s -> %s', (origin, host, expected) => {
     expect(isAllowedOrigin(origin, host, allowed)).toBe(expected);
   });
