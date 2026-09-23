@@ -642,7 +642,7 @@ table.admin-table td.admin-actions-cell { white-space: nowrap; }
 .usage-row { display: flex; justify-content: space-between; gap: var(--sp-md); font-size: 0.9rem; margin-top: var(--sp-md); }
 .usage-bar { height: 10px; border-radius: 6px; background: var(--line); overflow: hidden; margin: var(--sp-xs, 4px) 0 var(--sp-sm); }
 .usage-fill { height: 100%; background: var(--accent); border-radius: 6px; }
-.usage-fill.over { background: #b3261e; }
+.usage-fill.over { background: var(--error); }
 .table-wrap { overflow-x: auto; padding: 0; }
 .plain-table { width: 100%; border-collapse: collapse; font-size: 0.9rem; }
 .plain-table th, .plain-table td { text-align: left; padding: var(--sp-sm) var(--sp-md); border-bottom: 1px solid var(--line); vertical-align: top; }
@@ -654,7 +654,7 @@ table.admin-table td.admin-actions-cell { white-space: nowrap; }
 .key-actions { display: flex; gap: var(--sp-xs); flex-wrap: wrap; justify-content: flex-end; }
 .key-detail { margin-top: var(--sp-xs); }
 .key-usage-days { margin-top: var(--sp-sm); }
-.meta-chip.warn { border-color: var(--warning, #b26a00); color: var(--warning, #b26a00); }
+.meta-chip.warn { border-color: var(--warning); color: var(--warning); }
 .chip-x { background: none; border: none; color: inherit; cursor: pointer; padding: 0 0 0 4px; font: inherit; opacity: .7; }
 .chip-x:hover:not(:disabled) { opacity: 1; }
 @media (max-width: 520px) { .key-card { flex-wrap: wrap; } .key-actions { justify-content: flex-start; width: 100%; } }
