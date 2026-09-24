@@ -38,7 +38,7 @@ export async function isNewSignInDevice(userId: string, ip: string, userAgent: s
 
 export type SecurityNotice = 'new_sign_in' | 'password_changed' | 'password_reset' | 'api_key_created' | 'account_deleted' | 'two_factor_enabled' | 'two_factor_disabled';
 
-function describe(kind: SecurityNotice, request: FastifyRequest, extra: string | undefined): { title: string; body: string } {
+function describe(kind: SecurityNotice, request: FastifyRequest, extra: string | undefined): { title: string; body: string; showAction?: boolean } {
   const ua = request.headers['user-agent'];
   const where = `from ${getClientIp(request)}${typeof ua === 'string' && ua ? ` using ${ua.slice(0, 80)}` : ''}`;
   switch (kind) {
@@ -47,7 +47,9 @@ function describe(kind: SecurityNotice, request: FastifyRequest, extra: string |
     case 'password_changed':
       return { title: 'Your password was changed', body: `The password for your Desk account was changed ${where}. Your other devices were signed out.` };
     case 'password_reset':
-      return { title: 'Your password was reset', body: `The password for your Desk account was reset with an emailed link ${where}. All devices were signed out.` };
+      // Deliberately no IP/browser detail and no "review your account activity" button here — the person just used
+      // the emailed reset link themselves, so that detail is noise rather than a signal worth surfacing.
+      return { title: 'Your password was reset', body: 'The password for your Desk account was reset.', showAction: false };
     case 'account_deleted':
       return { title: 'Your Desk account was deleted', body: `Your Desk account was deleted ${where}. Your sessions, API keys and the businesses only you owned were removed. If this was not you, reply to this email straight away.` };
     case 'api_key_created':
@@ -60,6 +62,6 @@ function describe(kind: SecurityNotice, request: FastifyRequest, extra: string |
 }
 
 export function notifySecurityEvent(request: FastifyRequest, email: string, kind: SecurityNotice, extra?: string): void {
-  const { title, body } = describe(kind, request, extra);
-  void sendSecurityNoticeEmail(config, email, title, body, request.id).catch(() => {});
+  const { title, body, showAction } = describe(kind, request, extra);
+  void sendSecurityNoticeEmail(config, email, title, body, request.id, showAction ?? true).catch(() => {});
 }

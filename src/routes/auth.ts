@@ -275,7 +275,7 @@ export async function signUpHandler(request: FastifyRequest, reply: FastifyReply
       // Email already registered — notify the real account owner instead of
       // telling the caller, so this endpoint can't be used to check whether
       // an email has an account (same shape as requestPasswordReset()).
-      await sendAccountAlreadyExistsEmail(config, trimmedEmail, request.id);
+      await sendAccountAlreadyExistsEmail(config, trimmedEmail, request.id, emailLinkBase(request));
       audit(request, 'signup_already_exists', 'ok');
     }
     // Response is identical either way, including status code and body

@@ -78,8 +78,6 @@ registerRoute('/login', async (app, params) => {
       updateCooldownUI();
     }, 1000);
   }
-  if (s.resetCooldown > 0) tickCooldown('resetCooldown');
-  if (s.confirmationCooldown > 0) tickCooldown('confirmationCooldown');
 
   // The tick only ever changes one of two buttons' text/disabled state -- a full render() here would rebuild the
   // whole form for that, which (while a cooldown from an earlier request is still counting down) tears down and
@@ -103,6 +101,8 @@ registerRoute('/login', async (app, params) => {
       }
     }
   }
+  if (s.resetCooldown > 0) tickCooldown('resetCooldown');
+  if (s.confirmationCooldown > 0) tickCooldown('confirmationCooldown');
 
   // Callers always render() again themselves right after calling this (in
   // their own finally block) — no render() here, since an immediate one

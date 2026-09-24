@@ -333,7 +333,7 @@ registerRoute('/developer', async (app) => {
   function render() {
     let body;
     if (s.isLoading) {
-      body = `<div class="empty-state">${spinnerBtn(true, '', { dark: true })}<div style="margin-top:var(--sp-md);">Loading your API keys…</div></div>`;
+      body = `<div class="empty-state">${spinnerBtn(true, '', { dark: true })}</div>`;
     } else if (s.loadError) {
       body = `<div class="empty-state">${icon('error_outline')}<div style="margin-top:var(--sp-md);">API Library could not load</div><div class="hint">${esc(s.loadError)}</div><button type="button" class="btn" id="retry-load-btn" style="margin-top:var(--sp-lg);">${icon('refresh')} Try again</button></div>`;
     } else {

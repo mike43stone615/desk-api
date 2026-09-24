@@ -96,6 +96,7 @@ export async function sendSecurityNoticeEmail(
   title: string,
   body: string,
   requestId: string,
+  showAction: boolean = true,
 ): Promise<void> {
   await sendEmail(config, {
     to,
@@ -103,6 +104,7 @@ export async function sendSecurityNoticeEmail(
     html: themedEmailHtml({
       title,
       body,
+      showAction,
       actionLabel: 'Review your account activity',
       actionUrl: `${config.appBaseUrl}/account/sessions`,
       note: 'If this was not you, reset your password right away and sign out all devices from the page above. You cannot unsubscribe from security notices.',
@@ -245,8 +247,9 @@ export async function sendAccountAlreadyExistsEmail(
   config: AppConfig,
   to: string,
   requestId: string,
+  linkBase: string = config.appBaseUrl,
 ): Promise<void> {
-  const signInUrl = `${config.appBaseUrl}/login`;
+  const signInUrl = `${linkBase}/login`;
   await sendEmail(config, {
     to,
     subject: 'You already have a Desk account',
@@ -279,6 +282,8 @@ interface ThemedEmailContent {
   body: string;
   actionLabel: string;
   actionUrl: string;
+  /** false hides the button entirely; actionUrl is still used to resolve the logo's origin either way. */
+  showAction?: boolean;
   note: string;
 }
 
@@ -371,14 +376,14 @@ function themedEmailHtml(content: ThemedEmailContent): string {
                   <td style="padding:20px 24px 24px">
                     <h1 style="margin:0 0 8px;color:#FFFFFF;font-size:24px;line-height:1.2;font-weight:700;letter-spacing:0">${escapeHtml(content.title)}</h1>
                     <p style="margin:0 0 24px;color:#CBD5E1;font-size:14px;line-height:1.45;font-weight:500;letter-spacing:0">${escapeHtml(content.body)}</p>
-                    <table cellpadding="0" cellspacing="0" role="presentation" style="width:100%;border-collapse:separate">
+                    ${content.showAction === false ? '' : `<table cellpadding="0" cellspacing="0" role="presentation" style="width:100%;border-collapse:separate">
                       <tr>
                         <td align="center" bgcolor="#3B82F6" style="border-radius:12px;background:#3B82F6">
                           <a href="${content.actionUrl}" style="display:block;padding:14px 18px;color:#FFFFFF;text-decoration:none;font-size:15px;line-height:20px;font-weight:700;border-radius:12px">${escapeHtml(content.actionLabel)}</a>
                         </td>
                       </tr>
-                    </table>
-                    <p style="margin:24px 0 0;color:#94A3B8;font-size:14px;line-height:1.45;font-weight:500;letter-spacing:0">${escapeHtml(content.note)}</p>
+                    </table>`}
+                    <p style="margin:${content.showAction === false ? '0' : '24px'} 0 0;color:#94A3B8;font-size:14px;line-height:1.45;font-weight:500;letter-spacing:0">${escapeHtml(content.note)}</p>
                   </td>
                 </tr>
               </table>

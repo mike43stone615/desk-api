@@ -7,6 +7,8 @@ export const emailed = {
   invite: new Map<string, 'existing-account' | 'sign-up'>(),
   /** Security notices by recipient: the titles, in the order sent. */
   security: new Map<string, string[]>(),
+  /** Security notices, in order, with the full detail the title-only map above drops. */
+  securityDetail: [] as Array<{ to: string; title: string; body: string; showAction: boolean }>,
   /** The confirm.unsubscribe token pair handed to a status-subscribe confirmation e-mail, by recipient. */
   statusSubscribe: new Map<string, string>(),
   /** Incident notice e-mails sent, in order: { to, title, status }. */
@@ -29,8 +31,9 @@ export function emailModuleMock() {
     sendBusinessInviteSignupEmail: async (_config: unknown, email: string) => {
       emailed.invite.set(email, 'sign-up');
     },
-    sendSecurityNoticeEmail: async (_config: unknown, email: string, title: string) => {
+    sendSecurityNoticeEmail: async (_config: unknown, email: string, title: string, body: string, _requestId: string, showAction = true) => {
       emailed.security.set(email, [...(emailed.security.get(email) ?? []), title]);
+      emailed.securityDetail.push({ to: email, title, body, showAction });
     },
     sendAccountAlreadyExistsEmail: async () => {},
     sendTeamInviteEmail: async () => {},

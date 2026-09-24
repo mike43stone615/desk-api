@@ -15,7 +15,7 @@ registerRoute('/developer/authorize', async (app) => {
   function render() {
     let body;
     if (s.isLoading) {
-      body = `<div class="empty-state">${spinnerBtn(true, '', { dark: true })}<div style="margin-top:var(--sp-md);">Checking the request…</div></div>`;
+      body = `<div class="empty-state">${spinnerBtn(true, '', { dark: true })}</div>`;
     } else if (s.error) {
       body = `<div class="empty-state">${icon('error_outline')}<div style="margin-top:var(--sp-md);">This request cannot be approved</div><div class="hint">${esc(s.error)}</div></div>`;
     } else {

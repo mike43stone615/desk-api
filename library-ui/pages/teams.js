@@ -449,7 +449,7 @@ registerRoute('/developer/teams', async (app) => {
   function render() {
     let body;
     if (s.isLoading) {
-      body = `<div class="empty-state">${spinnerBtn(true, '', { dark: true })}<div style="margin-top:var(--sp-md);">Loading your teams…</div></div>`;
+      body = `<div class="empty-state">${spinnerBtn(true, '', { dark: true })}</div>`;
     } else if (s.loadError) {
       body = `<div class="empty-state">${icon('error_outline')}<div style="margin-top:var(--sp-md);">Teams could not load</div><div class="hint">${esc(s.loadError)}</div><button type="button" class="btn" id="retry-teams-btn" style="margin-top:var(--sp-lg);">${icon('refresh')} Try again</button></div>`;
     } else {
