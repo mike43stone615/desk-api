@@ -93,3 +93,18 @@ jobs:
             -ValidateEnv `
             -LivePath $live `
             -StartCommand "start:prod"
+
+      # library-ui/ is served two ways (see routes/libraryUi.ts's header comment): the Fastify route above, AND a
+      # separate Cloudflare Workers Static Assets deployment (worker.js) that api.deskbusiness.co's DNS actually
+      # points at and that answers most library-ui requests directly, without ever reaching the service just
+      # deployed. Only this step updates that copy — confirmed live: a library-ui-only change deployed above alone
+      # kept serving the old files at api.deskbusiness.co until this ran.
+      - name: Deploy the API Library's static assets to Cloudflare Workers
+        shell: powershell
+        working-directory: library-ui
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: |
+          if (-not $env:CLOUDFLARE_API_TOKEN) { throw "CLOUDFLARE_API_TOKEN secret is not set for this repo." }
+          npx wrangler deploy
+          if ($LASTEXITCODE -ne 0) { throw "wrangler deploy failed" }
