@@ -39,15 +39,15 @@ export function getServiceCatalog(): ServiceCatalogEntry[] {
       service: 'desk_api',
       name: 'Desk API',
       description:
-        'Read access to your own Desk account: your businesses, setup drafts, and their members. A key can only ever see data your own account can see.',
+        'Read access to your own Desk account. A key can only see your data or your businesses’ data.',
       basePath: '/v1',
       available: true,
     },
     {
       service: 'registry_api',
-      name: 'Registry API',
+      name: 'Business Name Registry API',
       description:
-        'State business-registry lookups: business name, DBA, and trademark availability checks, plus legal business-structure reference data.',
+        'State business registry lookups: business names, DBAs, trademark availabilities, and legal business structure data.',
       basePath: '/v1/gateway/registry',
       available: registryReady,
       unavailableReason: registryReady ? undefined : notConfigured,
@@ -56,7 +56,7 @@ export function getServiceCatalog(): ServiceCatalogEntry[] {
       service: 'market_validation_api',
       name: 'Market Validation API',
       description:
-        'Market opportunity research for a business idea, scored from public Census, BLS, and BEA data.',
+        'Research market opportunity for business ideas scored off public data (Census, BLS, etc.).',
       basePath: '/v1/gateway/market',
       available: marketReady,
       unavailableReason: marketReady ? undefined : notConfigured,

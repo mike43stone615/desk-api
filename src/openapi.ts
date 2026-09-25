@@ -448,6 +448,9 @@ const BASE_SPEC = {
     '/gateway/api-keys/{id}/resume': {
       post: { tags: ['API Library'], summary: 'Switch a suspended key back on', security: [{ SessionToken: [] }], parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }], responses: { '200': { description: 'Resumed' }, '404': { description: 'Not suspended, or not your key' } } },
     },
+    '/gateway/api-keys/{id}/rotate': {
+      post: { tags: ['API Library'], summary: 'Issue a new secret for one of your own keys; the old one stops working at once, everything else about the key is unchanged', security: [{ SessionToken: [] }], parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }], responses: { '200': { description: 'The key with its new plaintext secret (shown once)' }, '404': { description: 'Not your key' }, '409': { description: 'Already revoked' } } },
+    },
     '/teams': {
       get: { tags: ['Teams'], summary: 'The teams you belong to, with your role, their member and key counts', security: [{ SessionToken: [] }], responses: { '200': { description: 'OK' } } },
       post: { tags: ['Teams'], summary: 'Create a team (you become its owner). Team keys share one allowance', security: [{ SessionToken: [] }], requestBody: { required: true, content: { 'application/json': { schema: { type: 'object', required: ['name'], properties: { name: { type: 'string', maxLength: 64 } } } } } }, responses: { '201': { description: 'Created (Location header)' }, '409': { description: 'You already created the maximum number of teams (code team_limit_reached)' } } },

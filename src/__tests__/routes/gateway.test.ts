@@ -278,6 +278,55 @@ describe('listing and revoking are scoped to the owner', () => {
   });
 });
 
+describe('rotating a key', () => {
+  it('issues a new secret; the old one stops working and everything else about the key stays the same', async () => {
+    const user = seedUser('rotate@example.com');
+    const { apiKey } = JSON.parse((await createKey(user, ['desk_api', 'registry_api'], 'rotate me')).body);
+    const oldKey = apiKey.key;
+
+    const res = await app.inject({ method: 'POST', url: `/gateway/api-keys/${apiKey.id}/rotate`, headers: user.headers });
+    expect(res.statusCode).toBe(200);
+    const rotated = JSON.parse(res.body).apiKey;
+    expect(rotated.id).toBe(apiKey.id);
+    expect(rotated.label).toBe('rotate me');
+    expect(rotated.services).toEqual(['desk_api', 'registry_api']);
+    expect(rotated.key).toMatch(/^deskgw_[0-9a-f]{48}$/);
+    expect(rotated.key).not.toBe(oldKey);
+
+    const oldStillWorks = await app.inject({ method: 'GET', url: '/setup/businesses', headers: { 'x-api-key': oldKey } });
+    expect(oldStillWorks.statusCode).toBe(401);
+    const newWorks = await app.inject({ method: 'GET', url: '/setup/businesses', headers: { 'x-api-key': rotated.key } });
+    expect(newWorks.statusCode).toBe(200);
+
+    const list = JSON.parse((await app.inject({ method: 'GET', url: '/gateway/api-keys', headers: user.headers })).body);
+    expect(list.apiKeys).toHaveLength(1); // rotating changes the secret in place, it does not add a second key
+  });
+
+  it("never rotates another user's key, and refuses an already-revoked one", async () => {
+    const alice = seedUser('alice-rotate@example.com');
+    const bob = seedUser('bob-rotate@example.com');
+    const aliceKey = JSON.parse((await createKey(alice, ['desk_api'])).body).apiKey;
+
+    const bobRotate = await app.inject({ method: 'POST', url: `/gateway/api-keys/${aliceKey.id}/rotate`, headers: bob.headers });
+    expect(bobRotate.statusCode).toBe(404);
+
+    await app.inject({ method: 'DELETE', url: `/gateway/api-keys/${aliceKey.id}`, headers: alice.headers });
+    const afterRevoke = await app.inject({ method: 'POST', url: `/gateway/api-keys/${aliceKey.id}/rotate`, headers: alice.headers });
+    expect(afterRevoke.statusCode).toBe(409);
+  });
+
+  it('leaves a brokered service grant (its real backend key) untouched by a rotate', async () => {
+    const user = seedUser('rotate-broker@example.com');
+    const { apiKey } = JSON.parse((await createKey(user, ['registry_api'])).body);
+    const grantBefore = fakeDb.gatewayGrants.find((g) => g.api_key_id === apiKey.id);
+
+    await app.inject({ method: 'POST', url: `/gateway/api-keys/${apiKey.id}/rotate`, headers: user.headers });
+    const grantAfter = fakeDb.gatewayGrants.find((g) => g.api_key_id === apiKey.id);
+    expect(grantAfter!.backend_key_id).toBe(grantBefore!.backend_key_id);
+    expect(grantAfter!.encrypted_backend_key).toBe(grantBefore!.encrypted_backend_key);
+  });
+});
+
 describe('a key on desk-api itself: only its owner\'s data, read-only, never admin', () => {
   it("returns only the owner's own drafts (and works under /v1)", async () => {
     const alice = seedUser('alice-data@example.com');

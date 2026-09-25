@@ -794,6 +794,16 @@ export function createFakeDb() {
       const row = k && k.owner_user_id === p[1] ? [{ id: k.id, revoked_at: k.revoked_at, team_id: k.team_id ?? null, sandbox: k.sandbox === true }] : [];
       return { rows: row, rowCount: row.length };
     }
+    if (s.startsWith('SELECT id, revoked_at, sandbox FROM gateway_api_keys WHERE id = $1 AND owner_user_id = $2')) {
+      const k = gatewayKeys.get(p[0]);
+      const row = k && k.owner_user_id === p[1] ? [{ id: k.id, revoked_at: k.revoked_at, sandbox: k.sandbox === true }] : [];
+      return { rows: row, rowCount: row.length };
+    }
+    if (s.startsWith('UPDATE gateway_api_keys SET key_hash = $2, key_prefix = $3 WHERE id = $1')) {
+      const k = gatewayKeys.get(p[0]);
+      if (k) { k.key_hash = p[1] as string; k.key_prefix = p[2] as string; }
+      return { rows: [], rowCount: k ? 1 : 0 };
+    }
     if (s.startsWith('SELECT k.id, k.revoked_at, k.team_id, k.desk_scopes FROM gateway_api_keys k WHERE k.id = $1 AND k.owner_user_id = $2')) {
       const k = gatewayKeys.get(p[0]);
       const row = k && k.owner_user_id === p[1] ? [{ id: k.id, revoked_at: k.revoked_at, team_id: k.team_id ?? null, desk_scopes: k.desk_scopes ?? ['profile', 'drafts', 'businesses'] }] : [];

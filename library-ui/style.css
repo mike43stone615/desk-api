@@ -648,13 +648,19 @@ table.admin-table td.admin-actions-cell { white-space: nowrap; }
 .plain-table th, .plain-table td { text-align: left; padding: var(--sp-sm) var(--sp-md); border-bottom: 1px solid var(--line); vertical-align: top; }
 .plain-table .num { text-align: right; white-space: nowrap; }
 
-/* API keys: per-key details, switched-off marker */
-.key-block { margin-bottom: var(--sp-md); }
-.key-block .state-card { margin-bottom: 0; }
+/* API keys: switched-off marker, per-key actions */
 .key-actions { display: flex; gap: var(--sp-xs); flex-wrap: wrap; justify-content: flex-end; }
-.key-detail { margin-top: var(--sp-xs); }
 .key-usage-days { margin-top: var(--sp-sm); }
 .meta-chip.warn { border-color: var(--warning); color: var(--warning); }
 .chip-x { background: none; border: none; color: inherit; cursor: pointer; padding: 0 0 0 4px; font: inherit; opacity: .7; }
 .chip-x:hover:not(:disabled) { opacity: 1; }
 @media (max-width: 520px) { .key-card { flex-wrap: wrap; } .key-actions { justify-content: flex-start; width: 100%; } }
+
+/* API Library: create-key page, split into a left form and a right key list (pages/developer.js). */
+.developer-split { display: grid; grid-template-columns: minmax(320px, 440px) 1fr; gap: var(--sp-xl); align-items: start; }
+@media (max-width: 860px) { .developer-split { grid-template-columns: 1fr; } }
+/* A service row's checkbox+icon+body stays one clickable label; the sandbox toggle (only shown once the service
+   itself is checked) sits beside it as its own control, not nested inside that label. */
+.library-row-main { display: flex; align-items: flex-start; gap: var(--sp-md); flex: 1; min-width: 0; cursor: pointer; }
+.library-row-head { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-sm); }
+.sandbox-inline { display: flex; align-items: center; gap: var(--sp-2xs); font-size: .8rem; font-weight: 600; color: var(--ink-soft); white-space: nowrap; flex-shrink: 0; cursor: pointer; }

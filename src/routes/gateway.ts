@@ -36,7 +36,13 @@ export async function libraryOpenApiHandler(_request: FastifyRequest, reply: Fas
 
 export async function listGatewayServicesHandler(request: FastifyRequest, reply: FastifyReply) {
   await requireAuth(request, reply);
-  return sendWithEtag(request, reply, { services: getServiceCatalog() });
+  // The standard personal-key rate (an administrator override on a specific key can only be seen after it exists, so
+  // this is the number a new key would actually get) plus the fixed idle-expiry, so the create-key form can show what
+  // a service is limited to before the key is made, not only afterward on an existing key's usage panel.
+  const perMinute = Math.ceil(config.rateLimitPerMinute * KEY_BUCKET_FACTOR);
+  const notes = new Map(limitsFor(perMinute).map((l) => [l.service, l.note]));
+  const services = getServiceCatalog().map((entry) => ({ ...entry, limitNote: notes.get(entry.service), idleExpiryDays: IDLE_DAYS }));
+  return sendWithEtag(request, reply, { services });
 }
 
 export async function listGatewayKeysHandler(request: FastifyRequest, reply: FastifyReply) {
@@ -205,6 +211,22 @@ export async function resumeGatewayKeyHandler(request: FastifyRequest, reply: Fa
   if (!owner || !(await resumeKey(id, owner))) throw new HttpError(404, 'That key is not suspended, or is not yours.', 'api_key_not_found');
   auditKey(request, 'gateway_key_resumed', { userId: user.id, keyId: id });
   return reply.send({ ok: true, suspended: false });
+}
+
+/** Issues a new secret for one of the caller's own keys, keeping everything else about it (its id, grants, scopes) unchanged. */
+export async function rotateGatewayKeyHandler(request: FastifyRequest, reply: FastifyReply) {
+  await requireAuth(request, reply);
+  await requireConfirmedEmail(request, reply);
+  const { id } = request.params as { id: string };
+  const user = request.currentUser!;
+  try {
+    const rotated = await gatewayApiKeys.rotate(user.id, id);
+    auditKey(request, 'gateway_key_rotated', { userId: user.id, keyId: id });
+    notifySecurityEvent(request, user.email, 'api_key_rotated', rotated.label);
+    return reply.send({ apiKey: rotated });
+  } catch (err) {
+    return keyServiceError(err);
+  }
 }
 
 export async function revokeGatewayKeyHandler(request: FastifyRequest, reply: FastifyReply) {

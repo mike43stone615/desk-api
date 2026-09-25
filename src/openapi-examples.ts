@@ -955,6 +955,25 @@ export const GATEWAY_EXAMPLES: Record<string, { status: number; request: unknown
       "suspended": false
     }
   },
+  "POST /v1/gateway/api-keys/{id}/rotate": {
+    "status": 200,
+    "request": null,
+    "response": {
+      "apiKey": {
+        "id": "3f1c2c0e-7a51-4f6e-9a0b-6b0c1f7e2d11",
+        "label": "my server",
+        "keyPrefix": "deskgw_f9e8d",
+        "createdAt": "2026-09-01T12:00:00Z",
+        "lastUsedAt": "2026-09-19T08:30:00Z",
+        "expiresAt": null,
+        "services": [
+          "desk_api",
+          "registry_api"
+        ],
+        "key": "deskgw_f9e8d7c6b5a4f3e2d1c0b9a8f7e6d5c4b3a2f1e0d9c8b7a6 (shown once, never again)"
+      }
+    }
+  },
   "GET /v1/gateway/webhook-events": {
     "status": 200,
     "request": null,

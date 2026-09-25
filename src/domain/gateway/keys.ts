@@ -305,6 +305,27 @@ export const gatewayApiKeys = {
   },
 
   /**
+   * Issues a new plaintext secret for a key the caller owns, keeping its id, label, services, scopes and every other
+   * setting unchanged — only the credential itself changes, so nothing that reads its id or grants (usage history,
+   * webhooks, team membership) needs to move. The old secret stops working the instant this returns.
+   */
+  async rotate(ownerUserId: string, keyId: string): Promise<CreatedGatewayKey> {
+    const { rows } = await pool.query<{ id: string; revoked_at: string | null; sandbox: boolean }>(
+      `SELECT id, revoked_at, sandbox FROM gateway_api_keys WHERE id = $1 AND owner_user_id = $2`,
+      [keyId, ownerUserId],
+    );
+    const row = rows[0];
+    if (!row) throw new GatewayKeyError('not_found', 'API key not found.');
+    if (row.revoked_at) throw new GatewayKeyError('already_revoked', 'This API key has been revoked.');
+    const plaintext = `${GATEWAY_KEY_PREFIX}${row.sandbox ? 'test_' : ''}${randomBytes(24).toString('hex')}`;
+    const keyHash = hashGatewayKey(plaintext);
+    const keyPrefix = plaintext.slice(0, 12);
+    await pool.query(`UPDATE gateway_api_keys SET key_hash = $2, key_prefix = $3 WHERE id = $1`, [keyId, keyHash, keyPrefix]);
+    const summary = (await this.summaryOf(keyId))!;
+    return { ...summary, key: plaintext };
+  },
+
+  /**
    * Changes a key's IP allowlist and/or its one-business restriction (owner only). Pass an empty array / null to clear
    * a restriction. Adding a business restriction validates it exactly as creating a key with one does.
    */

@@ -1,9 +1,9 @@
 // API Library — create developer API keys and choose which APIs each one can
 // call. Backed by desk-api's /gateway/* routes (desk-api src/routes/gateway.ts).
 // Key management only works from a signed-in session; the plaintext key is
-// shown exactly once, right after creation, and never again.
-// Options when creating: live or sandbox, which parts of the Desk API a key may read, and an expiry. For a key that exists: its usage
-// and limits, switching it off and on, adding or removing an API, and revoking it.
+// shown exactly once, right after creation (or a rotation), and never again.
+// Options when creating: live or sandbox, which APIs a key may call, and an expiry. For a key that exists: its usage
+// and limits, switching it off and on, rotating its secret, adding or removing an API, and revoking it.
 import {
   registerRoute, api, esc, icon, spinnerBtn, statusMsg, friendlyError, toast,
   reportHandledException, currentEpoch, submitOnEnter, navigate,
@@ -12,16 +12,14 @@ import { tabsHtml } from '../tabs.js';
 
 const MAX_LABEL_LENGTH = 64;
 
-/** The parts of the Desk API a key may be limited to (the server's DESK_SCOPES), in plain words. */
-const KEY_SCOPES = [
-  ['profile', 'Your name and email address'],
-  ['drafts', 'Unfinished business setups'],
-  ['businesses', 'Businesses and their members'],
-];
+/** Plain-word labels for a key's DESK_SCOPES, used only to describe an already-restricted key (see keys.ts):
+    a new key always gets full access now — there is nothing left in the Desk API worth gating by scope. */
+const DESK_SCOPE_LABELS = { profile: 'Your name and email address', drafts: 'Unfinished business setups', businesses: 'Businesses and their members' };
+const DESK_SCOPE_COUNT = Object.keys(DESK_SCOPE_LABELS).length;
 /** Expiry choices: days (0 = never expires). The server accepts 1 to 730. */
 const EXPIRY_CHOICES = [[0, 'Never'], [30, 'In 30 days'], [90, 'In 90 days'], [365, 'In a year'], [730, 'In two years']];
 
-// Sent with a create so a retry of the same request can never make a second key.
+// Sent with a create (or a rotate) so a retry of the same request can never act twice.
 function newIdempotencyKey() {
   const c = globalThis.crypto;
   return c && typeof c.randomUUID === 'function' ? c.randomUUID() : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
@@ -51,16 +49,16 @@ registerRoute('/developer', async (app) => {
     createAttempt: null,
     fieldErrors: {},
     formError: null,
-    revealed: null,
-    animateReveal: false,
+    revealed: null, // { ...key summary, key, rotated }
     sandbox: false,
-    scopes: new Set(KEY_SCOPES.map(([id]) => id)),
     expiresInDays: 0,
-    expanded: new Set(), // key ids whose details are open
+    detailFor: null, // the id of the key whose usage/settings popup is open, or null
     details: {}, // key id -> { loading, error, usage }
     busyKeys: new Set(), // key ids with a change in flight
     confirmRevoke: null,
     isRevoking: false,
+    confirmRotate: null,
+    isRotating: false,
     _lastFormError: null,
   };
 
@@ -93,7 +91,6 @@ registerRoute('/developer', async (app) => {
     const errors = {};
     if (!s.label.trim()) errors.label = 'Give this key a name.';
     if (s.selected.size === 0) errors.services = 'Choose at least one API.';
-    if (s.selected.has('desk_api') && !s.sandbox && KEY_SCOPES.every(([id]) => !s.scopes.has(id))) errors.scopes = 'Choose at least one thing the key may read.';
     return errors;
   }
 
@@ -109,10 +106,6 @@ registerRoute('/developer', async (app) => {
       const services = s.services.map((x) => x.service).filter((id) => s.selected.has(id));
       const body = { label: s.label.trim(), services };
       if (s.sandbox) body.sandbox = true;
-      if (services.includes('desk_api')) {
-        const chosen = KEY_SCOPES.map(([id]) => id).filter((id) => s.scopes.has(id));
-        if (chosen.length < KEY_SCOPES.length) body.deskScopes = chosen; // all of them is the default: leave it out
-      }
       if (s.expiresInDays > 0) body.expiresInDays = s.expiresInDays;
       // The same form submitted again (after a dropped connection, say) reuses its
       // Idempotency-Key; a changed form gets a new one.
@@ -124,13 +117,11 @@ registerRoute('/developer', async (app) => {
       s.createAttempt = null;
       const { key, ...summary } = res.apiKey;
       s.keys = [summary, ...s.keys];
-      s.revealed = { ...summary, key };
-      s.animateReveal = true;
+      s.revealed = { ...summary, key, rotated: false };
       s.label = '';
       s.selected = new Set();
       s.sandbox = false;
       s.expiresInDays = 0;
-      s.scopes = new Set(KEY_SCOPES.map(([id]) => id));
     } catch (err) {
       reportHandledException(err, 'createApiKey');
       s.formError = friendlyError(err, 'We could not create that key. Please try again.');
@@ -160,6 +151,7 @@ registerRoute('/developer', async (app) => {
       await api(`/gateway/api-keys/${encodeURIComponent(target.id)}`, { method: 'DELETE' });
       s.keys = s.keys.filter((k) => k.id !== target.id);
       if (s.revealed && s.revealed.id === target.id) s.revealed = null;
+      if (s.detailFor === target.id) s.detailFor = null;
       toast('Key revoked.');
     } catch (err) {
       reportHandledException(err, 'revokeApiKey');
@@ -171,8 +163,28 @@ registerRoute('/developer', async (app) => {
     }
   }
 
-  // ── a key that exists: usage, switch off/on, add or remove an API ─────────────────────────────────────────────
+  // ── a key that exists: usage, switch off/on, rotate, add or remove an API ─────────────────────────────────────
   const replaceKey = (updated) => { s.keys = s.keys.map((k) => (k.id === updated.id ? { ...k, ...updated } : k)); };
+
+  async function rotateKey() {
+    const target = s.confirmRotate;
+    if (!target) return;
+    s.isRotating = true;
+    render();
+    try {
+      const res = await api(`/gateway/api-keys/${encodeURIComponent(target.id)}/rotate`, { method: 'POST', body: {} });
+      const { key, ...summary } = res.apiKey;
+      replaceKey(summary);
+      s.revealed = { ...summary, key, rotated: true };
+    } catch (err) {
+      reportHandledException(err, 'rotateApiKey');
+      toast(friendlyError(err, 'Could not rotate that key. Please try again.'), true);
+    } finally {
+      s.confirmRotate = null;
+      s.isRotating = false;
+      if (isCurrent()) render();
+    }
+  }
 
   async function loadUsage(id) {
     s.details[id] = { loading: true, error: null, usage: null };
@@ -186,9 +198,8 @@ registerRoute('/developer', async (app) => {
     if (isCurrent()) render();
   }
 
-  function toggleDetails(id) {
-    if (s.expanded.has(id)) { s.expanded.delete(id); render(); return; }
-    s.expanded.add(id);
+  function openDetails(id) {
+    s.detailFor = id;
     if (!s.details[id] || s.details[id].error) loadUsage(id); else render();
   }
 
@@ -233,36 +244,59 @@ registerRoute('/developer', async (app) => {
 
   const onKeydown = (e) => {
     if (!isCurrent()) { document.removeEventListener('keydown', onKeydown); return; }
-    if (e.key === 'Escape' && s.confirmRevoke && !s.isRevoking) { s.confirmRevoke = null; render(); }
+    if (e.key !== 'Escape') return;
+    if (s.confirmRevoke && !s.isRevoking) { s.confirmRevoke = null; render(); return; }
+    if (s.confirmRotate && !s.isRotating) { s.confirmRotate = null; render(); return; }
+    if (s.detailFor) { s.detailFor = null; render(); return; }
+    if (s.revealed) { s.revealed = null; render(); return; }
   };
   document.addEventListener('keydown', onKeydown);
 
   function serviceRowHtml(svc) {
     const disabled = !svc.available || (s.sandbox && svc.service === 'desk_api');
+    const checked = s.selected.has(svc.service);
+    const sandboxable = svc.service !== 'desk_api';
+    const details = [];
+    if (checked && svc.limitNote) details.push(svc.limitNote);
+    if (checked && svc.idleExpiryDays) details.push(`A key that is not used for ${svc.idleExpiryDays} days is revoked automatically.`);
     return `
-      <label class="library-row">
-        <input type="checkbox" name="service" value="${esc(svc.service)}" aria-labelledby="svc-name-${esc(svc.service)}" aria-describedby="svc-desc-${esc(svc.service)}" ${s.selected.has(svc.service) ? 'checked' : ''} ${disabled ? 'disabled' : ''} />
-        <span class="library-icon">${icon(SERVICE_ICONS[svc.service] || 'category_outlined')}</span>
-        <span class="library-body">
-          <span class="name" id="svc-name-${esc(svc.service)}">${esc(svc.name)}</span>
-          <span class="biz-sub" id="svc-desc-${esc(svc.service)}">${esc(svc.description)}</span>
-          <span class="biz-sub">${!svc.available ? esc(svc.unavailableReason || 'Not available right now.') : disabled ? 'Not available on a sandbox key.' : `Endpoints under <b>${esc(svc.basePath)}</b>`}</span>
-        </span>
-      </label>
+      <div class="library-row">
+        <label class="library-row-main" for="svc-${esc(svc.service)}">
+          <input type="checkbox" id="svc-${esc(svc.service)}" name="service" value="${esc(svc.service)}" aria-describedby="svc-desc-${esc(svc.service)}" ${checked ? 'checked' : ''} ${disabled ? 'disabled' : ''} />
+          <span class="library-icon">${icon(SERVICE_ICONS[svc.service] || 'category_outlined')}</span>
+          <span class="library-body">
+            <span class="library-row-head">
+              <span class="name">${esc(svc.name)}</span>
+            </span>
+            <span class="biz-sub" id="svc-desc-${esc(svc.service)}">${esc(svc.description)}</span>
+            ${!svc.available ? `<span class="biz-sub">${esc(svc.unavailableReason || 'Not available right now.')}</span>` : disabled ? `<span class="biz-sub">Not available on a sandbox key.</span>` : ''}
+            ${details.length ? `<span class="biz-sub" style="margin-top:var(--sp-2xs);">${details.map(esc).join('<br>')}</span>` : ''}
+          </span>
+        </label>
+        ${sandboxable && checked ? `
+          <label class="sandbox-inline" for="sandbox-for-${esc(svc.service)}">
+            <input type="checkbox" id="sandbox-for-${esc(svc.service)}" name="sandboxFor" value="${esc(svc.service)}" ${s.sandbox ? 'checked' : ''} />
+            Sandbox Key
+          </label>` : ''}
+      </div>
     `;
   }
 
-  function revealHtml() {
+  function revealModalHtml() {
     const r = s.revealed;
     return `
-      <div class="card fold-in${s.animateReveal ? ' fold-in-animate' : ''}" id="reveal-card" style="max-height:1600px;margin-bottom:var(--sp-lg);">
-        <h2 class="biz-section-title">Copy your new key</h2>
-        <p class="biz-sub" style="margin-bottom:var(--sp-md);">This is the only time the full key is shown. Store it somewhere safe — if you lose it, revoke it and create a new one.</p>
-        <div class="reveal-key">
-          <input id="reveal-input" readonly value="${esc(r.key)}" aria-label="Your new API key" />
-          <button type="button" class="btn btn-primary" id="copy-key-btn">${icon('content_copy')} Copy</button>
+      <div class="modal-backdrop" id="reveal-modal-backdrop">
+        <div class="modal" role="dialog" aria-modal="true" aria-labelledby="reveal-title">
+          <h2 id="reveal-title">${r.rotated ? 'Copy your new secret' : 'Copy your new key'}</h2>
+          <p class="biz-sub" style="margin-bottom:var(--sp-md);">This is the only time the full key is shown. Store it somewhere safe — if you lose it, ${r.rotated ? 'rotate it again' : 'revoke it and create a new one'}.</p>
+          <div class="reveal-key">
+            <input id="reveal-input" readonly value="${esc(r.key)}" aria-label="Your new API key" />
+            <button type="button" class="btn btn-primary" id="copy-key-btn">${icon('content_copy')} Copy</button>
+          </div>
+          <div style="display:flex;justify-content:flex-end;margin-top:var(--sp-lg);">
+            <button type="button" class="btn" id="dismiss-reveal-btn">I've saved my key</button>
+          </div>
         </div>
-        <button type="button" class="btn" id="dismiss-reveal-btn" style="margin-top:var(--sp-lg);">I've saved my key</button>
       </div>
     `;
   }
@@ -276,7 +310,7 @@ registerRoute('/developer', async (app) => {
 
   function usageHtml(k) {
     const d = s.details[k.id];
-    if (!d || d.loading) return `<div class="biz-sub">Loading usage…</div>`;
+    if (!d || d.loading) return `<div class="empty-state">${spinnerBtn(true, '', { dark: true })}</div>`;
     if (d.error) return `<div class="biz-sub">${esc(d.error)} <button type="button" class="btn-link" data-retry-usage="${esc(k.id)}">Try again</button></div>`;
     const u = d.usage;
     const max = Math.max(1, ...u.daily.map((x) => x.calls));
@@ -298,34 +332,48 @@ registerRoute('/developer', async (app) => {
       ${have.length === 1 ? `<div class="biz-sub">A key keeps at least one API.</div>` : ''}`;
   }
 
-  function keyCardHtml(k) {
-    const used = k.lastUsedAt ? `Last used ${formatDate(k.lastUsedAt)}` : 'Never used';
-    const open = s.expanded.has(k.id);
-    const busy = s.busyKeys.has(k.id);
-    const scopes = (k.services || []).includes('desk_api') && Array.isArray(k.deskScopes) && k.deskScopes.length < KEY_SCOPES.length
-      ? `<span class="meta-chip" title="What this key may read from the Desk API">Reads: ${esc(k.deskScopes.map((id) => (KEY_SCOPES.find(([x]) => x === id) || [id, id])[1]).join(', '))}</span>` : '';
-    const exp = expiryText(k);
+  function detailModalHtml(k) {
     return `
-      <div class="key-block">
-        <div class="state-card key-card">
-          <div class="biz-icon neutral">${icon('key')}</div>
-          <div class="biz-body">
-            <div class="biz-title">${esc(k.label)}</div>
-            <div class="biz-sub">${esc(k.keyPrefix)}… · Created ${esc(formatDate(k.createdAt))} · ${esc(used)}${exp ? ` · ${esc(exp)}` : ''}</div>
-            <div class="biz-chips">
-              ${k.suspended ? '<span class="meta-chip warn">Switched off</span>' : ''}
-              ${k.sandbox ? '<span class="meta-chip" title="Fixed sample answers; nothing real is called, counted or billed">Sandbox</span>' : ''}
-              ${(k.services || []).map((id) => `<span class="meta-chip">${esc(serviceName(id))}</span>`).join('')}
-              ${scopes}
-            </div>
-          </div>
-          <div class="key-actions">
-            <button type="button" class="btn btn-sm" data-details="${esc(k.id)}" aria-expanded="${open}" aria-label="${open ? 'Hide' : 'Show'} usage and settings for ${esc(k.label)}">${open ? 'Hide details' : 'Details'}</button>
-            <button type="button" class="btn btn-sm" data-suspend="${esc(k.id)}" data-off="${k.suspended ? '0' : '1'}" ${busy ? 'disabled' : ''} aria-label="${k.suspended ? 'Switch on' : 'Switch off'} key ${esc(k.label)}">${k.suspended ? 'Switch on' : 'Switch off'}</button>
-            <button type="button" class="btn btn-sm" data-revoke="${esc(k.id)}" aria-label="Revoke key ${esc(k.label)}">Revoke</button>
+      <div class="modal-backdrop" id="detail-modal-backdrop">
+        <div class="modal" role="dialog" aria-modal="true" aria-labelledby="detail-title">
+          <h2 id="detail-title">${esc(k.label)}</h2>
+          ${usageHtml(k)}
+          <div style="margin-top:var(--sp-lg);">${apisHtml(k)}</div>
+          <div style="display:flex;justify-content:flex-end;margin-top:var(--sp-xl);">
+            <button type="button" class="btn" id="close-detail-btn">Close</button>
           </div>
         </div>
-        ${open ? `<div class="card key-detail">${usageHtml(k)}<div style="margin-top:var(--sp-lg);">${apisHtml(k)}</div></div>` : ''}
+      </div>
+    `;
+  }
+
+  function keyCardHtml(k) {
+    const busy = s.busyKeys.has(k.id);
+    const scopes = (k.services || []).includes('desk_api') && Array.isArray(k.deskScopes) && k.deskScopes.length < DESK_SCOPE_COUNT
+      ? `<span class="meta-chip" title="What this key may read from the Desk API">Reads: ${esc(k.deskScopes.map((id) => DESK_SCOPE_LABELS[id] || id).join(', '))}</span>` : '';
+    const exp = expiryText(k);
+    const subParts = [`${k.keyPrefix}…`, `Created ${formatDate(k.createdAt)}`];
+    if (k.lastUsedAt) subParts.push(`Last used ${formatDate(k.lastUsedAt)}`);
+    if (exp) subParts.push(exp);
+    return `
+      <div class="state-card key-card">
+        <div class="biz-icon neutral">${icon('key')}</div>
+        <div class="biz-body">
+          <div class="biz-title">${esc(k.label)}</div>
+          <div class="biz-sub">${subParts.map((p) => esc(p)).join(' · ')}</div>
+          <div class="biz-chips">
+            ${k.suspended ? '<span class="meta-chip warn">Switched off</span>' : ''}
+            ${k.sandbox ? '<span class="meta-chip" title="Fixed sample answers; nothing real is called, counted or billed">Sandbox</span>' : ''}
+            ${(k.services || []).map((id) => `<span class="meta-chip">${esc(serviceName(id))}</span>`).join('')}
+            ${scopes}
+          </div>
+        </div>
+        <div class="key-actions">
+          <button type="button" class="btn btn-sm" data-details="${esc(k.id)}" aria-label="Show usage and settings for ${esc(k.label)}">Details</button>
+          <button type="button" class="btn btn-sm" data-suspend="${esc(k.id)}" data-off="${k.suspended ? '0' : '1'}" ${busy ? 'disabled' : ''} aria-label="${k.suspended ? 'Switch on' : 'Switch off'} key ${esc(k.label)}">${k.suspended ? 'Switch on' : 'Switch off'}</button>
+          <button type="button" class="btn btn-sm" data-rotate="${esc(k.id)}" ${busy ? 'disabled' : ''} aria-label="Rotate key ${esc(k.label)}">Rotate</button>
+          <button type="button" class="btn btn-sm" data-revoke="${esc(k.id)}" aria-label="Revoke key ${esc(k.label)}">Revoke</button>
+        </div>
       </div>
     `;
   }
@@ -341,38 +389,42 @@ registerRoute('/developer', async (app) => {
       s._lastFormError = s.formError;
       const errText = (name) => (s.fieldErrors[name] ? `<div class="error-text">${esc(s.fieldErrors[name])}</div>` : '');
       body = `
-        ${s.revealed ? revealHtml() : ''}
-        <div class="card" style="margin-bottom:var(--sp-lg);">
-          <h2 class="biz-section-title">Create a key</h2>
-          <p class="biz-sub" style="margin-bottom:var(--sp-lg);">Choose which APIs the key can call. You can add or remove APIs later from the key's details.</p>
-          <form id="create-form" novalidate>
-            <div class="field-float has-icon">
-              <span class="field-icon">${icon('key')}</span>
-              <label>Key name</label>
-              <input name="label" placeholder=" " maxlength="${MAX_LABEL_LENGTH}" value="${esc(s.label)}" autocomplete="off" class="${s.fieldErrors.label ? 'invalid' : ''}" />
-            </div>
-            ${errText('label')}
-            <div class="field-header"><label>APIs this key can call</label></div>
-            <div class="library-list" id="service-list">${s.services.map(serviceRowHtml).join('')}</div>
-            ${errText('services')}
-            ${s.selected.has('desk_api') && !s.sandbox ? `
-              <div class="field-header"><label>What the key may read from the Desk API</label></div>
-              <div class="library-list" id="scope-list">${KEY_SCOPES.map(([id, label]) => `<label class="library-row"><input type="checkbox" name="scope" value="${id}" ${s.scopes.has(id) ? 'checked' : ''} /><span class="library-body"><span class="name">${esc(label)}</span></span></label>`).join('')}</div>
-              ${errText('scopes')}` : ''}
-            <div class="field-header"><label for="key-expiry">Expires</label></div>
-            <select id="key-expiry" class="team-select" style="margin-bottom:var(--sp-md);">${EXPIRY_CHOICES.map(([d, label]) => `<option value="${d}" ${s.expiresInDays === d ? 'selected' : ''}>${esc(label)}</option>`).join('')}</select>
-            <label class="library-row" id="sandbox-row"><input type="checkbox" name="sandbox" ${s.sandbox ? 'checked' : ''} /><span class="library-body"><span class="name">Sandbox key</span><span class="biz-sub">For trying things out: fixed sample answers, nothing real is called or counted against your plan. Registry and Market APIs only.</span></span></label>
-            ${s.formError ? statusMsg('error', s.formError, animateError) : ''}
-            <button type="submit" class="btn btn-primary" style="margin-top:var(--sp-lg);" ${s.isCreating ? 'disabled' : ''}>
-              ${s.isCreating ? spinnerBtn(true, '') : icon('key')}
-              ${s.isCreating ? '' : 'Create key'}
-            </button>
-          </form>
+        <div class="developer-split">
+          <div class="card">
+            <h2 class="biz-section-title">Create a key</h2>
+            <form id="create-form" novalidate>
+              <div class="field-float has-icon">
+                <span class="field-icon">${icon('key')}</span>
+                <label>Key name</label>
+                <input name="label" placeholder=" " maxlength="${MAX_LABEL_LENGTH}" value="${esc(s.label)}" autocomplete="off" class="${s.fieldErrors.label ? 'invalid' : ''}" />
+              </div>
+              ${errText('label')}
+              <div class="field-header"><label>APIs this key can call</label></div>
+              <div class="library-list" id="service-list">${s.services.map(serviceRowHtml).join('')}</div>
+              ${errText('services')}
+              <div style="display:flex;align-items:center;gap:var(--sp-sm);margin:var(--sp-lg) 0 var(--sp-md);">
+                <label for="key-expiry" style="font-weight:700;">Expires</label>
+                <select id="key-expiry" class="team-select" style="width:auto;">${EXPIRY_CHOICES.map(([d, label]) => `<option value="${d}" ${s.expiresInDays === d ? 'selected' : ''}>${esc(label)}</option>`).join('')}</select>
+              </div>
+              ${s.formError ? statusMsg('error', s.formError, animateError) : ''}
+              <div class="wizard-actions">
+                <div></div>
+                <div>
+                  <button type="submit" class="btn btn-primary" ${s.isCreating ? 'disabled' : ''}>
+                    ${s.isCreating ? spinnerBtn(true, '') : icon('key')}
+                    ${s.isCreating ? '' : ' Create key'}
+                  </button>
+                </div>
+              </div>
+            </form>
+          </div>
+          <div>
+            <h2 class="biz-section-title">Your keys</h2>
+            ${s.keys.length
+              ? s.keys.map(keyCardHtml).join('')
+              : `<div class="state-card"><div class="biz-icon neutral">${icon('key')}</div><div class="biz-body"><div class="biz-title">No API keys yet</div></div></div>`}
+          </div>
         </div>
-        <h2 class="biz-section-title" style="margin-top:var(--sp-xl);">Your keys</h2>
-        ${s.keys.length
-          ? s.keys.map(keyCardHtml).join('')
-          : `<div class="state-card"><div class="biz-icon neutral">${icon('key')}</div><div class="biz-body"><div class="biz-title">No API keys yet</div><div class="biz-sub">Create your first key above to start calling the APIs.</div></div></div>`}
       `;
     }
 
@@ -381,12 +433,14 @@ registerRoute('/developer', async (app) => {
         <div class="page-head-row">
           <div class="head-text">
             <h1>API Library</h1>
-            <p>Create keys and choose which Desk APIs each one can call.</p>
+            <p>Create keys and choose which APIs each one can call.</p>
           </div>
         </div>
         ${tabsHtml('/developer')}
         ${body}
       </div>
+      ${s.revealed ? revealModalHtml() : ''}
+      ${s.detailFor && s.keys.find((k) => k.id === s.detailFor) ? detailModalHtml(s.keys.find((k) => k.id === s.detailFor)) : ''}
       ${s.confirmRevoke ? `
         <div class="modal-backdrop" id="revoke-modal-backdrop">
           <div class="modal" role="dialog" aria-modal="true" aria-labelledby="revoke-title">
@@ -399,8 +453,19 @@ registerRoute('/developer', async (app) => {
           </div>
         </div>
       ` : ''}
+      ${s.confirmRotate ? `
+        <div class="modal-backdrop" id="rotate-modal-backdrop">
+          <div class="modal" role="dialog" aria-modal="true" aria-labelledby="rotate-title">
+            <h2 id="rotate-title">Rotate key</h2>
+            <p>Rotate "${esc(s.confirmRotate.label)}"? Its current secret stops working immediately and a new one is shown once. Anything still using the old secret will need the new one.</p>
+            <div style="display:flex;justify-content:flex-end;gap:var(--sp-sm);margin-top:var(--sp-xl);">
+              <button type="button" class="btn" id="cancel-rotate-btn" ${s.isRotating ? 'disabled' : ''}>Cancel</button>
+              <button type="button" class="btn btn-primary" id="confirm-rotate-btn" ${s.isRotating ? 'disabled' : ''}>${s.isRotating ? spinnerBtn(true, '') : 'Rotate'}</button>
+            </div>
+          </div>
+        </div>
+      ` : ''}
     `;
-    s.animateReveal = false;
 
     app.querySelectorAll('[data-nav]').forEach((a) => a.addEventListener('click', (e) => { e.preventDefault(); navigate(a.dataset.nav); }));
 
@@ -415,18 +480,23 @@ registerRoute('/developer', async (app) => {
       form.querySelectorAll('input[name="service"]').forEach((box) => {
         box.addEventListener('change', () => {
           if (box.checked) s.selected.add(box.value); else s.selected.delete(box.value);
-          if (box.value === 'desk_api') render(); // the "what may it read" choices come and go with the Desk API
+          render(); // a service's limit note / sandbox toggle comes and goes with its own checkbox
         });
       });
-      form.querySelectorAll('input[name="scope"]').forEach((box) => box.addEventListener('change', () => { if (box.checked) s.scopes.add(box.value); else s.scopes.delete(box.value); }));
+      form.querySelectorAll('input[name="sandboxFor"]').forEach((box) => {
+        box.addEventListener('change', () => {
+          s.sandbox = box.checked;
+          if (s.sandbox) s.selected.delete('desk_api'); // a sandbox key has no Desk API
+          render();
+        });
+      });
       const expiry = document.getElementById('key-expiry'); if (expiry) expiry.addEventListener('change', () => { s.expiresInDays = Number(expiry.value); });
-      const sb = form.querySelector('input[name="sandbox"]');
-      if (sb) sb.addEventListener('change', () => { s.sandbox = sb.checked; if (s.sandbox) s.selected.delete('desk_api'); render(); }); // a sandbox key has no Desk API
     }
 
-    app.querySelectorAll('[data-details]').forEach((b) => b.addEventListener('click', () => toggleDetails(b.dataset.details)));
+    app.querySelectorAll('[data-details]').forEach((b) => b.addEventListener('click', () => openDetails(b.dataset.details)));
     app.querySelectorAll('[data-retry-usage]').forEach((b) => b.addEventListener('click', () => loadUsage(b.dataset.retryUsage)));
     app.querySelectorAll('[data-suspend]').forEach((b) => b.addEventListener('click', () => { const k = s.keys.find((x) => x.id === b.dataset.suspend); if (k) setSuspended(k, b.dataset.off === '1'); }));
+    app.querySelectorAll('[data-rotate]').forEach((b) => b.addEventListener('click', () => { s.confirmRotate = s.keys.find((x) => x.id === b.dataset.rotate) || null; render(); }));
     app.querySelectorAll('[data-add-api]').forEach((b) => b.addEventListener('click', () => { const [id, svc] = b.dataset.addApi.split('::'); const k = s.keys.find((x) => x.id === id); if (k) addService(k, svc); }));
     app.querySelectorAll('[data-remove-api]').forEach((b) => b.addEventListener('click', () => { const [id, svc] = b.dataset.removeApi.split('::'); const k = s.keys.find((x) => x.id === id); if (k) removeService(k, svc); }));
 
@@ -434,6 +504,13 @@ registerRoute('/developer', async (app) => {
     if (copy) copy.addEventListener('click', copyRevealedKey);
     const dismiss = document.getElementById('dismiss-reveal-btn');
     if (dismiss) dismiss.addEventListener('click', () => { s.revealed = null; render(); });
+    const revealBackdrop = document.getElementById('reveal-modal-backdrop');
+    if (revealBackdrop) revealBackdrop.addEventListener('click', (e) => { if (e.target === revealBackdrop) { s.revealed = null; render(); } });
+
+    const closeDetail = document.getElementById('close-detail-btn');
+    if (closeDetail) { closeDetail.addEventListener('click', () => { s.detailFor = null; render(); }); closeDetail.focus(); }
+    const detailBackdrop = document.getElementById('detail-modal-backdrop');
+    if (detailBackdrop) detailBackdrop.addEventListener('click', (e) => { if (e.target === detailBackdrop) { s.detailFor = null; render(); } });
 
     app.querySelectorAll('[data-revoke]').forEach((btn) => {
       btn.addEventListener('click', () => {
@@ -447,6 +524,13 @@ registerRoute('/developer', async (app) => {
     if (confirm) confirm.addEventListener('click', revokeKey);
     const backdrop = document.getElementById('revoke-modal-backdrop');
     if (backdrop) backdrop.addEventListener('click', (e) => { if (e.target === backdrop && !s.isRevoking) { s.confirmRevoke = null; render(); } });
+
+    const cancelRotate = document.getElementById('cancel-rotate-btn');
+    if (cancelRotate) { cancelRotate.addEventListener('click', () => { s.confirmRotate = null; render(); }); cancelRotate.focus(); }
+    const confirmRotateBtn = document.getElementById('confirm-rotate-btn');
+    if (confirmRotateBtn) confirmRotateBtn.addEventListener('click', rotateKey);
+    const rotateBackdrop = document.getElementById('rotate-modal-backdrop');
+    if (rotateBackdrop) rotateBackdrop.addEventListener('click', (e) => { if (e.target === rotateBackdrop && !s.isRotating) { s.confirmRotate = null; render(); } });
   }
 
   await load();

@@ -108,6 +108,7 @@ import {
   listGatewayKeysHandler,
   listGatewayServicesHandler,
   revokeGatewayKeyHandler,
+  rotateGatewayKeyHandler,
 } from './routes/gateway';
 import { createWebhookHandler, deleteWebhookHandler, listWebhookEventsHandler, listWebhooksHandler, rotateWebhookSecretHandler, testWebhookHandler, webhookDeliveriesHandler, retryWebhookDeliveryHandler } from './routes/webhooksOut';
 import { authorizeDecisionHandler, authorizeHandler, authorizeInfoHandler, createClientHandler, deleteClientHandler, discoveryHandler, listAuthorizationsHandler, listClientsHandler, registerOAuthTokenRoutes, revokeAuthorizationHandler } from './routes/oauth';
@@ -680,6 +681,7 @@ async function registerLegacyAndVersionedRoutes(instance: FastifyInstance) {
   instance.patch('/gateway/api-keys/:id/restrictions', small, setKeyRestrictionsHandler);
   instance.post('/gateway/api-keys/:id/suspend', small, suspendGatewayKeyHandler);
   instance.post('/gateway/api-keys/:id/resume', small, resumeGatewayKeyHandler);
+  instance.post('/gateway/api-keys/:id/rotate', small, rotateGatewayKeyHandler);
 
   // ── API Library: key-authenticated proxies to registry-api / market-validation-api ──
   instance.get('/gateway/registry/*', gatewayRegistryProxyHandler);

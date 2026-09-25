@@ -36,14 +36,16 @@ export async function isNewSignInDevice(userId: string, ip: string, userAgent: s
   }
 }
 
-export type SecurityNotice = 'new_sign_in' | 'password_changed' | 'password_reset' | 'api_key_created' | 'account_deleted' | 'two_factor_enabled' | 'two_factor_disabled';
+export type SecurityNotice = 'new_sign_in' | 'password_changed' | 'password_reset' | 'api_key_created' | 'api_key_rotated' | 'account_deleted' | 'two_factor_enabled' | 'two_factor_disabled';
 
 function describe(kind: SecurityNotice, request: FastifyRequest, extra: string | undefined): { title: string; body: string; showAction?: boolean } {
   const ua = request.headers['user-agent'];
   const where = `from ${getClientIp(request)}${typeof ua === 'string' && ua ? ` using ${ua.slice(0, 80)}` : ''}`;
   switch (kind) {
     case 'new_sign_in':
-      return { title: 'New sign-in to your account', body: `Your Desk account was just signed in to ${where}. It is a browser or network we have not seen for you recently.` };
+      // No raw IP/user-agent in the body: "a browser or network we haven't seen" already says why this was sent,
+      // without reading like a server log.
+      return { title: 'New sign-in to your account', body: 'Your Desk account was just signed in from a browser or network we have not seen for you recently.' };
     case 'password_changed':
       return { title: 'Your password was changed', body: `The password for your Desk account was changed ${where}. Your other devices were signed out.` };
     case 'password_reset':
@@ -53,7 +55,9 @@ function describe(kind: SecurityNotice, request: FastifyRequest, extra: string |
     case 'account_deleted':
       return { title: 'Your Desk account was deleted', body: `Your Desk account was deleted ${where}. Your sessions, API keys and the businesses only you owned were removed. If this was not you, reply to this email straight away.` };
     case 'api_key_created':
-      return { title: 'A new API key was created', body: `An API key${extra ? ` named "${extra}"` : ''} was created for your Desk account ${where}.` };
+      return { title: 'A new API key was created', body: `An API key${extra ? ` named "${extra}"` : ''} was created for your Desk account.` };
+    case 'api_key_rotated':
+      return { title: 'An API key was rotated', body: `An API key${extra ? ` named "${extra}"` : ''} was given a new secret for your Desk account. Its old secret stopped working immediately.` };
     case 'two_factor_enabled':
       return { title: 'Two-factor authentication turned on', body: `Two-factor authentication was turned on for your Desk account ${where}. A code from your authenticator app is now needed to sign in.` };
     case 'two_factor_disabled':
