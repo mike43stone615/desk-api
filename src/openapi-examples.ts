@@ -765,7 +765,7 @@ export const GATEWAY_EXAMPLES: Record<string, { status: number; request: unknown
         },
         {
           "service": "registry_api",
-          "name": "Registry API",
+          "name": "Business Name Registry API",
           "description": "Business registry lookups.",
           "basePath": "/v1/gateway/registry",
           "available": true

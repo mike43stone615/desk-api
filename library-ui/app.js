@@ -565,12 +565,17 @@ document.addEventListener('click', (e) => {
 
 // ---------------- Shared helpers ----------------
 
+// Only one toast is ever on screen: they're all fixed to the same corner, so two shown at once would sit on top of
+// each other rather than stack. A new one replaces whatever is still showing (and its own timer) instead of piling up.
+let currentToast = null;
 export function toast(msg, isError = false) {
+  if (currentToast) { clearTimeout(currentToast.timer); currentToast.el.remove(); }
   const el = document.createElement('div');
   el.className = 'toast' + (isError ? ' error' : '');
   el.textContent = msg;
   document.body.appendChild(el);
-  setTimeout(() => el.remove(), 3500);
+  const timer = setTimeout(() => { el.remove(); if (currentToast && currentToast.el === el) currentToast = null; }, 3500);
+  currentToast = { el, timer };
 }
 
 export function esc(s) {
@@ -631,6 +636,7 @@ const ICONS = {
   mark_email_read_outlined: '<rect x="2" y="5" width="20" height="14" rx="2"/><path d="M3 7l9 6 9-6"/><path d="M14.5 16.5l2 2L21 14"/>',
   mark_email_unread_outlined: '<rect x="2" y="5" width="20" height="14" rx="2"/><path d="M3 7l9 6 9-6"/><circle cx="19" cy="6" r="3" fill="currentColor" stroke="none"/>',
   help_outline: '<circle cx="12" cy="12" r="10"/><path d="M9.5 9a2.5 2.5 0 1 1 3.5 2.3c-.9.4-1.5 1.1-1.5 2.2"/><line x1="12" y1="17.3" x2="12" y2="17.31"/>',
+  info_outline: '<circle cx="12" cy="12" r="10"/><line x1="12" y1="11" x2="12" y2="16"/><line x1="12" y1="7.5" x2="12" y2="7.51"/>',
   arrow_back: '<path d="M19 12H5M11 18l-6-6 6-6"/>',
   lock_reset_outlined: '<rect x="4" y="11" width="12" height="9" rx="2"/><path d="M7 11V7a5 5 0 0 1 9.5-2.2"/><path d="M18 4v4h-4"/>',
   check_circle_outline: '<circle cx="12" cy="12" r="10"/><path d="M8 12l3 3 5-6"/>',

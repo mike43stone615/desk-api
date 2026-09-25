@@ -148,13 +148,28 @@ describe('security emails', () => {
     expect(emailed.security.get(u.email)).toBeUndefined();
   });
 
-  it('a new API key emails the owner with its name', async () => {
+  it('a new API key emails the owner with its name, informational only (no action button)', async () => {
     const u = seedUser();
     const t = tokenOf(await signIn(u.email, '203.0.113.5', 'me/1'));
     config.gatewayKeyEncryptionSecret = 'ab'.repeat(32);
     await app.inject({ method: 'POST', url: '/gateway/api-keys', headers: bearer(t), payload: { label: 'deploy bot', services: ['desk_api'] } });
     await flush();
     expect(emailed.security.get(u.email)).toContain('A new API key was created');
+    const detail = emailed.securityDetail.find((n) => n.to === u.email && n.title === 'A new API key was created');
+    expect(detail?.showAction).toBe(false);
+  });
+
+  it('rotating a key is also informational only (no action button)', async () => {
+    const u = seedUser();
+    const t = tokenOf(await signIn(u.email, '203.0.113.5', 'me/1'));
+    config.gatewayKeyEncryptionSecret = 'ab'.repeat(32);
+    const created = JSON.parse((await app.inject({ method: 'POST', url: '/gateway/api-keys', headers: bearer(t), payload: { label: 'rotate me', services: ['desk_api'] } })).body).apiKey;
+    await flush();
+    await app.inject({ method: 'POST', url: `/gateway/api-keys/${created.id}/rotate`, headers: bearer(t) });
+    await flush();
+    expect(emailed.security.get(u.email)).toContain('An API key was rotated');
+    const detail = emailed.securityDetail.find((n) => n.to === u.email && n.title === 'An API key was rotated');
+    expect(detail?.showAction).toBe(false);
   });
 
   describe('new sign-in from an unfamiliar browser or network', () => {

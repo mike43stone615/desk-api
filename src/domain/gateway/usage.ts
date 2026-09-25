@@ -35,7 +35,7 @@ export async function keyUsage(keyId: string, days: number): Promise<DailyUsage[
 export function limitsFor(perMinuteDeskApi: number): Array<{ service: string; perMinute: number; note: string }> {
   return [
     { service: 'desk_api', perMinute: perMinuteDeskApi, note: `Each key may make ${perMinuteDeskApi} calls a minute to the Desk API, and every account ${Math.ceil(perMinuteDeskApi * 5)} across all its keys and devices.` },
-    { service: 'registry_api', perMinute: 60, note: 'The Registry API itself allows 60 calls a minute per key; the answers carry X-RateLimit-* headers.' },
+    { service: 'registry_api', perMinute: 60, note: 'The Business Name Registry API itself allows 60 calls a minute per key; the answers carry X-RateLimit-* headers.' },
     { service: 'market_validation_api', perMinute: 60, note: 'The Market Validation API itself allows 60 calls a minute per key; a market analysis is limited to 2 at once.' },
   ];
 }

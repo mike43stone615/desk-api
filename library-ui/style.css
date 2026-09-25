@@ -448,7 +448,7 @@ input[type="password"]::-ms-reveal { display: none; }
 .key-card > .team-select { flex-shrink: 0; }
 .library-list { display: flex; flex-direction: column; gap: var(--sp-sm); margin-bottom: var(--sp-sm); }
 .library-row {
-  display: flex; align-items: flex-start; gap: var(--sp-md); padding: var(--sp-md) var(--sp-lg);
+  position: relative; display: flex; align-items: flex-start; gap: var(--sp-md); padding: var(--sp-md) var(--sp-lg);
   background: var(--input-bg); border: 1px solid var(--line); border-radius: var(--r-md); cursor: pointer;
 }
 .library-row:hover { border-color: var(--line-strong); }
@@ -648,19 +648,43 @@ table.admin-table td.admin-actions-cell { white-space: nowrap; }
 .plain-table th, .plain-table td { text-align: left; padding: var(--sp-sm) var(--sp-md); border-bottom: 1px solid var(--line); vertical-align: top; }
 .plain-table .num { text-align: right; white-space: nowrap; }
 
-/* API keys: switched-off marker, per-key actions */
+/* API keys: per-key actions */
 .key-actions { display: flex; gap: var(--sp-xs); flex-wrap: wrap; justify-content: flex-end; }
 .key-usage-days { margin-top: var(--sp-sm); }
 .meta-chip.warn { border-color: var(--warning); color: var(--warning); }
 .chip-x { background: none; border: none; color: inherit; cursor: pointer; padding: 0 0 0 4px; font: inherit; opacity: .7; }
 .chip-x:hover:not(:disabled) { opacity: 1; }
+.chip-add { appearance: none; border-style: dashed; cursor: pointer; font: inherit; color: var(--accent); }
+.chip-add:hover:not(:disabled) { border-color: var(--accent); background: var(--accent-soft); }
+.chip-add:disabled { opacity: .5; cursor: not-allowed; }
+/* Switched off reads on the button itself (amber, like a caution light) instead of a separate "Switched off" pill. */
+.btn-warn { background: var(--warning); border-color: var(--warning); color: var(--surface); }
+.btn-warn:hover:not(:disabled) { filter: brightness(1.08); }
+.btn-warn:active:not(:disabled) { filter: brightness(.95); }
 @media (max-width: 520px) { .key-card { flex-wrap: wrap; } .key-actions { justify-content: flex-start; width: 100%; } }
 
 /* API Library: create-key page, split into a left form and a right key list (pages/developer.js). */
 .developer-split { display: grid; grid-template-columns: minmax(320px, 440px) 1fr; gap: var(--sp-xl); align-items: start; }
 @media (max-width: 860px) { .developer-split { grid-template-columns: 1fr; } }
-/* A service row's checkbox+icon+body stays one clickable label; the sandbox toggle (only shown once the service
-   itself is checked) sits beside it as its own control, not nested inside that label. */
-.library-row-main { display: flex; align-items: flex-start; gap: var(--sp-md); flex: 1; min-width: 0; cursor: pointer; }
-.library-row-head { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-sm); }
-.sandbox-inline { display: flex; align-items: center; gap: var(--sp-2xs); font-size: .8rem; font-weight: 600; color: var(--ink-soft); white-space: nowrap; flex-shrink: 0; cursor: pointer; }
+.modal-wide { width: 680px; }
+
+/* A small "i" badge: hover or focus (never a click) reveals a themed tooltip, standing in for the native title
+   attribute wherever the plain OS tooltip would look out of place next to the rest of the page. */
+.info-icon { position: relative; display: inline-flex; vertical-align: middle; color: var(--ink-faint); cursor: default; }
+.info-icon:hover, .info-icon:focus-visible { color: var(--ink-soft); outline: none; }
+.info-icon.corner { position: absolute; top: var(--sp-md); right: var(--sp-md); }
+.info-tooltip {
+  position: absolute; top: 100%; right: 0; margin-top: var(--sp-xs); z-index: 20; width: max-content; max-width: 260px;
+  background: var(--surface-2); border: 1px solid var(--line); border-radius: var(--r-md); box-shadow: var(--shadow);
+  padding: var(--sp-sm) var(--sp-md); font-size: .78rem; font-weight: 500; line-height: 1.4; color: var(--ink-soft);
+  opacity: 0; pointer-events: none; transform: translateY(-2px); transition: opacity 120ms ease, transform 120ms ease;
+}
+.info-icon:hover .info-tooltip, .info-icon:focus-visible .info-tooltip { opacity: 1; transform: translateY(0); }
+
+/* The two per-key usage charts (calls/day, errors/day): plain SVG bars, no charting library. */
+.usage-chart { display: block; width: 100%; height: 70px; margin-bottom: var(--sp-md); }
+.chart-bar { cursor: pointer; }
+.chart-bar.calls-bar { fill: var(--accent); }
+.chart-bar.calls-bar:hover, .chart-bar.calls-bar.selected { fill: var(--accent-hover); }
+.chart-bar.errors-bar { fill: var(--error); }
+.chart-bar.errors-bar:hover, .chart-bar.errors-bar.selected { fill: #f87171; }

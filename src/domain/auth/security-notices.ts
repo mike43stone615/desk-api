@@ -55,9 +55,10 @@ function describe(kind: SecurityNotice, request: FastifyRequest, extra: string |
     case 'account_deleted':
       return { title: 'Your Desk account was deleted', body: `Your Desk account was deleted ${where}. Your sessions, API keys and the businesses only you owned were removed. If this was not you, reply to this email straight away.` };
     case 'api_key_created':
-      return { title: 'A new API key was created', body: `An API key${extra ? ` named "${extra}"` : ''} was created for your Desk account.` };
+      // Purely informational — there's nothing to act on unless the person signs in anyway, so no button either.
+      return { title: 'A new API key was created', body: `An API key${extra ? ` named "${extra}"` : ''} was created for your Desk account.`, showAction: false };
     case 'api_key_rotated':
-      return { title: 'An API key was rotated', body: `An API key${extra ? ` named "${extra}"` : ''} was given a new secret for your Desk account. Its old secret stopped working immediately.` };
+      return { title: 'An API key was rotated', body: `An API key${extra ? ` named "${extra}"` : ''} was given a new secret for your Desk account. Its old secret stopped working immediately.`, showAction: false };
     case 'two_factor_enabled':
       return { title: 'Two-factor authentication turned on', body: `Two-factor authentication was turned on for your Desk account ${where}. A code from your authenticator app is now needed to sign in.` };
     case 'two_factor_disabled':
