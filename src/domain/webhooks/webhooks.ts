@@ -1,4 +1,4 @@
-// Outbound webhooks: Desk tells a developer's server when something happens (a key is made or revoked, someone joins a team,
+// Outbound webhooks: Desk tells a developer's server when something happens (a key is made or revoked,
 // a plan changes). Each delivery is
 //   * signed:   `Desk-Signature: t=<unix seconds>,v1=<hex HMAC-SHA256 of "<t>.<body>" with the endpoint's secret>`, so the receiver
 //               can prove it came from Desk and reject a replay (an old `t`);
@@ -13,9 +13,8 @@ import { pool } from '../../db';
 import { config } from '../../config';
 import { decryptSecret, encryptSecret } from '../gateway/crypto';
 import { subscriptionFor } from '../billing/plans';
-import { atLeast, roleIn } from '../teams/teams';
 
-export const WEBHOOK_EVENTS = ['key.created', 'key.revoked', 'team.member_joined', 'team.member_removed', 'plan.changed', 'oauth.app_authorized', 'usage.cap_reached', 'usage.threshold_reached', 'webhook.test'] as const;
+export const WEBHOOK_EVENTS = ['key.created', 'key.revoked', 'plan.changed', 'oauth.app_authorized', 'usage.cap_reached', 'usage.threshold_reached', 'webhook.test'] as const;
 export type WebhookEvent = (typeof WEBHOOK_EVENTS)[number];
 
 const BACKOFF_SECONDS = [60, 300, 1800, 7200, 21600];
@@ -77,11 +76,11 @@ export async function assertSafeWebhookUrl(raw: string, resolve: (host: string) 
 
 // ── endpoints ───────────────────────────────────────────────────────────────────────────────────────────────────────
 export interface WebhookEndpoint {
-  id: string; url: string; events: string[]; teamId: string | null; active: boolean; disabledReason: string | null; createdAt: string; consecutiveFailures: number;
+  id: string; url: string; events: string[]; active: boolean; disabledReason: string | null; createdAt: string; consecutiveFailures: number;
 }
-interface EndpointRow { id: string; url: string; events: string[]; team_id: string | null; active: boolean; disabled_reason: string | null; created_at: string; consecutive_failures: number }
-const toEndpoint = (r: EndpointRow): WebhookEndpoint => ({ id: r.id, url: r.url, events: r.events, teamId: r.team_id, active: r.active, disabledReason: r.disabled_reason, createdAt: r.created_at, consecutiveFailures: r.consecutive_failures });
-const COLS = 'id, url, events, team_id, active, disabled_reason, created_at, consecutive_failures';
+interface EndpointRow { id: string; url: string; events: string[]; active: boolean; disabled_reason: string | null; created_at: string; consecutive_failures: number }
+const toEndpoint = (r: EndpointRow): WebhookEndpoint => ({ id: r.id, url: r.url, events: r.events, active: r.active, disabledReason: r.disabled_reason, createdAt: r.created_at, consecutiveFailures: r.consecutive_failures });
+const COLS = 'id, url, events, active, disabled_reason, created_at, consecutive_failures';
 
 const secretKey = () => {
   if (!config.gatewayKeyEncryptionSecret) throw new WebhookError('unavailable', 'Webhook storage is not configured.');
@@ -92,50 +91,32 @@ export function newSecret(): string {
   return `whsec_${randomBytes(24).toString('hex')}`;
 }
 
-async function assertMayManage(userId: string, teamId: string | null): Promise<void> {
-  if (!teamId) return;
-  const role = await roleIn(teamId, userId);
-  if (!role) throw new WebhookError('not_found', 'Team not found.');
-  if (!atLeast(role, 'admin')) throw new WebhookError('forbidden', 'Only a team admin or owner can manage its webhooks.');
-}
-
 export const webhooks = {
-  async create(userId: string, input: { url: string; events: string[]; teamId?: string | null }): Promise<{ endpoint: WebhookEndpoint; secret: string }> {
-    const teamId = input.teamId ?? null;
-    await assertMayManage(userId, teamId);
+  async create(userId: string, input: { url: string; events: string[] }): Promise<{ endpoint: WebhookEndpoint; secret: string }> {
     const events = [...new Set(input.events)];
     if (events.some((e) => !(WEBHOOK_EVENTS as readonly string[]).includes(e) || e === 'webhook.test')) throw new WebhookError('invalid_url', 'Unknown event name.');
     await assertSafeWebhookUrl(input.url);
-    const cap = (await subscriptionFor(teamId ? 'team' : 'user', teamId ?? userId)).plan.maxWebhooks;
-    const { rows: c } = await pool.query<{ n: string }>(teamId ? `SELECT COUNT(*) AS n FROM webhook_endpoints WHERE team_id = $1` : `SELECT COUNT(*) AS n FROM webhook_endpoints WHERE owner_user_id = $1 AND team_id IS NULL`, [teamId ?? userId]);
+    const cap = (await subscriptionFor('user', userId)).plan.maxWebhooks;
+    const { rows: c } = await pool.query<{ n: string }>(`SELECT COUNT(*) AS n FROM webhook_endpoints WHERE owner_user_id = $1`, [userId]);
     if (Number(c[0]?.n ?? 0) >= cap) throw new WebhookError('limit_reached', `Your plan allows ${cap} webhook endpoints. Remove one first.`);
     const secret = newSecret();
     const id = randomUUID();
     const { rows } = await pool.query<EndpointRow>(
-      `INSERT INTO webhook_endpoints (id, owner_user_id, team_id, url, secret_enc, events) VALUES ($1, $2, $3, $4, $5, $6) RETURNING ${COLS}`,
-      [id, userId, teamId, input.url, encryptSecret(secret, secretKey()), events],
+      `INSERT INTO webhook_endpoints (id, owner_user_id, url, secret_enc, events) VALUES ($1, $2, $3, $4, $5) RETURNING ${COLS}`,
+      [id, userId, input.url, encryptSecret(secret, secretKey()), events],
     );
     return { endpoint: toEndpoint(rows[0]), secret };
   },
 
-  async list(userId: string, teamId?: string | null): Promise<WebhookEndpoint[]> {
-    if (teamId) {
-      const role = await roleIn(teamId, userId);
-      if (!role) throw new WebhookError('not_found', 'Team not found.');
-      const { rows } = await pool.query<EndpointRow>(`SELECT ${COLS} FROM webhook_endpoints WHERE team_id = $1 ORDER BY created_at DESC`, [teamId]);
-      return rows.map(toEndpoint);
-    }
-    const { rows } = await pool.query<EndpointRow>(`SELECT ${COLS} FROM webhook_endpoints WHERE owner_user_id = $1 AND team_id IS NULL ORDER BY created_at DESC`, [userId]);
+  async list(userId: string): Promise<WebhookEndpoint[]> {
+    const { rows } = await pool.query<EndpointRow>(`SELECT ${COLS} FROM webhook_endpoints WHERE owner_user_id = $1 ORDER BY created_at DESC`, [userId]);
     return rows.map(toEndpoint);
   },
 
-  /** The endpoint, if the person may manage it (their own, or their team's when they are an admin or owner). */
+  /** The endpoint, if the person may manage it (their own). */
   async manageable(userId: string, id: string): Promise<(EndpointRow & { owner_user_id: string; secret_enc: string }) | null> {
-    const { rows } = await pool.query<EndpointRow & { owner_user_id: string; secret_enc: string }>(`SELECT ${COLS}, owner_user_id, secret_enc FROM webhook_endpoints WHERE id = $1`, [id]);
-    const e = rows[0];
-    if (!e) return null;
-    if (e.team_id) return atLeast(await roleIn(e.team_id, userId), 'admin') ? e : null;
-    return e.owner_user_id === userId ? e : null;
+    const { rows } = await pool.query<EndpointRow & { owner_user_id: string; secret_enc: string }>(`SELECT ${COLS}, owner_user_id, secret_enc FROM webhook_endpoints WHERE id = $1 AND owner_user_id = $2`, [id, userId]);
+    return rows[0] ?? null;
   },
 
   async remove(userId: string, id: string): Promise<boolean> {
@@ -199,13 +180,13 @@ async function queue(endpointIds: string[], type: WebhookEvent, data: Record<str
   }
 }
 
-/** Tells every listening endpoint of the person (or team) about an event. Never throws and never waits for delivery. */
-export function emitWebhookEvent(target: { userId?: string; teamId?: string }, type: WebhookEvent, data: Record<string, unknown>): void {
+/** Tells every listening endpoint of the person about an event. Never throws and never waits for delivery. */
+export function emitWebhookEvent(target: { userId?: string }, type: WebhookEvent, data: Record<string, unknown>): void {
+  if (!target.userId) return;
   void (async () => {
     const { rows } = await pool.query<{ id: string }>(
-      `SELECT id FROM webhook_endpoints WHERE active AND $3 = ANY(events)
-         AND ((owner_user_id = $1 AND team_id IS NULL) OR team_id = $2)`,
-      [target.userId ?? null, target.teamId ?? null, type],
+      `SELECT id FROM webhook_endpoints WHERE active AND $2 = ANY(events) AND owner_user_id = $1`,
+      [target.userId, type],
     );
     if (rows.length) await queue(rows.map((r) => r.id), type, data);
   })().catch(() => {});

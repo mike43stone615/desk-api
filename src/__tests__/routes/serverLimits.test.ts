@@ -40,7 +40,7 @@ describe('the website own files are not counted by the address limit', () => {
   beforeEach(() => { config.rateLimitPerMinute = 3; });
   it('pages, scripts, styles and the logo keep loading while an API call from the same address is refused', async () => {
     const headers = { 'cf-connecting-ip': '198.51.100.88' };
-    for (const url of ['/', '/login', '/developer', '/app.js', '/style.css', '/pages/teams.js', '/desk_logo.png']) {
+    for (const url of ['/', '/login', '/developer', '/app.js', '/style.css', '/pages/developer.js', '/desk_logo.png']) {
       for (let i = 0; i < 6; i++) expect((await app.inject({ method: 'GET', url, headers })).statusCode, `${url} #${i}`).toBe(200);
     }
     // ...and the API calls from that same address are the ones limited

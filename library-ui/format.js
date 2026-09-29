@@ -26,8 +26,6 @@ export function usageShare(used, included) {
 export const EVENT_LABELS = {
   'key.created': 'An API key is created',
   'key.revoked': 'An API key is revoked',
-  'team.member_joined': 'Someone joins a team',
-  'team.member_removed': 'Someone is removed from a team',
   'plan.changed': 'A plan changes',
   'oauth.app_authorized': 'An app is authorized',
   'usage.cap_reached': 'A daily usage cap is reached',
@@ -40,7 +38,7 @@ export const SCOPE_LABELS = {
   profile: 'Your name and email address',
   drafts: 'Unfinished business setups',
   businesses: 'Businesses and their members',
-  teams: 'Teams and their keys (GraphQL)',
+  teams: 'Your API keys, plan and usage (GraphQL)',
 };
 
 /** One redirect address per line (or comma) -> a clean list; blank lines dropped, duplicates removed. */

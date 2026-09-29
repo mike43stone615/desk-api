@@ -5,7 +5,7 @@
 //      for "/developer" or "/login", the SPA's own router handles it once index.html's JS has loaded -- so serve
 //      the app shell for those.
 //   2. real backend traffic that has nothing to do with this static deployment at all: the actual API calls the
-//      pages make (/auth, /gateway, /admin, /billing, /oauth, /teams), plus things this project has no opinion on
+//      pages make (/auth, /gateway, /admin, /billing, /oauth), plus things this project has no opinion on
 //      and must not swallow -- health checks, OAuth discovery (/.well-known/*), /docs, /openapi.json, /changelog,
 //      /status, etc. -- proxy those straight through to the same origin api.deskbusiness.co's DNS record already
 //      points at, unchanged.
@@ -25,7 +25,6 @@ const SPA_ROUTES = new Set([
   '/developer/apps',
   '/developer/authorize',
   '/developer/billing',
-  '/developer/teams',
   '/developer/webhooks',
 ]);
 

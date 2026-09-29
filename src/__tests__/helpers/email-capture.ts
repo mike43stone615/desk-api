@@ -9,6 +9,8 @@ export const emailed = {
   security: new Map<string, string[]>(),
   /** Security notices, in order, with the full detail the title-only map above drops. */
   securityDetail: [] as Array<{ to: string; title: string; body: string; showAction: boolean }>,
+  /** Key-share invitation e-mails sent, in order: { to, keyLabel, inviterEmail }. */
+  keyShare: [] as Array<{ to: string; keyLabel: string; inviterEmail: string }>,
   /** The confirm.unsubscribe token pair handed to a status-subscribe confirmation e-mail, by recipient. */
   statusSubscribe: new Map<string, string>(),
   /** Incident notice e-mails sent, in order: { to, title, status }. */
@@ -36,8 +38,9 @@ export function emailModuleMock() {
       emailed.securityDetail.push({ to: email, title, body, showAction });
     },
     sendAccountAlreadyExistsEmail: async () => {},
-    sendTeamInviteEmail: async () => {},
-    sendTeamInviteSignupEmail: async () => {},
+    sendKeyShareEmail: async (_config: unknown, to: string, keyLabel: string, inviterEmail: string) => {
+      emailed.keyShare.push({ to, keyLabel, inviterEmail });
+    },
     sendStatusSubscribeConfirmEmail: async (_config: unknown, email: string, token: string) => {
       emailed.statusSubscribe.set(email, token);
     },

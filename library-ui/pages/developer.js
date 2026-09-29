@@ -347,10 +347,14 @@ registerRoute('/developer', async (app) => {
     const filled = fillDailyRange(d.usage.daily, d.usage.days);
     const picked = s.selectedDay && filled.find((x) => x.day === s.selectedDay);
     return `
-      <div class="field-header"><label>Calls, last ${d.usage.days} days</label></div>
-      ${barChartSvg(filled, 'calls', 'calls-bar')}
-      <div class="field-header"><label>Errors, last ${d.usage.days} days</label></div>
-      ${barChartSvg(filled, 'errors', 'errors-bar')}
+      <div class="chart-legend">
+        <span class="chart-legend-item"><span class="chart-legend-dot calls-bar"></span>Calls, last ${d.usage.days} days</span>
+        <span class="chart-legend-item"><span class="chart-legend-dot errors-bar"></span>Errors, last ${d.usage.days} days</span>
+      </div>
+      <div class="usage-charts-row">
+        ${barChartSvg(filled, 'calls', 'calls-bar')}
+        ${barChartSvg(filled, 'errors', 'errors-bar')}
+      </div>
       ${picked ? `<div class="biz-sub" style="margin-top:var(--sp-sm);">${esc(picked.day)} — ${picked.calls} ${picked.calls === 1 ? 'call' : 'calls'}, ${picked.errors} ${picked.errors === 1 ? 'error' : 'errors'}${d.usage.sharedWithTeam ? ' (shared with the team)' : ''}</div>` : ''}
     `;
   }
@@ -416,7 +420,7 @@ registerRoute('/developer', async (app) => {
       <div class="state-card key-card">
         <div class="biz-icon neutral">${icon('key')}</div>
         <div class="biz-body">
-          <div class="biz-title">${esc(k.label)} ${infoIcon(`Created ${formatDate(k.createdAt)} · ${expiryText(k)}`)}</div>
+          <div class="biz-title-row"><div class="biz-title">${esc(k.label)}</div>${infoIcon(`Created ${formatDate(k.createdAt)} · ${expiryText(k)}`)}</div>
           <div class="biz-sub">${subParts.map((p) => esc(p)).join(' · ')}</div>
           <div class="biz-chips">
             ${k.sandbox ? '<span class="meta-chip" title="Fixed sample answers; nothing real is called, counted or billed">Sandbox</span>' : ''}
@@ -426,7 +430,7 @@ registerRoute('/developer', async (app) => {
         </div>
         <div class="key-actions">
           <button type="button" class="btn btn-sm" data-details="${esc(k.id)}" aria-label="Show usage and settings for ${esc(k.label)}">Details</button>
-          <button type="button" class="btn btn-sm ${k.suspended ? 'btn-warn' : ''}" data-suspend="${esc(k.id)}" data-off="${k.suspended ? '0' : '1'}" ${busy ? 'disabled' : ''} aria-label="${k.suspended ? 'Switch on' : 'Switch off'} key ${esc(k.label)}">${k.suspended ? 'Switch on' : 'Switch off'}</button>
+          <button type="button" class="btn btn-sm btn-suspend-toggle ${k.suspended ? 'btn-warn' : ''}" data-suspend="${esc(k.id)}" data-off="${k.suspended ? '0' : '1'}" ${busy ? 'disabled' : ''} aria-label="${k.suspended ? 'Switch on' : 'Switch off'} key ${esc(k.label)}">${k.suspended ? 'Switch on' : 'Switch off'}</button>
           <button type="button" class="btn btn-sm" data-rotate="${esc(k.id)}" ${busy ? 'disabled' : ''} aria-label="Rotate key ${esc(k.label)}">Rotate</button>
           <button type="button" class="btn btn-sm" data-revoke="${esc(k.id)}" aria-label="Revoke key ${esc(k.label)}">Revoke</button>
         </div>

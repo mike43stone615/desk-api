@@ -1,7 +1,7 @@
 // OAuth 2.0 for third-party apps: a person lets an app read their Desk data without giving it a password or a key.
 //   * authorization code flow with PKCE (S256), required for every client, public or confidential;
 //   * access tokens live one hour, refresh tokens 30 days and are replaced on every use (a refresh token works once; presenting a used one again ends the grant);
-//   * scopes are read-only: profile, drafts, businesses (the Desk API's own read scopes) and teams (GraphQL only);
+//   * scopes are read-only: profile, drafts, businesses (the Desk API's own read scopes) and teams (API keys/plan/usage, GraphQL only — named "teams" for backward compatibility with apps that already requested it, from when it also covered the now-removed Teams feature);
 //   * tokens and client secrets are stored only as SHA-256 hashes; a person can list and revoke every app they authorized.
 // An access token carries the same restrictions as a Desk API key: it can only reach the read routes on the allow-list.
 import { createHash, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
@@ -13,7 +13,7 @@ export const SCOPE_DESCRIPTIONS: Record<OAuthScope, string> = {
   profile: 'Read your name and e-mail address',
   drafts: 'Read your unfinished business setups',
   businesses: 'Read your businesses and their members',
-  teams: 'Read your teams and their keys (never the secrets)',
+  teams: 'Read your API keys, plan and usage (never a key’s secret)',
 };
 
 export const ACCESS_TOKEN_PREFIX = 'dsk_at_';

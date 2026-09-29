@@ -1,4 +1,4 @@
-// Plans & billing: the plans on offer, the plan you (or a team you run) are on, this month's usage, and invoices.
+// Plans & billing: the plans on offer, your plan, this month's usage, and invoices.
 // Backed by /billing/plans (public), /billing/subscription and /billing/invoices (src/routes/billing.ts).
 // Nobody can buy a plan here yet: there is no payment provider, prices are drafts and an administrator assigns plans.
 import {
@@ -14,35 +14,22 @@ const INVOICE_STATUS = { draft: 'Draft', open: 'Open', paid: 'Paid', void: 'Canc
 registerRoute('/developer/billing', async (app) => {
   const myEpoch = currentEpoch();
   const s = {
-    isLoading: true, loadError: null, plans: [], note: '', teams: [], scope: '', // '' = me, else a team id
+    isLoading: true, loadError: null, plans: [], note: '',
     sub: null, usage: null, invoices: [], invoiceNote: null,
   };
   const isCurrent = () => currentEpoch() === myEpoch;
 
-  async function loadScope() {
-    const q = s.scope ? `?teamId=${encodeURIComponent(s.scope)}` : '';
-    const subRes = await api(`/billing/subscription${q}`);
-    s.sub = subRes.subscription; s.usage = subRes.usage;
-    s.invoices = []; s.invoiceNote = null;
-    const team = s.teams.find((t) => t.id === s.scope);
-    if (s.scope && team && team.role !== 'owner' && team.role !== 'admin') { s.invoiceNote = 'Only a team owner or admin can see the invoices.'; return; }
-    try { s.invoices = (await api(`/billing/invoices${q}`)).invoices || []; } catch (err) {
-      if (err && (err.statusCode === 403 || err.statusCode === 404)) s.invoiceNote = 'Only a team owner or admin can see the invoices.'; else throw err;
-    }
-  }
   async function load() {
     s.isLoading = true; s.loadError = null; render();
     try {
-      const [plans, teams] = await Promise.all([api('/billing/plans'), api('/teams')]);
+      const [plans, subRes] = await Promise.all([api('/billing/plans'), api('/billing/subscription')]);
       s.plans = plans.plans || []; s.note = plans.note || '';
-      s.teams = teams.teams || [];
-      await loadScope();
+      s.sub = subRes.subscription; s.usage = subRes.usage;
+      s.invoices = []; s.invoiceNote = null;
+      try { s.invoices = (await api('/billing/invoices')).invoices || []; } catch (err) {
+        if (err && (err.statusCode === 403 || err.statusCode === 404)) s.invoiceNote = 'We could not load your invoices.'; else throw err;
+      }
     } catch (err) { reportHandledException(err, 'loadBilling'); s.loadError = friendlyError(err, 'We could not load your plan.'); }
-    finally { if (isCurrent()) { s.isLoading = false; render(); } }
-  }
-  async function changeScope(value) {
-    s.scope = value; s.isLoading = true; s.loadError = null; render();
-    try { await loadScope(); } catch (err) { reportHandledException(err, 'loadBillingScope'); s.loadError = friendlyError(err, 'We could not load that plan.'); }
     finally { if (isCurrent()) { s.isLoading = false; render(); } }
   }
 
@@ -86,7 +73,6 @@ registerRoute('/developer/billing', async (app) => {
       body = `
         <div class="card" style="margin-bottom:var(--sp-lg);">
           <h2 class="biz-section-title">Your plan: ${esc(s.sub.plan.name)}</h2>
-          ${s.teams.length ? `<div class="field-header"><label for="bill-scope">Showing</label></div><select id="bill-scope" class="team-select" style="margin-bottom:var(--sp-md);"><option value="">Me</option>${s.teams.map((t) => `<option value="${esc(t.id)}" ${s.scope === t.id ? 'selected' : ''}>Team: ${esc(t.name)}</option>`).join('')}</select>` : ''}
           <p class="biz-sub">${paused ? `This plan is ${esc(s.sub.status === 'past_due' ? 'past due' : 'canceled')}. ` : ''}The current period runs ${esc(new Date(s.sub.periodStart).toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' }))} to ${esc(new Date(s.sub.periodEnd).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', timeZone: 'UTC' }))}.</p>
           ${usageHtml()}
         </div>
@@ -110,7 +96,6 @@ registerRoute('/developer/billing', async (app) => {
   function wire() {
     app.querySelectorAll('[data-nav]').forEach((a) => a.addEventListener('click', (e) => { e.preventDefault(); navigate(a.dataset.nav); }));
     const retry = document.getElementById('retry-btn'); if (retry) retry.addEventListener('click', load);
-    const sel = document.getElementById('bill-scope'); if (sel) sel.addEventListener('change', (e) => changeScope(e.target.value));
   }
 
   await load();

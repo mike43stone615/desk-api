@@ -6,21 +6,21 @@
 // owner_user_id = $n), never by trusting an id from the URL.
 import { recordSecurityEvent } from '../modules/audit/security-events';
 import { notifySecurityEvent } from '../domain/auth/security-notices';
+import { sendKeyShareEmail } from '../infrastructure/email/resend';
 import type { FastifyReply, FastifyRequest } from 'fastify';
 import { HttpError, validationError } from '../middleware/http-error';
 import { sendWithEtag } from '../middleware/etag';
 import { requireAuth, requireConfirmedEmail } from '../middleware/auth';
 import { gatewayApiKeys, GatewayKeyError } from '../domain/gateway/keys';
-import { keyManagerOwner, keyViewerOwner, teams as teamsDomain, TeamError } from '../domain/teams/teams';
-import { pool } from '../db';
+import { keyShares, ShareError } from '../domain/gateway/sharing';
 import { emitWebhookEvent } from '../domain/webhooks/webhooks';
 import { resumeKey, suspendKey } from '../domain/suspension';
 import { IDLE_DAYS, keyUsage, limitsFor } from '../domain/gateway/usage';
 import { config } from '../config';
-import { KEY_BUCKET_FACTOR, TEAM_BUCKET_FACTOR } from '../middleware/api-protection';
+import { KEY_BUCKET_FACTOR } from '../middleware/api-protection';
 import { BrokerError } from '../domain/gateway/broker';
 import { getServiceCatalog } from '../domain/gateway/services';
-import { AddKeyServiceSchema, CreateGatewayKeySchema, SetKeyRestrictionsSchema } from '../validators/gateway';
+import { AddKeyServiceSchema, CreateGatewayKeySchema, SetKeyRestrictionsSchema, ShareKeySchema } from '../validators/gateway';
 import { GATEWAY_SERVICES, type GatewayService } from '../domain/gateway/services';
 import { LIBRARY_OPENAPI_SPEC } from '../openapi';
 
@@ -48,18 +48,13 @@ export async function listGatewayServicesHandler(request: FastifyRequest, reply:
 export async function listGatewayKeysHandler(request: FastifyRequest, reply: FastifyReply) {
   await requireAuth(request, reply);
   const user = request.currentUser!;
-  const { teamId } = request.query as { teamId?: string };
-  if (teamId) {
-    // A team's keys are visible to every accepted member (a viewer sees them and their usage, never a secret).
-    try {
-      await teamsDomain.requireMember(teamId, user.id, 'viewer');
-    } catch (err) {
-      if (err instanceof TeamError) throw new HttpError(err.code === 'not_found' ? 404 : 403, err.message, `team_${err.code}`);
-      throw err;
-    }
-    return reply.send({ apiKeys: await gatewayApiKeys.list(user.id, teamId) });
-  }
   return reply.send({ apiKeys: await gatewayApiKeys.list(user.id) });
+}
+
+/** Keys someone else shared with the caller (pending and accepted) — "Key shared with me" on the API Library page. */
+export async function listSharedKeysHandler(request: FastifyRequest, reply: FastifyReply) {
+  await requireAuth(request, reply);
+  return reply.send({ sharedKeys: await keyShares.listSharedWithMe(request.currentUser!.id) });
 }
 
 export async function createGatewayKeyHandler(request: FastifyRequest, reply: FastifyReply) {
@@ -70,23 +65,19 @@ export async function createGatewayKeyHandler(request: FastifyRequest, reply: Fa
   const user = request.currentUser!;
 
   try {
-    // A team key needs the developer role or higher in that team.
-    if (parsed.data.teamId) await teamsDomain.requireMember(parsed.data.teamId, user.id, 'developer');
-    const created = await gatewayApiKeys.create(user.id, parsed.data.label, parsed.data.services, parsed.data.expiresInDays, [...new Set(parsed.data.deskScopes)], parsed.data.teamId, parsed.data.sandbox === true, parsed.data.allowedIps, parsed.data.businessId);
+    const created = await gatewayApiKeys.create(user.id, parsed.data.label, parsed.data.services, parsed.data.expiresInDays, [...new Set(parsed.data.deskScopes)], undefined, parsed.data.sandbox === true, parsed.data.allowedIps, parsed.data.businessId);
     auditKey(request, 'gateway_key_created', {
       userId: user.id,
       keyId: created.id,
       services: created.services.join(','),
       deskScopes: (created.deskScopes ?? []).join(','),
-      teamId: created.teamId ?? '',
     });
     notifySecurityEvent(request, user.email, 'api_key_created', parsed.data.label);
-    emitWebhookEvent({ userId: user.id, teamId: created.teamId ?? undefined }, 'key.created', { keyId: created.id, label: created.label, services: created.services, teamId: created.teamId ?? null, sandbox: created.sandbox ?? false });
+    emitWebhookEvent({ userId: user.id }, 'key.created', { keyId: created.id, label: created.label, services: created.services, sandbox: created.sandbox ?? false });
     return reply.status(201).send({ apiKey: created });
   } catch (err) {
-    if (err instanceof TeamError) throw new HttpError(err.code === 'not_found' ? 404 : 403, err.message, `team_${err.code}`);
     if (err instanceof GatewayKeyError) {
-      throw new HttpError(err.code === 'limit_reached' ? 409 : err.code === 'team_desk_api' || err.code === 'sandbox_desk_api' ? 400 : 503, err.message, `api_key_${err.code}`);
+      throw new HttpError(err.code === 'limit_reached' ? 409 : err.code === 'sandbox_desk_api' ? 400 : 503, err.message, `api_key_${err.code}`);
     }
     if (err instanceof BrokerError) {
       request.log.error({ err }, 'gateway key provisioning failed');
@@ -98,11 +89,19 @@ export async function createGatewayKeyHandler(request: FastifyRequest, reply: Fa
 
 function keyServiceError(err: unknown): never {
   if (err instanceof GatewayKeyError) {
-    const status = err.code === 'not_found' ? 404 : err.code === 'service_unavailable' ? 503 : err.code === 'team_desk_api' || err.code === 'sandbox_desk_api' ? 400 : 409;
+    const status = err.code === 'not_found' ? 404 : err.code === 'service_unavailable' ? 503 : err.code === 'sandbox_desk_api' ? 400 : 409;
     throw new HttpError(status, err.message, `api_key_${err.code}`);
   }
   if (err instanceof BrokerError) throw new HttpError(502, 'Could not set up access to that API. Nothing was changed; please try again.', 'upstream_provisioning_failed');
   throw err;
+}
+
+function shareError(err: unknown): never {
+  if (err instanceof ShareError) {
+    const status = err.code === 'not_found' ? 404 : err.code === 'no_account' || err.code === 'already_owner' ? 400 : 409;
+    throw new HttpError(status, err.message, `key_share_${err.code}`);
+  }
+  throw err as Error;
 }
 
 /** Changes a key's IP allowlist and/or its one-business restriction. Pass null (or an empty array for allowedIps) to clear one. */
@@ -130,9 +129,7 @@ export async function addKeyServiceHandler(request: FastifyRequest, reply: Fasti
   if (!parsed.success) throw validationError(parsed.error);
   const user = request.currentUser!;
   try {
-    const owner = await keyManagerOwner(user.id, id);
-    if (!owner) throw new GatewayKeyError('not_found', 'API key not found.');
-    const key = await gatewayApiKeys.addService(owner, id, parsed.data.service);
+    const key = await gatewayApiKeys.addService(user.id, id, parsed.data.service);
     auditKey(request, 'gateway_key_service_added', { userId: user.id, keyId: id, service: parsed.data.service });
     return reply.send({ apiKey: key });
   } catch (err) {
@@ -147,9 +144,7 @@ export async function removeKeyServiceHandler(request: FastifyRequest, reply: Fa
   if (!(GATEWAY_SERVICES as readonly string[]).includes(service)) throw new HttpError(404, 'No such API.', 'not_found');
   const user = request.currentUser!;
   try {
-    const owner = await keyManagerOwner(user.id, id);
-    if (!owner) throw new GatewayKeyError('not_found', 'API key not found.');
-    const key = await gatewayApiKeys.removeService(owner, id, service as GatewayService);
+    const key = await gatewayApiKeys.removeService(user.id, id, service as GatewayService);
     auditKey(request, 'gateway_key_service_removed', { userId: user.id, keyId: id, service });
     return reply.send({ apiKey: key });
   } catch (err) {
@@ -157,25 +152,13 @@ export async function removeKeyServiceHandler(request: FastifyRequest, reply: Fa
   }
 }
 
-async function teamOfKey(keyId: string): Promise<string | null> {
-  const { rows } = await pool.query<{ team_id: string | null }>(`SELECT team_id FROM gateway_api_keys WHERE id = $1`, [keyId]);
-  return rows[0]?.team_id ?? null;
-}
-
-/** The calls a minute a key may make: a personal key gets half an address's worth; a team key draws on its team's shared allowance. */
-async function effectivePerMinute(teamId: string | null): Promise<number> {
-  if (!teamId) return Math.ceil(config.rateLimitPerMinute * KEY_BUCKET_FACTOR);
-  const { rows } = await pool.query<{ rate_limit_per_minute: number | null }>(`SELECT rate_limit_per_minute FROM teams WHERE id = $1`, [teamId]);
-  return rows[0]?.rate_limit_per_minute ?? Math.ceil(config.rateLimitPerMinute * TEAM_BUCKET_FACTOR);
-}
-
-/** How much one of the caller's own keys has been used (calls and errors per day), and the limits that apply to it. */
+/** How much one of the caller's own keys (or one shared with them) has been used (calls and errors per day), and the limits that apply to it. */
 export async function keyUsageHandler(request: FastifyRequest, reply: FastifyReply) {
   await requireAuth(request, reply);
   const { id } = request.params as { id: string };
   const q = request.query as { days?: string };
   const days = Math.min(90, Math.max(1, Number.parseInt(q.days ?? '30', 10) || 30));
-  const viewerOwner = await keyViewerOwner(request.currentUser!.id, id);
+  const viewerOwner = await keyShares.viewerOwnerOf(request.currentUser!.id, id);
   const mine = viewerOwner ? await gatewayApiKeys.summaryOf(id) : undefined;
   if (!mine) throw new HttpError(404, 'That key does not exist, is not yours, or was revoked.', 'api_key_not_found');
   const daily = await keyUsage(id, days);
@@ -187,8 +170,7 @@ export async function keyUsageHandler(request: FastifyRequest, reply: FastifyRep
     idleExpiryDays: IDLE_DAYS,
     totals: { calls: daily.reduce((n, d) => n + d.calls, 0), errors: daily.reduce((n, d) => n + d.errors, 0) },
     daily,
-    limits: limitsFor(await effectivePerMinute(mine.teamId ?? null)),
-    ...(mine.teamId ? { teamId: mine.teamId, sharedWithTeam: true } : {}),
+    limits: limitsFor(Math.ceil(config.rateLimitPerMinute * KEY_BUCKET_FACTOR)),
   });
 }
 
@@ -197,8 +179,7 @@ export async function suspendGatewayKeyHandler(request: FastifyRequest, reply: F
   await requireAuth(request, reply);
   const { id } = request.params as { id: string };
   const user = request.currentUser!;
-  const owner = await keyManagerOwner(user.id, id);
-  if (!owner || !(await suspendKey(id, owner, 'suspended by its owner', user.email))) throw new HttpError(404, 'That key does not exist, is not yours, or was revoked.', 'api_key_not_found');
+  if (!(await suspendKey(id, user.id, 'suspended by its owner', user.email))) throw new HttpError(404, 'That key does not exist, is not yours, or was revoked.', 'api_key_not_found');
   auditKey(request, 'gateway_key_suspended', { userId: user.id, keyId: id });
   return reply.send({ ok: true, suspended: true });
 }
@@ -207,8 +188,7 @@ export async function resumeGatewayKeyHandler(request: FastifyRequest, reply: Fa
   await requireAuth(request, reply);
   const { id } = request.params as { id: string };
   const user = request.currentUser!;
-  const owner = await keyManagerOwner(user.id, id);
-  if (!owner || !(await resumeKey(id, owner))) throw new HttpError(404, 'That key is not suspended, or is not yours.', 'api_key_not_found');
+  if (!(await resumeKey(id, user.id))) throw new HttpError(404, 'That key is not suspended, or is not yours.', 'api_key_not_found');
   auditKey(request, 'gateway_key_resumed', { userId: user.id, keyId: id });
   return reply.send({ ok: true, suspended: false });
 }
@@ -234,11 +214,9 @@ export async function revokeGatewayKeyHandler(request: FastifyRequest, reply: Fa
   const { id } = request.params as { id: string };
   const user = request.currentUser!;
   try {
-    const owner = await keyManagerOwner(user.id, id);
-    if (!owner) throw new GatewayKeyError('not_found', 'API key not found.');
-    const { upstreamFailures } = await gatewayApiKeys.revoke(owner, id);
+    const { upstreamFailures } = await gatewayApiKeys.revoke(user.id, id);
     auditKey(request, 'gateway_key_revoked', { userId: user.id, keyId: id });
-    emitWebhookEvent({ userId: user.id, teamId: (await teamOfKey(id)) ?? undefined }, 'key.revoked', { keyId: id });
+    emitWebhookEvent({ userId: user.id }, 'key.revoked', { keyId: id });
     if (upstreamFailures.length > 0) {
       request.log.warn(
         { keyId: id, services: upstreamFailures },
@@ -252,5 +230,75 @@ export async function revokeGatewayKeyHandler(request: FastifyRequest, reply: Fa
       throw new HttpError(404, err.message, `api_key_${err.code}`);
     }
     throw err;
+  }
+}
+
+// ── sharing a key with another person ───────────────────────────────────────────────────────────────────────────
+
+/** The owner invites someone (by email; they must already have a confirmed Desk account) to view one of their keys. */
+export async function shareGatewayKeyHandler(request: FastifyRequest, reply: FastifyReply) {
+  await requireAuth(request, reply);
+  const { id } = request.params as { id: string };
+  const parsed = ShareKeySchema.safeParse(request.body ?? {});
+  if (!parsed.success) throw validationError(parsed.error);
+  const user = request.currentUser!;
+  try {
+    const share = await keyShares.share(user.id, id, parsed.data.email);
+    auditKey(request, 'gateway_key_shared', { userId: user.id, keyId: id, sharedWithEmail: parsed.data.email });
+    const key = await gatewayApiKeys.summaryOf(id);
+    void sendKeyShareEmail(config, share.sharedWith.email, key?.label ?? 'a key', user.email, request.id).catch(() => {});
+    return reply.status(201).send({ share });
+  } catch (err) {
+    return shareError(err);
+  }
+}
+
+/** Everyone a key has been shared with (pending and accepted) — the owner's own "invite +" popup. */
+export async function listKeySharesHandler(request: FastifyRequest, reply: FastifyReply) {
+  await requireAuth(request, reply);
+  const { id } = request.params as { id: string };
+  try {
+    return reply.send({ shares: await keyShares.listForKey(request.currentUser!.id, id) });
+  } catch (err) {
+    return shareError(err);
+  }
+}
+
+/** The owner removes someone a key was shared with. */
+export async function removeKeyShareHandler(request: FastifyRequest, reply: FastifyReply) {
+  await requireAuth(request, reply);
+  const { id, shareId } = request.params as { id: string; shareId: string };
+  try {
+    await keyShares.removeByOwner(request.currentUser!.id, id, shareId);
+    auditKey(request, 'gateway_key_share_removed', { userId: request.currentUser!.id, keyId: id, shareId });
+    return reply.status(204).send();
+  } catch (err) {
+    return shareError(err);
+  }
+}
+
+/** The invited person accepts a pending share. */
+export async function acceptKeyShareHandler(request: FastifyRequest, reply: FastifyReply) {
+  await requireAuth(request, reply);
+  const { shareId } = request.params as { shareId: string };
+  try {
+    await keyShares.accept(request.currentUser!.id, shareId);
+    auditKey(request, 'gateway_key_share_accepted', { userId: request.currentUser!.id, shareId });
+    return reply.send({ ok: true });
+  } catch (err) {
+    return shareError(err);
+  }
+}
+
+/** The invited person declines a pending share, or removes themselves from one they'd accepted. */
+export async function declineKeyShareHandler(request: FastifyRequest, reply: FastifyReply) {
+  await requireAuth(request, reply);
+  const { shareId } = request.params as { shareId: string };
+  try {
+    await keyShares.decline(request.currentUser!.id, shareId);
+    auditKey(request, 'gateway_key_share_declined', { userId: request.currentUser!.id, shareId });
+    return reply.status(204).send();
+  } catch (err) {
+    return shareError(err);
   }
 }

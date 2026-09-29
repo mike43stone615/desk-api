@@ -974,6 +974,88 @@ export const GATEWAY_EXAMPLES: Record<string, { status: number; request: unknown
       }
     }
   },
+  "GET /v1/gateway/shared-keys": {
+    "status": 200,
+    "request": null,
+    "response": {
+      "sharedKeys": [
+        {
+          "id": "3f1c2c0e-7a51-4f6e-9a0b-6b0c1f7e2d11",
+          "label": "my server",
+          "keyPrefix": "deskgw_f9e8d",
+          "createdAt": "2026-09-01T12:00:00Z",
+          "lastUsedAt": "2026-09-19T08:30:00Z",
+          "expiresAt": null,
+          "services": [
+            "desk_api",
+            "registry_api"
+          ],
+          "shareId": "b2b6d6d0-7a41-4a8e-9a6f-1b2c3d4e5f60",
+          "shareAcceptedAt": null,
+          "owner": {
+            "email": "owner@example.com",
+            "firstName": "Owner",
+            "lastName": "Person"
+          }
+        }
+      ]
+    }
+  },
+  "POST /v1/gateway/api-keys/{id}/shares": {
+    "status": 201,
+    "request": {
+      "email": "colleague@example.com"
+    },
+    "response": {
+      "share": {
+        "id": "b2b6d6d0-7a41-4a8e-9a6f-1b2c3d4e5f60",
+        "apiKeyId": "3f1c2c0e-7a51-4f6e-9a0b-6b0c1f7e2d11",
+        "acceptedAt": null,
+        "createdAt": "2026-09-19T08:30:00Z",
+        "sharedWith": {
+          "email": "colleague@example.com",
+          "firstName": "Colleague",
+          "lastName": "Person"
+        }
+      }
+    }
+  },
+  "GET /v1/gateway/api-keys/{id}/shares": {
+    "status": 200,
+    "request": null,
+    "response": {
+      "shares": [
+        {
+          "id": "b2b6d6d0-7a41-4a8e-9a6f-1b2c3d4e5f60",
+          "apiKeyId": "3f1c2c0e-7a51-4f6e-9a0b-6b0c1f7e2d11",
+          "acceptedAt": null,
+          "createdAt": "2026-09-19T08:30:00Z",
+          "sharedWith": {
+            "email": "colleague@example.com",
+            "firstName": "Colleague",
+            "lastName": "Person"
+          }
+        }
+      ]
+    }
+  },
+  "DELETE /v1/gateway/api-keys/{id}/shares/{shareId}": {
+    "status": 204,
+    "request": null,
+    "response": {}
+  },
+  "POST /v1/gateway/shares/{shareId}/accept": {
+    "status": 200,
+    "request": null,
+    "response": {
+      "ok": true
+    }
+  },
+  "DELETE /v1/gateway/shares/{shareId}": {
+    "status": 204,
+    "request": null,
+    "response": {}
+  },
   "GET /v1/gateway/webhook-events": {
     "status": 200,
     "request": null,

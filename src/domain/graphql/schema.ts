@@ -6,7 +6,7 @@ import { pool } from '../../db';
 import { gatewayApiKeys } from '../gateway/keys';
 import { keyUsage } from '../gateway/usage';
 import { subscriptionFor } from '../billing/plans';
-import { teams as teamsDomain, keyViewerOwner, TeamError } from '../teams/teams';
+import { keyShares } from '../gateway/sharing';
 
 
 export type Scope = 'profile' | 'drafts' | 'businesses' | 'teams';
@@ -35,8 +35,8 @@ export const SDL = /* GraphQL */ `
     businesses(first: Int = 20): [Business!]!
     drafts(first: Int = 20): [Draft!]!
     teams: [Team!]!
-    apiKeys(teamId: ID): [ApiKey!]!
-    plan(teamId: ID): Plan!
+    apiKeys: [ApiKey!]!
+    plan: Plan!
     usage(keyId: ID!, days: Int = 30): [UsageDay!]!
   }
   type User { id: ID! email: String! firstName: String! lastName: String! emailConfirmedAt: String }
@@ -93,36 +93,24 @@ const root = {
       return { id: r.id, businessName: typeof d.businessName === 'string' ? d.businessName : null, currentStep: typeof d.currentStep === 'number' ? d.currentStep : null, updatedAt: r.updated_at };
     });
   },
+  // Teams no longer exist (replaced by sharing one key at a time — see domain/gateway/sharing.ts); this stays as an
+  // always-empty list, and "teams" stays the scope name below, so an existing integration's query keeps working
+  // rather than erroring outright.
   teams: async (_: unknown, ctx: GraphQLContext) => {
     need(ctx, 'teams');
-    const list = await teamsDomain.list(ctx.user.id);
-    return list.map((t) => ({
-      ...t,
-      members: async () => (await teamsDomain.get(t.id, ctx.user.id)).members.map((m) => ({ id: m.id, userId: m.userId, role: m.role, email: m.user.email, accepted: m.acceptedAt !== null })),
-      keys: async () => gatewayApiKeys.list(ctx.user.id, t.id),
-    }));
+    return [];
   },
-  apiKeys: async ({ teamId }: { teamId?: string }, ctx: GraphQLContext) => {
+  apiKeys: async (_: unknown, ctx: GraphQLContext) => {
     need(ctx, 'teams');
-    if (teamId) {
-      try { await teamsDomain.requireMember(teamId, ctx.user.id, 'viewer'); } catch (err) {
-        if (err instanceof TeamError) throw new GraphQLError('No such team.', { extensions: { code: 'NOT_FOUND' } });
-        throw err;
-      }
-      return gatewayApiKeys.list(ctx.user.id, teamId);
-    }
     return gatewayApiKeys.list(ctx.user.id);
   },
-  plan: async ({ teamId }: { teamId?: string }, ctx: GraphQLContext) => {
+  plan: async (_: unknown, ctx: GraphQLContext) => {
     need(ctx, 'teams');
-    if (teamId) {
-      try { await teamsDomain.requireMember(teamId, ctx.user.id, 'viewer'); } catch { throw new GraphQLError('No such team.', { extensions: { code: 'NOT_FOUND' } }); }
-    }
-    return (await subscriptionFor(teamId ? 'team' : 'user', teamId ?? ctx.user.id)).plan;
+    return (await subscriptionFor('user', ctx.user.id)).plan;
   },
   usage: async ({ keyId, days }: { keyId: string; days?: number }, ctx: GraphQLContext) => {
     need(ctx, 'teams');
-    if (!(await keyViewerOwner(ctx.user.id, keyId))) throw new GraphQLError('No such key.', { extensions: { code: 'NOT_FOUND' } });
+    if (!(await keyShares.viewerOwnerOf(ctx.user.id, keyId))) throw new GraphQLError('No such key.', { extensions: { code: 'NOT_FOUND' } });
     return keyUsage(keyId, Math.max(1, Math.min(90, Number(days) || 30)));
   },
 };

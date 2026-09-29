@@ -127,7 +127,6 @@ const BASE_SPEC = {
       description:
         'Developer API keys. Sign in, create a key, and choose which APIs it can call. Send the key as an x-api-key header. Key management itself requires a signed-in session.',
     },
-    { name: 'Teams', description: 'People sharing API keys and one allowance. Roles: owner, admin, developer, viewer. Team keys carry the Registry and Market APIs only. Session-only.' },
     { name: 'Billing', description: 'Plans, your subscription, metered usage and invoices. Nobody is charged yet: there is no payment provider.' },
     { name: 'Webhooks', description: 'Signed, retried events sent to your server when something happens (Desk-Signature header, five-minute replay window).' },
     { name: 'GraphQL', description: 'A read-only GraphQL view of your own data, with depth and cost limits.' },
@@ -435,7 +434,7 @@ const BASE_SPEC = {
       patch: {
         tags: ['API Library'],
         summary: 'Restrict one of your keys to an IP allowlist and/or one business',
-        description: 'Body: { "allowedIps"?: string[] | null, "businessId"?: string | null }. Omit a field to leave it unchanged; null clears it. A business restriction needs the Desk API with the "businesses" scope, and is not available on a team key.',
+        description: 'Body: { "allowedIps"?: string[] | null, "businessId"?: string | null }. Omit a field to leave it unchanged; null clears it. A business restriction needs the Desk API with the "businesses" scope.',
         security: [{ SessionToken: [] }],
         parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }],
         requestBody: { required: false, content: { 'application/json': { schema: { type: 'object', properties: { allowedIps: { type: 'array', items: { type: 'string' } }, businessId: { type: 'string' } } } } } },
@@ -451,47 +450,33 @@ const BASE_SPEC = {
     '/gateway/api-keys/{id}/rotate': {
       post: { tags: ['API Library'], summary: 'Issue a new secret for one of your own keys; the old one stops working at once, everything else about the key is unchanged', security: [{ SessionToken: [] }], parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }], responses: { '200': { description: 'The key with its new plaintext secret (shown once)' }, '404': { description: 'Not your key' }, '409': { description: 'Already revoked' } } },
     },
-    '/teams': {
-      get: { tags: ['Teams'], summary: 'The teams you belong to, with your role, their member and key counts', security: [{ SessionToken: [] }], responses: { '200': { description: 'OK' } } },
-      post: { tags: ['Teams'], summary: 'Create a team (you become its owner). Team keys share one allowance', security: [{ SessionToken: [] }], requestBody: { required: true, content: { 'application/json': { schema: { type: 'object', required: ['name'], properties: { name: { type: 'string', maxLength: 64 } } } } } }, responses: { '201': { description: 'Created (Location header)' }, '409': { description: 'You already created the maximum number of teams (code team_limit_reached)' } } },
+    '/gateway/shared-keys': {
+      get: { tags: ['API Library'], summary: 'Keys other people have shared with you, pending and accepted', security: [{ SessionToken: [] }], responses: { '200': { description: 'The shared keys' } } },
     },
-    '/teams/invites': {
-      get: { tags: ['Teams'], summary: 'Team invitations waiting for you', security: [{ SessionToken: [] }], responses: { '200': { description: 'OK' } } },
+    '/gateway/api-keys/{id}/shares': {
+      post: { tags: ['API Library'], summary: 'Share one of your own keys with someone by e-mail (they must already have a confirmed Desk account)', security: [{ SessionToken: [] }], parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }], requestBody: { required: true, content: { 'application/json': { schema: { type: 'object', required: ['email'], properties: { email: { type: 'string' } } } } } }, responses: { '201': { description: 'Shared' }, '404': { description: 'Not your key' }, '409': { description: 'No confirmed account at that address, that is already you, or the key has reached its share limit' } } },
+      get: { tags: ['API Library'], summary: 'Everyone one of your keys has been shared with, pending and accepted (owner only)', security: [{ SessionToken: [] }], parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }], responses: { '200': { description: 'The shares' }, '404': { description: 'Not your key' } } },
     },
-    '/teams/invites/{membershipId}/accept': {
-      post: { tags: ['Teams'], summary: 'Accept a team invitation', security: [{ SessionToken: [] }], parameters: [{ name: 'membershipId', in: 'path', required: true, schema: { type: 'string' } }], responses: { '200': { description: 'Accepted' }, '404': { description: 'No such invitation' } } },
+    '/gateway/api-keys/{id}/shares/{shareId}': {
+      delete: { tags: ['API Library'], summary: 'Remove someone a key was shared with, pending or accepted (owner only)', security: [{ SessionToken: [] }], parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }, { name: 'shareId', in: 'path', required: true, schema: { type: 'string' } }], responses: { '204': { description: 'Removed' }, '404': { description: 'Not your key, or no such share' } } },
     },
-    '/teams/invites/{membershipId}': {
-      delete: { tags: ['Teams'], summary: 'Decline a team invitation', security: [{ SessionToken: [] }], parameters: [{ name: 'membershipId', in: 'path', required: true, schema: { type: 'string' } }], responses: { '204': { description: 'Declined' }, '404': { description: 'No such invitation' } } },
+    '/gateway/shares/{shareId}/accept': {
+      post: { tags: ['API Library'], summary: 'Accept a key someone shared with you', security: [{ SessionToken: [] }], parameters: [{ name: 'shareId', in: 'path', required: true, schema: { type: 'string' } }], responses: { '200': { description: 'Accepted' }, '404': { description: 'No such invitation' } } },
     },
-    '/teams/{id}': {
-      get: { tags: ['Teams'], summary: 'One team and its members (any member may look)', security: [{ SessionToken: [] }], parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }], responses: { '200': { description: 'The team and its members' }, '404': { description: 'No such team, or you are not in it' } } },
-      delete: { tags: ['Teams'], summary: 'Delete a team (owner only): every team key is revoked first', security: [{ SessionToken: [] }], parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }], responses: { '204': { description: 'Deleted' }, '403': { description: 'Only an owner can (code team_forbidden)' }, '404': { description: 'No such team, or you are not in it' } } },
-    },
-    '/teams/{id}/members': {
-      post: { tags: ['Teams'], summary: 'Invite someone by e-mail (admin or owner); they are e-mailed, and an address with no account is kept for 30 days until it signs up. The answer is the same whether or not the address has an account', security: [{ SessionToken: [] }], parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }], requestBody: { required: true, content: { 'application/json': { schema: { type: 'object', required: ['email'], properties: { email: { type: 'string' }, role: { type: 'string', enum: ['owner', 'admin', 'developer', 'viewer'], default: 'developer' } } } } } }, responses: { '202': { description: 'Invitation recorded if the account exists' }, '403': { description: 'Your role does not allow that (code team_forbidden)' }, '404': { description: 'No such team, or you are not in it' }, '409': { description: 'The team is full (code team_limit_reached)' } } },
-    },
-    '/teams/{id}/members/{membershipId}': {
-      patch: { tags: ['Teams'], summary: 'Change a member\'s role (admin or owner; only an owner may touch admins and owners)', security: [{ SessionToken: [] }], parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }, { name: 'membershipId', in: 'path', required: true, schema: { type: 'string' } }], requestBody: { required: true, content: { 'application/json': { schema: { type: 'object', required: ['role'], properties: { role: { type: 'string', enum: ['owner', 'admin', 'developer', 'viewer'] } } } } } }, responses: { '200': { description: 'Changed' }, '403': { description: 'Your role does not allow that' }, '404': { description: 'No such team or member' }, '409': { description: 'A team must keep an owner (code team_last_owner)' } } },
-      delete: { tags: ['Teams'], summary: 'Remove a member, withdraw an invitation, or leave (remove yourself). The last owner cannot leave', security: [{ SessionToken: [] }], parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }, { name: 'membershipId', in: 'path', required: true, schema: { type: 'string' } }], responses: { '204': { description: 'Removed' }, '403': { description: 'Your role does not allow that' }, '404': { description: 'No such team or member' }, '409': { description: 'A team must keep an owner (code team_last_owner)' } } },
-    },
-    '/teams/{id}/email-invites/{inviteId}': {
-      delete: { tags: ['Teams'], summary: 'Withdraw an invitation sent to an address that has no Desk account yet (listed as emailInvites in GET /teams/{id}; admin or owner, and only an owner may touch admin/owner invitations)', security: [{ SessionToken: [] }], parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }, { name: 'inviteId', in: 'path', required: true, schema: { type: 'string' } }], responses: { '204': { description: 'Withdrawn' }, '403': { description: 'Only an owner may withdraw an invitation for an admin or owner' }, '404': { description: 'No such team or invitation' } } },
-    },
-    '/admin/teams/{id}/limit': {
-      post: { tags: ['Admin'], summary: 'Give a whole team its own per-minute limit, shared by all its keys (null clears it)', security: [{ SessionToken: [] }], parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }], responses: { '200': { description: 'OK' }, '404': { description: 'No such team' } } },
+    '/gateway/shares/{shareId}': {
+      delete: { tags: ['API Library'], summary: 'Decline a pending share, or remove yourself from one you had accepted', security: [{ SessionToken: [] }], parameters: [{ name: 'shareId', in: 'path', required: true, schema: { type: 'string' } }], responses: { '204': { description: 'Declined' }, '404': { description: 'No such share' } } },
     },
     '/billing/plans': {
       get: { tags: ['Billing'], summary: 'The plans and what each includes (public). Prices are draft figures until billing is switched on', responses: { '200': { description: 'The plans' } } },
     },
     '/billing/subscription': {
-      get: { tags: ['Billing'], summary: 'Your plan (or a team\'s, with ?teamId=) and this month\'s metered usage', security: [{ SessionToken: [] }], parameters: [{ name: 'teamId', in: 'query', required: false, schema: { type: 'string' } }], responses: { '200': { description: 'The subscription and usage' }, '404': { description: 'Not a member of that team' } } },
+      get: { tags: ['Billing'], summary: 'Your plan and this month\'s metered usage', security: [{ SessionToken: [] }], responses: { '200': { description: 'The subscription and usage' } } },
     },
     '/billing/invoices': {
-      get: { tags: ['Billing'], summary: 'Your invoices (a team\'s, with ?teamId=, for admins and owners)', security: [{ SessionToken: [] }], parameters: [{ name: 'teamId', in: 'query', required: false, schema: { type: 'string' } }], responses: { '200': { description: 'The invoices, newest first' }, '403': { description: 'Team invoices need the admin role' }, '404': { description: 'Not a member of that team' } } },
+      get: { tags: ['Billing'], summary: 'Your invoices, newest first', security: [{ SessionToken: [] }], responses: { '200': { description: 'The invoices, newest first' } } },
     },
     '/admin/billing/{type}/{id}/plan': {
-      post: { tags: ['Admin'], summary: 'Put a user or a team on a plan (there is no payment provider yet)', security: [{ SessionToken: [] }], parameters: [{ name: 'type', in: 'path', required: true, schema: { type: 'string', enum: ['user', 'team'] } }, { name: 'id', in: 'path', required: true, schema: { type: 'string' } }], responses: { '200': { description: 'The new subscription' }, '400': { description: 'No such plan (code unknown_plan)' }, '404': { description: 'No such user or team' } } },
+      post: { tags: ['Admin'], summary: 'Put a user on a plan (there is no payment provider yet)', security: [{ SessionToken: [] }], parameters: [{ name: 'type', in: 'path', required: true, schema: { type: 'string', enum: ['user'] } }, { name: 'id', in: 'path', required: true, schema: { type: 'string' } }], responses: { '200': { description: 'The new subscription' }, '400': { description: 'No such plan (code unknown_plan)' }, '404': { description: 'No such user' } } },
     },
     '/admin/billing/invoices/generate': {
       post: { tags: ['Admin'], summary: 'Make the draft invoices for a month (default: last month); safe to repeat', security: [{ SessionToken: [] }], responses: { '200': { description: 'How many were created' } } },
@@ -503,8 +488,8 @@ const BASE_SPEC = {
       get: { tags: ['Webhooks'], summary: 'The events a webhook can listen for', security: [{ SessionToken: [] }], responses: { '200': { description: 'The event names' } } },
     },
     '/gateway/webhooks': {
-      get: { tags: ['Webhooks'], summary: 'Your webhook endpoints (a team\'s, with ?teamId=)', security: [{ SessionToken: [] }], parameters: [{ name: 'teamId', in: 'query', required: false, schema: { type: 'string' } }], responses: { '200': { description: 'The endpoints' }, '404': { description: 'Not a member of that team' } } },
-      post: { tags: ['Webhooks'], summary: 'Add a webhook endpoint. https only, public addresses only. The signing secret is shown once', security: [{ SessionToken: [] }], requestBody: { required: true, content: { 'application/json': { schema: { type: 'object', required: ['url', 'events'], properties: { url: { type: 'string' }, events: { type: 'array', items: { type: 'string' } }, teamId: { type: 'string' } } } } } }, responses: { '201': { description: 'Created (Location header); includes the secret once' }, '400': { description: 'The address or events were not acceptable (code webhook_invalid_url)' }, '409': { description: 'The plan allows no more endpoints (code webhook_limit_reached)' } } },
+      get: { tags: ['Webhooks'], summary: 'Your webhook endpoints', security: [{ SessionToken: [] }], responses: { '200': { description: 'The endpoints' } } },
+      post: { tags: ['Webhooks'], summary: 'Add a webhook endpoint. https only, public addresses only. The signing secret is shown once', security: [{ SessionToken: [] }], requestBody: { required: true, content: { 'application/json': { schema: { type: 'object', required: ['url', 'events'], properties: { url: { type: 'string' }, events: { type: 'array', items: { type: 'string' } } } } } } }, responses: { '201': { description: 'Created (Location header); includes the secret once' }, '400': { description: 'The address or events were not acceptable (code webhook_invalid_url)' }, '409': { description: 'The plan allows no more endpoints (code webhook_limit_reached)' } } },
     },
     '/gateway/webhooks/{id}': {
       delete: { tags: ['Webhooks'], summary: 'Remove a webhook endpoint', security: [{ SessionToken: [] }], parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }], responses: { '204': { description: 'Removed' }, '404': { description: 'Not your endpoint' } } },

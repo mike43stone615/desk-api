@@ -107,8 +107,14 @@ import {
   suspendGatewayKeyHandler, addKeyServiceHandler, removeKeyServiceHandler, setKeyRestrictionsHandler,
   listGatewayKeysHandler,
   listGatewayServicesHandler,
+  listSharedKeysHandler,
   revokeGatewayKeyHandler,
   rotateGatewayKeyHandler,
+  shareGatewayKeyHandler,
+  listKeySharesHandler,
+  removeKeyShareHandler,
+  acceptKeyShareHandler,
+  declineKeyShareHandler,
 } from './routes/gateway';
 import { createWebhookHandler, deleteWebhookHandler, listWebhookEventsHandler, listWebhooksHandler, rotateWebhookSecretHandler, testWebhookHandler, webhookDeliveriesHandler, retryWebhookDeliveryHandler } from './routes/webhooksOut';
 import { authorizeDecisionHandler, authorizeHandler, authorizeInfoHandler, createClientHandler, deleteClientHandler, discoveryHandler, listAuthorizationsHandler, listClientsHandler, registerOAuthTokenRoutes, revokeAuthorizationHandler } from './routes/oauth';
@@ -119,22 +125,9 @@ import { sendStatusSubscribeConfirmEmail } from './infrastructure/email/resend';
 import { listIncidents } from './domain/status/incidents';
 import { invoicesHandler, listPlansHandler, subscriptionHandler } from './routes/billing';
 import { adminAccessAddHandler, adminAccessListHandler, adminAccessRemoveHandler, adminMeHandler } from './routes/adminAccess';
-import {
-  acceptTeamInviteHandler,
-  changeTeamRoleHandler,
-  createTeamHandler,
-  declineTeamInviteHandler,
-  deleteTeamHandler,
-  getTeamHandler,
-  inviteTeamMemberHandler,
-  listTeamInvitesHandler,
-  listTeamsHandler,
-  removeTeamMemberHandler,
-  withdrawTeamEmailInviteHandler,
-} from './routes/teams';
 import { gatewayMarketProxyHandler, gatewayRegistryProxyHandler } from './routes/gatewayProxy';
 import { registerLibraryUi } from './routes/libraryUi';
-import { adminReconcileReportHandler, adminReconcileRunHandler, adminListKeysHandler, adminResumeKeyHandler, adminSuspendKeyHandler, adminSetKeyLimitHandler, adminSetTeamLimitHandler, adminAssignPlanHandler, adminGenerateInvoicesHandler, adminInvoiceStatusHandler, adminSuspendUserHandler, adminUnsuspendUserHandler } from './routes/adminAccounts';
+import { adminReconcileReportHandler, adminReconcileRunHandler, adminListKeysHandler, adminResumeKeyHandler, adminSuspendKeyHandler, adminSetKeyLimitHandler, adminAssignPlanHandler, adminGenerateInvoicesHandler, adminInvoiceStatusHandler, adminSuspendUserHandler, adminUnsuspendUserHandler } from './routes/adminAccounts';
 import { registerSecurityTxt } from './routes/securityTxt';
 import { registerWebhooks } from './routes/webhooks';
 import { buildStatus, statusHtml } from './domain/health/status';
@@ -588,7 +581,6 @@ async function registerLegacyAndVersionedRoutes(instance: FastifyInstance) {
   instance.post('/admin/users/:id/suspend', small, adminSuspendUserHandler);
   instance.post('/admin/users/:id/unsuspend', small, adminUnsuspendUserHandler);
   instance.post('/admin/gateway-keys/:id/limit', small, adminSetKeyLimitHandler);
-  instance.post('/admin/teams/:id/limit', small, adminSetTeamLimitHandler);
   instance.post('/admin/incidents', small, openIncidentHandler);
   instance.post('/admin/incidents/:id/updates', small, updateIncidentHandler);
   instance.post('/admin/billing/:type/:id/plan', small, adminAssignPlanHandler);
@@ -657,19 +649,6 @@ async function registerLegacyAndVersionedRoutes(instance: FastifyInstance) {
   instance.get('/billing/subscription', subscriptionHandler);
   instance.get('/billing/invoices', invoicesHandler);
 
-  // ── Teams: people sharing keys and one allowance (session-only) ──────────
-  instance.post('/teams', small, createTeamHandler);
-  instance.get('/teams', listTeamsHandler);
-  instance.delete('/teams/:id/email-invites/:inviteId', withdrawTeamEmailInviteHandler);
-  instance.get('/teams/invites', listTeamInvitesHandler);
-  instance.post('/teams/invites/:membershipId/accept', small, acceptTeamInviteHandler);
-  instance.delete('/teams/invites/:membershipId', declineTeamInviteHandler);
-  instance.get('/teams/:id', getTeamHandler);
-  instance.delete('/teams/:id', deleteTeamHandler);
-  instance.post('/teams/:id/members', small, inviteTeamMemberHandler);
-  instance.patch('/teams/:id/members/:membershipId', small, changeTeamRoleHandler);
-  instance.delete('/teams/:id/members/:membershipId', removeTeamMemberHandler);
-
   instance.get('/gateway/openapi.json', libraryOpenApiHandler);
   instance.get('/gateway/services', listGatewayServicesHandler);
   instance.get('/gateway/api-keys', listGatewayKeysHandler);
@@ -682,6 +661,14 @@ async function registerLegacyAndVersionedRoutes(instance: FastifyInstance) {
   instance.post('/gateway/api-keys/:id/suspend', small, suspendGatewayKeyHandler);
   instance.post('/gateway/api-keys/:id/resume', small, resumeGatewayKeyHandler);
   instance.post('/gateway/api-keys/:id/rotate', small, rotateGatewayKeyHandler);
+
+  // ── Sharing one of your own keys with another person (session-only) ─────
+  instance.get('/gateway/shared-keys', listSharedKeysHandler);
+  instance.post('/gateway/api-keys/:id/shares', small, shareGatewayKeyHandler);
+  instance.get('/gateway/api-keys/:id/shares', listKeySharesHandler);
+  instance.delete('/gateway/api-keys/:id/shares/:shareId', removeKeyShareHandler);
+  instance.post('/gateway/shares/:shareId/accept', small, acceptKeyShareHandler);
+  instance.delete('/gateway/shares/:shareId', declineKeyShareHandler);
 
   // ── API Library: key-authenticated proxies to registry-api / market-validation-api ──
   instance.get('/gateway/registry/*', gatewayRegistryProxyHandler);

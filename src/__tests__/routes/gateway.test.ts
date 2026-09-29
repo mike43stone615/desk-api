@@ -13,6 +13,7 @@ import { pool } from '../../db';
 import { buildApp } from '../../app';
 import { config } from '../../config';
 import { resetUpstreamState } from '../../domain/upstream/client';
+import { emailed } from '../helpers/email-capture';
 import type { FastifyInstance } from 'fastify';
 
 const fakeDb = pool as unknown as ReturnType<typeof createFakeDb>;
@@ -125,6 +126,8 @@ beforeEach(() => {
   fakeDb.idempotencyKeys.clear();
   fakeDb.gatewayKeys.clear();
   fakeDb.gatewayGrants.length = 0;
+  fakeDb.gatewayKeyShares.clear();
+  emailed.keyShare.length = 0;
 });
 
 describe('GET /gateway/services (the library listing)', () => {
@@ -946,5 +949,118 @@ describe('a struggling backend cannot hurt the gateway', () => {
       vi.stubGlobal('fetch', fetchMock);
       upstreamProxyOverride = null;
     }
+  });
+});
+
+describe('key sharing (an owner invites one person at a time to view a key)', () => {
+  const share = (owner: { headers: Record<string, string> }, keyId: string, email: string) =>
+    app.inject({ method: 'POST', url: `/gateway/api-keys/${keyId}/shares`, headers: owner.headers, payload: { email } });
+  const listShares = (owner: { headers: Record<string, string> }, keyId: string) =>
+    app.inject({ method: 'GET', url: `/gateway/api-keys/${keyId}/shares`, headers: owner.headers });
+  const removeShare = (owner: { headers: Record<string, string> }, keyId: string, shareId: string) =>
+    app.inject({ method: 'DELETE', url: `/gateway/api-keys/${keyId}/shares/${shareId}`, headers: owner.headers });
+  const accept = (who: { headers: Record<string, string> }, shareId: string) =>
+    app.inject({ method: 'POST', url: `/gateway/shares/${shareId}/accept`, headers: who.headers });
+  const decline = (who: { headers: Record<string, string> }, shareId: string) =>
+    app.inject({ method: 'DELETE', url: `/gateway/shares/${shareId}`, headers: who.headers });
+  const sharedWithMe = (who: { headers: Record<string, string> }) =>
+    app.inject({ method: 'GET', url: '/gateway/shared-keys', headers: who.headers });
+  const usage = (who: { headers: Record<string, string> }, keyId: string) =>
+    app.inject({ method: 'GET', url: `/gateway/api-keys/${keyId}/usage`, headers: who.headers });
+
+  it('invites a confirmed account by e-mail, e-mails them, and lists the pending share for the owner', async () => {
+    const owner = seedUser('share-owner1@example.com');
+    seedUser('share-friend1@example.com');
+    const { apiKey } = JSON.parse((await createKey(owner, ['desk_api'], 'shared key')).body);
+
+    const res = await share(owner, apiKey.id, 'share-friend1@example.com');
+    expect(res.statusCode, res.body).toBe(201);
+    const created = JSON.parse(res.body).share;
+    expect(created).toMatchObject({
+      apiKeyId: apiKey.id,
+      acceptedAt: null,
+      sharedWith: { email: 'share-friend1@example.com' },
+    });
+    expect(emailed.keyShare).toHaveLength(1);
+    expect(emailed.keyShare[0]).toMatchObject({ to: 'share-friend1@example.com', keyLabel: 'shared key', inviterEmail: 'share-owner1@example.com' });
+
+    const listed = JSON.parse((await listShares(owner, apiKey.id)).body).shares;
+    expect(listed).toHaveLength(1);
+    expect(listed[0].id).toBe(created.id);
+  });
+
+  it('refuses to share with an address that has no confirmed account, or with the owner themselves', async () => {
+    const owner = seedUser('share-owner2@example.com');
+    seedUser('share-unconfirmed2@example.com', { confirmed: false });
+    const { apiKey } = JSON.parse((await createKey(owner, ['desk_api'])).body);
+
+    const noAccount = await share(owner, apiKey.id, 'nobody-2@example.com');
+    expect(noAccount.statusCode).toBe(400);
+    expect(JSON.parse(noAccount.body).code).toBe('key_share_no_account');
+
+    const unconfirmed = await share(owner, apiKey.id, 'share-unconfirmed2@example.com');
+    expect(unconfirmed.statusCode).toBe(400);
+
+    const self = await share(owner, apiKey.id, 'share-owner2@example.com');
+    expect(self.statusCode).toBe(400);
+    expect(JSON.parse(self.body).code).toBe('key_share_already_owner');
+  });
+
+  it("never shares, lists or removes shares on another person's key, and answers 404 for a made-up key or share id", async () => {
+    const owner = seedUser('share-owner3@example.com');
+    const outsider = seedUser('share-outsider3@example.com');
+    seedUser('share-friend3@example.com');
+    const { apiKey } = JSON.parse((await createKey(owner, ['desk_api'])).body);
+    const shareId = JSON.parse((await share(owner, apiKey.id, 'share-friend3@example.com')).body).share.id;
+
+    expect((await share(outsider, apiKey.id, 'share-friend3@example.com')).statusCode).toBe(404);
+    expect((await listShares(outsider, apiKey.id)).statusCode).toBe(404);
+    expect((await removeShare(outsider, apiKey.id, shareId)).statusCode).toBe(404);
+    expect((await share(owner, 'no-such-key', 'share-friend3@example.com')).statusCode).toBe(404);
+  });
+
+  it('the invited person accepts, can then see (read-only) usage, and the owner can remove them at any time', async () => {
+    const owner = seedUser('share-owner4@example.com');
+    const friend = seedUser('share-friend4@example.com');
+    const outsider = seedUser('share-outsider4@example.com');
+    const { apiKey } = JSON.parse((await createKey(owner, ['desk_api'])).body);
+    const shareId = JSON.parse((await share(owner, apiKey.id, 'share-friend4@example.com')).body).share.id;
+
+    // not yet accepted: the friend cannot see usage
+    expect((await usage(friend, apiKey.id)).statusCode).toBe(404);
+    // only the invited person may accept
+    expect((await accept(outsider, shareId)).statusCode).toBe(404);
+    expect((await accept(friend, shareId)).statusCode).toBe(200);
+    expect((await accept(friend, shareId)).statusCode).toBe(404); // already accepted
+
+    const mine = JSON.parse((await sharedWithMe(friend)).body).sharedKeys;
+    expect(mine).toHaveLength(1);
+    expect(mine[0]).toMatchObject({ id: apiKey.id, shareId, owner: { email: 'share-owner4@example.com' } });
+    expect(mine[0].shareAcceptedAt).not.toBeNull();
+
+    expect((await usage(friend, apiKey.id)).statusCode).toBe(200);
+    expect((await usage(outsider, apiKey.id)).statusCode).toBe(404);
+
+    // the owner removes the share; access is revoked at once
+    expect((await removeShare(owner, apiKey.id, shareId)).statusCode).toBe(204);
+    expect((await usage(friend, apiKey.id)).statusCode).toBe(404);
+    expect(JSON.parse((await sharedWithMe(friend)).body).sharedKeys).toEqual([]);
+  });
+
+  it('the invited person can decline a pending share, or remove themselves from one they had accepted', async () => {
+    const owner = seedUser('share-owner5@example.com');
+    const friend = seedUser('share-friend5@example.com');
+    const { apiKey } = JSON.parse((await createKey(owner, ['desk_api'])).body);
+
+    const pendingId = JSON.parse((await share(owner, apiKey.id, 'share-friend5@example.com')).body).share.id;
+    expect((await decline(friend, pendingId)).statusCode).toBe(204);
+    expect(JSON.parse((await listShares(owner, apiKey.id)).body).shares).toEqual([]);
+
+    const acceptedId = JSON.parse((await share(owner, apiKey.id, 'share-friend5@example.com')).body).share.id;
+    await accept(friend, acceptedId);
+    expect((await usage(friend, apiKey.id)).statusCode).toBe(200);
+    expect((await decline(friend, acceptedId)).statusCode).toBe(204);
+    expect((await usage(friend, apiKey.id)).statusCode).toBe(404);
+    expect((await decline(friend, acceptedId)).statusCode).toBe(404); // already gone
   });
 });

@@ -30,6 +30,7 @@ export function createFakeDb() {
   const idempotencyKeys = new Map<string, FakeRow>(); // keyed by key
   const gatewayKeys = new Map<string, FakeRow>(); // keyed by id
   const gatewayGrants: FakeRow[] = [];
+  const gatewayKeyShares = new Map<string, FakeRow>(); // keyed by id (migration 0029)
   const appliedMigrations: string[] = readdirSync(join(__dirname, '..', '..', '..', 'migrations')).filter((f) => f.endsWith('.sql')).sort();
   const securityEvents: FakeRow[] = []; // migration 0014
   const keyUsage: FakeRow[] = []; // migration 0017
@@ -182,6 +183,10 @@ export function createFakeDb() {
     if (s === 'SELECT 1 FROM business_memberships WHERE business_id = $1 AND user_id = $2 AND accepted_at IS NOT NULL') {
       const has = [...memberships.values()].some((m) => m.business_id === p[0] && m.user_id === p[1] && m.accepted_at);
       return has ? { rows: [{ '?column?': 1 }], rowCount: 1 } : { rows: [], rowCount: 0 };
+    }
+    if (s.startsWith('SELECT 1 FROM gateway_key_shares WHERE api_key_id = $1 AND shared_with_user_id = $2 AND accepted_at IS NOT NULL')) {
+      const r = [...gatewayKeyShares.values()].find((row) => row.api_key_id === p[0] && row.shared_with_user_id === p[1] && row.accepted_at);
+      return { rows: r ? [{ '?column?': 1 }] : [], rowCount: r ? 1 : 0 };
     }
     if (s.startsWith('SELECT 1')) return { rows: [{ '?column?': 1 }], rowCount: 1 };
 
@@ -883,30 +888,89 @@ export function createFakeDb() {
     if (s.includes('FROM incidents WHERE started_at')) return { rows: [], rowCount: 0 };
     if (s.includes('FROM plans WHERE active')) return { rows: [], rowCount: 0 };
     if (s.startsWith('SELECT team_id FROM gateway_api_keys WHERE id = $1')) { const k = gatewayKeys.get(p[0]); return { rows: k ? [{ team_id: k.team_id ?? null }] : [], rowCount: k ? 1 : 0 }; }
+    // ── key sharing (migration 0029; see domain/gateway/sharing.ts) ────────
+    if (s.startsWith('SELECT owner_user_id FROM gateway_api_keys WHERE id = $1 AND revoked_at IS NULL')) {
+      const k = gatewayKeys.get(p[0]);
+      const row = k && !k.revoked_at ? [{ owner_user_id: k.owner_user_id }] : [];
+      return { rows: row, rowCount: row.length };
+    }
+    if (s.startsWith('SELECT id, email, first_name, last_name FROM users WHERE lower(email) = lower($1) AND email_confirmed_at IS NOT NULL')) {
+      const target = [...users.values()].find((u) => String(u.email).toLowerCase() === String(p[0]).toLowerCase() && u.email_confirmed_at);
+      const row = target ? [{ id: target.id, email: target.email, first_name: target.first_name, last_name: target.last_name }] : [];
+      return { rows: row, rowCount: row.length };
+    }
+    if (s.startsWith('SELECT COUNT(*) AS n FROM gateway_key_shares WHERE api_key_id = $1')) {
+      const n = [...gatewayKeyShares.values()].filter((r) => r.api_key_id === p[0]).length;
+      return { rows: [{ n: String(n) }], rowCount: 1 };
+    }
+    if (s.startsWith('INSERT INTO gateway_key_shares')) {
+      const [id, api_key_id, shared_with_user_id, invited_by_user_id] = p as unknown as [string, string, string, string];
+      const existing = [...gatewayKeyShares.values()].find((r) => r.api_key_id === api_key_id && r.shared_with_user_id === shared_with_user_id);
+      if (existing) {
+        existing.invited_by_user_id = invited_by_user_id;
+        return { rows: [{ id: existing.id, accepted_at: existing.accepted_at, created_at: existing.created_at }], rowCount: 1 };
+      }
+      const row: FakeRow = { id, api_key_id, shared_with_user_id, invited_by_user_id, accepted_at: null, created_at: nowIso() };
+      gatewayKeyShares.set(id, row);
+      return { rows: [{ id: row.id, accepted_at: row.accepted_at, created_at: row.created_at }], rowCount: 1 };
+    }
+    if (s.startsWith('SELECT s.id, s.accepted_at, s.created_at, u.email, u.first_name, u.last_name')) {
+      const rows = [...gatewayKeyShares.values()]
+        .filter((r) => r.api_key_id === p[0])
+        .sort((a, b) => String(a.created_at).localeCompare(String(b.created_at)))
+        .map((r) => {
+          const u = users.get(r.shared_with_user_id as string);
+          return { id: r.id, accepted_at: r.accepted_at, created_at: r.created_at, email: u?.email, first_name: u?.first_name, last_name: u?.last_name };
+        });
+      return { rows, rowCount: rows.length };
+    }
+    if (s.startsWith('SELECT id, api_key_id, accepted_at, created_at FROM gateway_key_shares WHERE shared_with_user_id = $1')) {
+      const rows = [...gatewayKeyShares.values()]
+        .filter((r) => r.shared_with_user_id === p[0])
+        .sort((a, b) => String(b.created_at).localeCompare(String(a.created_at)))
+        .map((r) => ({ id: r.id, api_key_id: r.api_key_id, accepted_at: r.accepted_at, created_at: r.created_at }));
+      return { rows, rowCount: rows.length };
+    }
+    if (s.startsWith('SELECT u.email, u.first_name, u.last_name FROM users u JOIN gateway_api_keys k ON k.owner_user_id = u.id WHERE k.id = $1')) {
+      const k = gatewayKeys.get(p[0]);
+      const u = k ? users.get(k.owner_user_id as string) : undefined;
+      const row = u ? [{ email: u.email, first_name: u.first_name, last_name: u.last_name }] : [];
+      return { rows: row, rowCount: row.length };
+    }
+    if (s.startsWith('UPDATE gateway_key_shares SET accepted_at')) {
+      const r = [...gatewayKeyShares.values()].find((row) => row.id === p[0] && row.shared_with_user_id === p[1] && !row.accepted_at);
+      if (r) r.accepted_at = nowIso();
+      return { rows: [], rowCount: r ? 1 : 0 };
+    }
+    if (s.startsWith('DELETE FROM gateway_key_shares WHERE id = $1 AND shared_with_user_id = $2')) {
+      const r = [...gatewayKeyShares.values()].find((row) => row.id === p[0] && row.shared_with_user_id === p[1]);
+      if (r) gatewayKeyShares.delete(r.id as string);
+      return { rows: [], rowCount: r ? 1 : 0 };
+    }
+    if (s.startsWith('DELETE FROM gateway_key_shares WHERE id = $1 AND api_key_id = $2')) {
+      const r = [...gatewayKeyShares.values()].find((row) => row.id === p[0] && row.api_key_id === p[1]);
+      if (r) gatewayKeyShares.delete(r.id as string);
+      return { rows: [], rowCount: r ? 1 : 0 };
+    }
     if (s.startsWith('SELECT id FROM webhook_endpoints WHERE active')) return { rows: [], rowCount: 0 };
     // ── outbound webhooks (migration; see domain/webhooks/webhooks.ts) ─────
-    if (s.startsWith('SELECT COUNT(*) AS n FROM webhook_endpoints WHERE')) {
-      const teamScoped = s.includes('WHERE team_id = $1');
-      const n = [...webhookEndpoints.values()].filter((e) => (teamScoped ? e.team_id === p[0] : e.owner_user_id === p[0] && !e.team_id)).length;
+    if (s.startsWith('SELECT COUNT(*) AS n FROM webhook_endpoints WHERE owner_user_id = $1')) {
+      const n = [...webhookEndpoints.values()].filter((e) => e.owner_user_id === p[0]).length;
       return { rows: [{ n: String(n) }], rowCount: 1 };
     }
     if (s.startsWith('INSERT INTO webhook_endpoints')) {
-      const [id, owner_user_id, team_id, url, secret_enc, events] = p as unknown as [string, string, string | null, string, string, string[]];
-      const row: FakeRow = { id, owner_user_id, team_id: team_id ?? null, url, secret_enc, events, active: true, disabled_reason: null, created_at: nowIso(), consecutive_failures: 0 };
+      const [id, owner_user_id, url, secret_enc, events] = p as unknown as [string, string, string, string, string[]];
+      const row: FakeRow = { id, owner_user_id, url, secret_enc, events, active: true, disabled_reason: null, created_at: nowIso(), consecutive_failures: 0 };
       webhookEndpoints.set(id, row);
       return { rows: [row], rowCount: 1 };
     }
-    if (s.startsWith('SELECT id, url, events, team_id, active, disabled_reason, created_at, consecutive_failures FROM webhook_endpoints WHERE team_id = $1')) {
-      const rows = [...webhookEndpoints.values()].filter((e) => e.team_id === p[0]);
+    if (s.startsWith('SELECT id, url, events, active, disabled_reason, created_at, consecutive_failures FROM webhook_endpoints WHERE owner_user_id = $1')) {
+      const rows = [...webhookEndpoints.values()].filter((e) => e.owner_user_id === p[0]);
       return { rows, rowCount: rows.length };
     }
-    if (s.startsWith('SELECT id, url, events, team_id, active, disabled_reason, created_at, consecutive_failures FROM webhook_endpoints WHERE owner_user_id = $1')) {
-      const rows = [...webhookEndpoints.values()].filter((e) => e.owner_user_id === p[0] && !e.team_id);
-      return { rows, rowCount: rows.length };
-    }
-    if (s.startsWith('SELECT id, url, events, team_id, active, disabled_reason, created_at, consecutive_failures, owner_user_id, secret_enc FROM webhook_endpoints WHERE id = $1')) {
+    if (s.startsWith('SELECT id, url, events, active, disabled_reason, created_at, consecutive_failures, owner_user_id, secret_enc FROM webhook_endpoints WHERE id = $1 AND owner_user_id = $2')) {
       const e = webhookEndpoints.get(p[0]);
-      return { rows: e ? [e] : [], rowCount: e ? 1 : 0 };
+      return { rows: e && e.owner_user_id === p[1] ? [e] : [], rowCount: e && e.owner_user_id === p[1] ? 1 : 0 };
     }
     if (s.startsWith('DELETE FROM webhook_endpoints WHERE id = $1')) {
       const existed = webhookEndpoints.delete(p[0]);
@@ -1060,6 +1124,7 @@ export function createFakeDb() {
     idempotencyKeys,
     gatewayKeys,
     gatewayGrants,
+    gatewayKeyShares,
     backendRevocations,
     webhookEndpoints,
     webhookDeliveries,

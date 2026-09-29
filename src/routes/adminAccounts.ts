@@ -108,35 +108,22 @@ export async function adminSetKeyLimitHandler(request: FastifyRequest, reply: Fa
   return reply.send({ ok: true, perMinute: parsed.data.perMinute });
 }
 
-/** Gives a whole team its own per-minute limit (shared by all its keys), or clears it (null) so the standard team limit applies. */
-export async function adminSetTeamLimitHandler(request: FastifyRequest, reply: FastifyReply) {
-  await guard(request, reply);
-  const { id } = request.params as { id: string };
-  const parsed = KeyLimitSchema.safeParse(request.body ?? {});
-  if (!parsed.success) throw validationError(parsed.error);
-  const result = await pool.query(`UPDATE teams SET rate_limit_per_minute = $2 WHERE id = $1`, [id, parsed.data.perMinute]);
-  if ((result.rowCount ?? 0) === 0) throw new HttpError(404, 'No such team.', 'team_not_found');
-  forgetKeyRateFactors();
-  record(request, 'set_team_limit', 'team', id, { perMinute: parsed.data.perMinute });
-  return reply.send({ ok: true, perMinute: parsed.data.perMinute });
-}
-
 const AssignPlanSchema = z.object({ planId: z.string().trim().min(1).max(40) });
 const InvoiceStatusSchema = z.object({ status: z.enum(['draft', 'open', 'paid', 'void']) });
 const GenerateInvoicesSchema = z.object({ month: z.string().regex(/^\d{4}-(0[1-9]|1[0-2])$/, 'month must look like 2026-09').optional() });
 
-/** Puts a person or a team on a plan. There is no payment provider yet, so this is how a plan is granted. */
+/** Puts a person on a plan. There is no payment provider yet, so this is how a plan is granted. */
 export async function adminAssignPlanHandler(request: FastifyRequest, reply: FastifyReply) {
   await guard(request, reply);
   const { type, id } = request.params as { type: string; id: string };
-  if (type !== 'user' && type !== 'team') throw new HttpError(404, 'Plans belong to a user or a team.', 'not_found');
+  if (type !== 'user') throw new HttpError(404, 'Plans belong to a user.', 'not_found');
   const parsed = AssignPlanSchema.safeParse(request.body ?? {});
   if (!parsed.success) throw validationError(parsed.error);
   try {
     const sub = await assignPlan(type, id, parsed.data.planId);
     forgetKeyRateFactors();
     record(request, 'assign_plan', type, id, { planId: parsed.data.planId });
-    emitWebhookEvent(type === 'user' ? { userId: id } : { teamId: id }, 'plan.changed', { subjectType: type, subjectId: id, plan: sub.plan.id });
+    emitWebhookEvent({ userId: id }, 'plan.changed', { subjectType: type, subjectId: id, plan: sub.plan.id });
     return reply.send({ subscription: sub });
   } catch (err) {
     if (err instanceof BillingError) throw new HttpError(err.code === 'not_found' ? 404 : 400, err.message, err.code === 'not_found' ? 'not_found' : 'unknown_plan');

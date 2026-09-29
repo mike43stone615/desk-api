@@ -699,7 +699,6 @@ registerRoute('/loading', async (app) => {
     import('./pages/confirm-email.js'),
     import('./pages/reset-password.js'),
     import('./pages/developer.js'),
-    import('./pages/teams.js'),
     import('./pages/webhooks.js'),
     import('./pages/apps.js'),
     import('./pages/billing.js'),

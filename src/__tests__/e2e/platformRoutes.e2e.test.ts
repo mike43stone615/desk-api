@@ -2,7 +2,7 @@ import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
 import { randomBytes } from 'node:crypto';
 
 // The routes around the platform features that the other end-to-end files only touch in passing: the status page's incidents,
-// the changelog feed, plans and invoices as seen by a person and by a team, GraphQL beyond the happy path, and the ways an
+// the changelog feed, plans and invoices, GraphQL beyond the happy path, and the ways an
 // outbound webhook can be refused. Real database; skipped without E2E_DATABASE_URL.
 const hasDb = !!process.env.E2E_DATABASE_URL;
 
@@ -16,22 +16,10 @@ vi.mock('../../domain/gateway/broker', async (orig) => {
   };
 });
 
-// The mail provider is not called; what would be sent is recorded.
-const mail = vi.hoisted(() => ({ existing: [] as unknown[][], signup: [] as unknown[][] }));
-vi.mock('../../infrastructure/email/resend', async (orig) => {
-  const real = await orig<typeof import('../../infrastructure/email/resend')>();
-  return {
-    ...real,
-    sendTeamInviteEmail: vi.fn(async (...args: unknown[]) => { mail.existing.push(args); }),
-    sendTeamInviteSignupEmail: vi.fn(async (...args: unknown[]) => { mail.signup.push(args); }),
-  };
-});
-
 import { pool } from '../../db';
 import { buildApp } from '../../app';
 import { config } from '../../config';
 import { assignPlan, BillingError, setInvoiceStatus } from '../../domain/billing/plans';
-import { claimEmailInvites, deleteExpiredEmailInvites } from '../../domain/setup/email-invites';
 import { deleteOldDeliveries, processDueDeliveries, type Sender } from '../../domain/webhooks/webhooks';
 import type { FastifyInstance } from 'fastify';
 
@@ -75,7 +63,6 @@ describe.skipIf(!hasDb)('E2E: status, changelog, billing, GraphQL and webhook re
   });
   afterAll(async () => {
     if (incidents.length) await pool.query('DELETE FROM incidents WHERE id = ANY($1)', [incidents]);
-    await pool.query('DELETE FROM teams WHERE id IN (SELECT team_id FROM team_members WHERE user_id = ANY($1))', [users]);
     await pool.query('DELETE FROM subscriptions WHERE subject_id = ANY($1)', [users]);
     await pool.query('DELETE FROM users WHERE id = ANY($1)', [users]);
     config.adminEmails.splice(config.adminEmails.indexOf(adminEmail.toLowerCase()), 1);
@@ -138,10 +125,8 @@ describe.skipIf(!hasDb)('E2E: status, changelog, billing, GraphQL and webhook re
     expect(atom.body).toContain('<feed');
   });
 
-  it('billing: a person and a team see their own plan, usage and invoices; outsiders and non-admins are kept out', async () => {
+  it('billing: a person sees their own plan, usage and invoices; a signed-out request is refused', async () => {
     const owner = await mkUser('boss');
-    const dev = await mkUser('dev');
-    const outsider = await mkUser('outsider');
     expect((await call('GET', '/v1/billing/subscription', null)).statusCode).toBe(401);
 
     const mine = await call('GET', '/v1/billing/subscription', owner);
@@ -149,45 +134,27 @@ describe.skipIf(!hasDb)('E2E: status, changelog, billing, GraphQL and webhook re
     expect(mine.json().subscription).toMatchObject({ subjectType: 'user', subjectId: owner.id, status: 'active' });
     expect(mine.json().usage).toMatchObject({ marketAnalyses: 0 });
     expect((await call('GET', '/v1/billing/invoices', owner)).json()).toEqual({ hasMore: false, invoices: [] });
-
-    const team = (await call('POST', '/v1/teams', owner, { name: 'Billing team' })).json().team;
-    expect((await call('POST', `/v1/teams/${team.id}/members`, owner, { email: dev.email, role: 'developer' })).statusCode).toBeLessThan(300);
-    await pool.query(`UPDATE team_members SET accepted_at = now() WHERE team_id = $1 AND user_id = $2`, [team.id, dev.id]).catch(() => {});
-
-    const teamSub = await call('GET', `/v1/billing/subscription?teamId=${team.id}`, owner);
-    expect(teamSub.statusCode).toBe(200);
-    expect(teamSub.json().subscription).toMatchObject({ subjectType: 'team', subjectId: team.id });
-    expect((await call('GET', `/v1/billing/invoices?teamId=${team.id}`, owner)).statusCode).toBe(200);
-    expect((await call('GET', `/v1/billing/subscription?teamId=${team.id}`, outsider)).statusCode).toBe(404);
-    expect((await call('GET', `/v1/billing/invoices?teamId=${team.id}`, outsider)).statusCode).toBe(404);
-    // a developer on the team may see the plan but invoices need an admin
-    const devInvoices = await call('GET', `/v1/billing/invoices?teamId=${team.id}`, dev);
-    expect([403, 404]).toContain(devInvoices.statusCode);
   });
 
-  it('GraphQL: a team\'s keys and plan for members, refusals for outsiders, key usage, drafts and business members', async () => {
+  it('GraphQL: keys and plan for their owner, refusals for outsiders, key usage, drafts and business members', async () => {
     const owner = await mkUser('gq-owner');
     const outsider = await mkUser('gq-outsider');
-    const team = (await call('POST', '/v1/teams', owner, { name: 'Graph team' })).json().team;
-    const keyRes = await call('POST', '/v1/gateway/api-keys', owner, { label: 'team key', services: ['registry_api'], teamId: team.id });
+    const keyRes = await call('POST', '/v1/gateway/api-keys', owner, { label: 'my key', services: ['registry_api'] });
     expect(keyRes.statusCode, keyRes.body).toBe(201);
     const keyId = keyRes.json().apiKey.id as string;
 
-    const ok = await gql(owner, `{ apiKeys(teamId: "${team.id}") { id label } plan(teamId: "${team.id}") { id } usage(keyId: "${keyId}", days: 7) { day calls } }`);
+    const ok = await gql(owner, `{ apiKeys { id label } plan { id } usage(keyId: "${keyId}", days: 7) { day calls } }`);
     const body = ok.json();
     expect(body.errors).toBeUndefined();
     expect(body.data.apiKeys.map((k: { id: string }) => k.id)).toContain(keyId);
     expect(body.data.plan.id).toBe('free');
     expect(Array.isArray(body.data.usage)).toBe(true);
 
-    const mineOnly = (await gql(owner, '{ apiKeys { id } plan { id } }')).json();
-    expect(mineOnly.data.plan.id).toBe('free');
-    expect(mineOnly.data.apiKeys.map((k: { id: string }) => k.id)).not.toContain(keyId);
+    const outsiderView = (await gql(outsider, '{ apiKeys { id } }')).json();
+    expect(outsiderView.data.apiKeys.map((k: { id: string }) => k.id)).not.toContain(keyId);
 
-    for (const q of [`{ apiKeys(teamId: "${team.id}") { id } }`, `{ plan(teamId: "${team.id}") { id } }`, `{ usage(keyId: "${keyId}") { day } }`]) {
-      const denied = (await gql(outsider, q)).json();
-      expect(denied.errors[0].extensions.code, q).toBe('NOT_FOUND');
-    }
+    const denied = (await gql(outsider, `{ usage(keyId: "${keyId}") { day } }`)).json();
+    expect(denied.errors[0].extensions.code).toBe('NOT_FOUND');
 
     await pool.query(`INSERT INTO business_setup_drafts (id, user_id, draft_json) VALUES ($1,$2,$3)`, [rid(), owner.id, JSON.stringify({ businessName: 'Draft Co', currentStep: 3 })]);
     await pool.query(`INSERT INTO business_setup_drafts (id, user_id, draft_json) VALUES ($1,$2,$3)`, [rid(), owner.id, 'not json']);
@@ -211,7 +178,6 @@ describe.skipIf(!hasDb)('E2E: status, changelog, billing, GraphQL and webhook re
     expect((await call('POST', '/v1/gateway/webhooks', u, { url: PUBLIC_URL, events: ['nonsense'] })).statusCode).toBe(400);
     expect((await call('POST', '/v1/gateway/webhooks', u, { url: 'http://93.184.216.34/x', events: ['key.created'] })).statusCode).toBe(400);
     expect((await call('POST', '/v1/gateway/webhooks', u, { url: 'https://127.0.0.1/x', events: ['key.created'] })).statusCode).toBe(400);
-    expect((await call('POST', '/v1/gateway/webhooks', u, { url: PUBLIC_URL, events: ['key.created'], teamId: rid() })).statusCode).toBeGreaterThanOrEqual(403);
 
     const made = await call('POST', '/v1/gateway/webhooks', u, { url: PUBLIC_URL, events: ['key.created'] });
     expect(made.statusCode).toBe(201);
@@ -223,29 +189,7 @@ describe.skipIf(!hasDb)('E2E: status, changelog, billing, GraphQL and webhook re
       const missing = path.replace(id, rid());
       expect((await call(method, missing, u)).statusCode, `${method} ${missing}`).toBe(404);
     }
-    expect((await call('GET', '/v1/gateway/webhooks?teamId=' + rid(), u)).statusCode).toBeGreaterThanOrEqual(403);
     expect((await call('DELETE', `/v1/gateway/webhooks/${id}`, u)).statusCode).toBe(204);
-  });
-
-  it('team webhooks: an admin manages them, a developer or viewer may not, and members can list them', async () => {
-    const owner = await mkUser('tw-owner');
-    const dev = await mkUser('tw-dev');
-    const outsider = await mkUser('tw-outsider');
-    const team = (await call('POST', '/v1/teams', owner, { name: 'Hook team' })).json().team;
-    await call('POST', `/v1/teams/${team.id}/members`, owner, { email: dev.email, role: 'developer' });
-    await pool.query(`UPDATE team_members SET accepted_at = now() WHERE team_id = $1 AND user_id = $2`, [team.id, dev.id]);
-
-    const made = await call('POST', '/v1/gateway/webhooks', owner, { url: PUBLIC_URL, events: ['key.created'], teamId: team.id });
-    expect(made.statusCode, made.body).toBe(201);
-    const id = made.json().endpoint.id as string;
-    expect((await call('POST', '/v1/gateway/webhooks', dev, { url: PUBLIC_URL, events: ['key.created'], teamId: team.id })).statusCode).toBe(403);
-    expect((await call('POST', '/v1/gateway/webhooks', outsider, { url: PUBLIC_URL, events: ['key.created'], teamId: team.id })).statusCode).toBe(404);
-    expect((await call('GET', `/v1/gateway/webhooks?teamId=${team.id}`, dev)).json().endpoints.map((e: { id: string }) => e.id)).toContain(id);
-    expect((await call('GET', `/v1/gateway/webhooks?teamId=${team.id}`, outsider)).statusCode).toBe(404);
-    expect((await call('POST', `/v1/gateway/webhooks/${id}/test`, dev)).statusCode).toBe(404);
-    expect((await call('DELETE', `/v1/gateway/webhooks/${id}`, dev)).statusCode).toBe(404);
-    expect((await call('POST', `/v1/gateway/webhooks/${id}/test`, owner)).statusCode).toBeLessThan(300);
-    expect((await call('DELETE', `/v1/gateway/webhooks/${id}`, owner)).statusCode).toBe(204);
   });
 
   it('a receiver that cannot be reached is recorded as a failed try, and old finished deliveries are cleared out', async () => {
@@ -276,80 +220,6 @@ describe.skipIf(!hasDb)('E2E: status, changelog, billing, GraphQL and webhook re
     expect(await setInvoiceStatus(invoiceId, 'paid')).toBe(true);
     expect((await pool.query('SELECT status FROM invoices WHERE id = $1', [invoiceId])).rows[0].status).toBe('paid');
     await pool.query('DELETE FROM invoices WHERE subject_id = $1', [u.id]);
-  });
-
-  it('team invitations are e-mailed: an account gets an invitation and a mail once a day, a new address is kept until it signs up', async () => {
-    mail.existing.length = 0;
-    mail.signup.length = 0;
-    const owner = await mkUser('inv-owner');
-    const dev = await mkUser('inv-dev');
-    const team = (await call('POST', '/v1/teams', owner, { name: 'Invite team' })).json().team;
-
-    // an existing account: a pending membership and one e-mail; the same invitation again sends nothing more
-    const first = await call('POST', `/v1/teams/${team.id}/members`, owner, { email: dev.email.toUpperCase(), role: 'developer' });
-    expect(first.statusCode).toBe(202);
-    expect(mail.existing).toHaveLength(1);
-    expect(mail.existing[0].slice(1, 4)).toEqual([dev.email, 'Invite team', owner.email]);
-    const again = await call('POST', `/v1/teams/${team.id}/members`, owner, { email: dev.email, role: 'developer' });
-    expect(again.statusCode).toBe(202);
-    expect(again.json()).toEqual(first.json()); // same answer either way
-    expect(mail.existing).toHaveLength(1);
-    // after a day the pending invitation may be sent again
-    await pool.query(`UPDATE team_members SET created_at = $2 WHERE team_id = $1 AND user_id = $3`, [team.id, new Date(Date.now() - 2 * 86_400_000).toISOString(), dev.id]);
-    await call('POST', `/v1/teams/${team.id}/members`, owner, { email: dev.email, role: 'viewer' });
-    expect(mail.existing).toHaveLength(2);
-    expect((await pool.query('SELECT role FROM team_members WHERE team_id = $1 AND user_id = $2', [team.id, dev.id])).rows[0].role).toBe('viewer');
-    // an accepted member is not e-mailed again
-    await pool.query(`UPDATE team_members SET accepted_at = now()::text, created_at = $3 WHERE team_id = $1 AND user_id = $2`, [team.id, dev.id, new Date(Date.now() - 2 * 86_400_000).toISOString()]);
-    await call('POST', `/v1/teams/${team.id}/members`, owner, { email: dev.email, role: 'viewer' });
-    expect(mail.existing).toHaveLength(2);
-
-    // an address with no account: kept, one sign-up mail, no second mail inside a day, same answer
-    const stranger = `newcomer-${rid()}@example.com`;
-    const s1 = await call('POST', `/v1/teams/${team.id}/members`, owner, { email: stranger, role: 'developer' });
-    expect(s1.json()).toEqual(first.json());
-    expect(mail.signup).toHaveLength(1);
-    expect(mail.signup[0].slice(1, 4)).toEqual([stranger, 'Invite team', owner.email]);
-    await call('POST', `/v1/teams/${team.id}/members`, owner, { email: stranger, role: 'developer' });
-    expect(mail.signup).toHaveLength(1);
-    expect((await pool.query('SELECT COUNT(*)::int n FROM team_email_invites WHERE team_id = $1', [team.id])).rows[0].n).toBe(1);
-
-    // the person signs up and confirms that address: the invitation becomes a pending membership (not yet accepted)
-    const joined = await mkUser('inv-joined', stranger);
-    expect(await claimEmailInvites({ id: joined.id, email: stranger })).toBeGreaterThanOrEqual(1);
-    const row = (await pool.query('SELECT role, accepted_at FROM team_members WHERE team_id = $1 AND user_id = $2', [team.id, joined.id])).rows[0];
-    expect(row).toMatchObject({ role: 'developer', accepted_at: null });
-    expect((await call('GET', '/v1/teams/invites', joined)).json().invites.map((i: { teamId: string }) => i.teamId)).toContain(team.id);
-    expect((await pool.query('SELECT COUNT(*)::int n FROM team_email_invites WHERE team_id = $1', [team.id])).rows[0].n).toBe(0);
-
-    // unclaimed invitations expire after 30 days
-    await call('POST', `/v1/teams/${team.id}/members`, owner, { email: `old-${rid()}@example.com`, role: 'viewer' });
-    await pool.query(`UPDATE team_email_invites SET invited_at = $2 WHERE team_id = $1`, [team.id, new Date(Date.now() - 40 * 86_400_000).toISOString()]);
-    await deleteExpiredEmailInvites();
-    expect((await pool.query('SELECT COUNT(*)::int n FROM team_email_invites WHERE team_id = $1', [team.id])).rows[0].n).toBe(0);
-
-    // the inviter sees who is waiting to sign up, and can withdraw the invitation; the team's developers see nothing of it
-    const outsider = await mkUser('inv-outsider');
-    const waitingAddress = `waiting-${rid()}@example.com`;
-    await call('POST', `/v1/teams/${team.id}/members`, owner, { email: waitingAddress, role: 'viewer' });
-    await call('POST', `/v1/teams/${team.id}/members`, owner, { email: `adminwait-${rid()}@example.com`, role: 'admin' });
-    const seen = (await call('GET', `/v1/teams/${team.id}`, owner)).json();
-    expect(seen.emailInvites.map((i: { email: string }) => i.email)).toContain(waitingAddress);
-    expect(seen.emailInvites.find((i: { email: string }) => i.email === waitingAddress)).toMatchObject({ role: 'viewer' });
-    await pool.query(`UPDATE team_members SET role = 'admin', accepted_at = now()::text WHERE team_id = $1 AND user_id = $2`, [team.id, dev.id]); // dev becomes an admin
-    const adminInviteId = seen.emailInvites.find((i: { role: string }) => i.role === 'admin').id as string;
-    const waitingId = seen.emailInvites.find((i: { email: string }) => i.email === waitingAddress).id as string;
-    expect((await call('DELETE', `/v1/teams/${team.id}/email-invites/${adminInviteId}`, dev)).statusCode).toBe(403); // an admin may not withdraw an admin's invitation
-    expect((await call('DELETE', `/v1/teams/${team.id}/email-invites/${waitingId}`, outsider)).statusCode).toBe(404);
-    expect((await call('DELETE', `/v1/teams/${team.id}/email-invites/${waitingId}`, dev)).statusCode).toBe(204);
-    expect((await call('DELETE', `/v1/teams/${team.id}/email-invites/${waitingId}`, dev)).statusCode).toBe(404);
-    expect((await call('DELETE', `/v1/teams/${team.id}/email-invites/${adminInviteId}`, owner)).statusCode).toBe(204);
-    await pool.query(`UPDATE team_members SET role = 'developer' WHERE team_id = $1 AND user_id = $2`, [team.id, dev.id]);
-    expect((await call('GET', `/v1/teams/${team.id}`, dev)).json().emailInvites).toEqual([]); // a developer cannot see who is waiting
-
-    // only an admin or owner may invite, and only an owner may invite an admin
-    expect((await call('POST', `/v1/teams/${team.id}/members`, dev, { email: `x-${rid()}@example.com`, role: 'viewer' })).statusCode).toBeGreaterThanOrEqual(403);
-    expect(mail.signup).toHaveLength(4); // the newcomer, the one that expired and the two waiting ones; the refused invitation sent nothing
   });
 
   it('administrator access: the owner manages a list; listed people get the data tables, not the list; removal takes effect at once', async () => {

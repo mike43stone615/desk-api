@@ -10,7 +10,6 @@ import { WEBHOOK_EVENTS, WebhookError, webhooks } from '../domain/webhooks/webho
 const CreateSchema = z.object({
   url: z.string().trim().min(1, 'A URL is required.').max(500, 'That address is too long.'),
   events: z.array(z.enum(WEBHOOK_EVENTS.filter((e) => e !== 'webhook.test') as [string, ...string[]])).min(1, 'Choose at least one event.').max(20),
-  teamId: z.string().trim().min(1).max(64).optional(),
 });
 
 function fail(err: unknown): never {
@@ -48,9 +47,8 @@ export async function createWebhookHandler(request: FastifyRequest, reply: Fasti
 
 export async function listWebhooksHandler(request: FastifyRequest, reply: FastifyReply) {
   await requireAuth(request, reply);
-  const { teamId } = request.query as { teamId?: string };
   try {
-    return reply.send({ hasMore: false, endpoints: await webhooks.list(request.currentUser!.id, teamId) });
+    return reply.send({ hasMore: false, endpoints: await webhooks.list(request.currentUser!.id) });
   } catch (err) {
     return fail(err);
   }

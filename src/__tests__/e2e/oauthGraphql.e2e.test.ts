@@ -101,7 +101,7 @@ describe.skipIf(!hasDb)('E2E: OAuth and GraphQL', () => {
     const noScope = await call('GET', '/v1/setup/businesses', bearer);
     expect(noScope.statusCode).toBe(403);
     expect(noScope.json().code).toBe('oauth_insufficient_scope');
-    for (const [method, url] of [['GET', '/v1/teams'], ['GET', '/v1/gateway/api-keys'], ['POST', '/v1/gateway/api-keys'], ['GET', '/v1/admin/tables'], ['POST', '/v1/oauth/clients'], ['GET', '/v1/oauth/authorizations']] as const) {
+    for (const [method, url] of [['GET', '/v1/gateway/api-keys'], ['POST', '/v1/gateway/api-keys'], ['GET', '/v1/admin/tables'], ['POST', '/v1/oauth/clients'], ['GET', '/v1/oauth/authorizations']] as const) {
       const res = await call(method, url, bearer, method === 'POST' ? {} : undefined);
       expect(res.statusCode, `${method} ${url}`).toBe(403);
     }
@@ -183,15 +183,11 @@ describe.skipIf(!hasDb)('E2E: OAuth and GraphQL', () => {
 
   it('GraphQL: a session reads its own data in one request; there are no mutations; the limits hold', async () => {
     const u = await mkUser('gq');
-    const other = await mkUser('gq-other');
-    await call('POST', '/v1/teams', u.headers, { name: 'GraphQL team' });
-    await call('POST', '/v1/teams', other.headers, { name: 'Not mine' });
     const res = await gql(u.headers, '{ viewer { id firstName } teams { name role memberCount members { email role } keys { id } } plan { id maxKeys } businesses { id } drafts { id } }');
     expect(res.statusCode).toBe(200);
     const data = res.json().data;
     expect(data.viewer.id).toBe(u.id);
-    expect(data.teams).toHaveLength(1);
-    expect(data.teams[0]).toMatchObject({ name: 'GraphQL team', role: 'owner', memberCount: 1 });
+    expect(data.teams).toEqual([]); // teams no longer exist; the field stays for old integrations and always answers empty
     expect(data.plan).toMatchObject({ id: 'free', maxKeys: 10 });
     // no way to change anything, and no GET
     const mut = await gql(u.headers, 'mutation { deleteEverything }');

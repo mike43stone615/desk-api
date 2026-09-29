@@ -15,8 +15,7 @@ registerRoute('/developer/webhooks', async (app) => {
   const myEpoch = currentEpoch();
   const s = {
     isLoading: true, loadError: null,
-    teams: [], events: [], endpoints: [],
-    scope: '', // '' = my own, else a team id
+    events: [], endpoints: [],
     url: '', chosen: new Set(),
     isCreating: false, formError: null,
     revealed: null, // { secret, what }
@@ -25,18 +24,15 @@ registerRoute('/developer/webhooks', async (app) => {
     isBusy: false, _lastFormError: null,
   };
   const isCurrent = () => currentEpoch() === myEpoch;
-  const query = () => (s.scope ? `?teamId=${encodeURIComponent(s.scope)}` : '');
 
   async function loadEndpoints() {
-    const res = await api(`/gateway/webhooks${query()}`);
+    const res = await api('/gateway/webhooks');
     s.endpoints = res.endpoints || [];
   }
   async function load() {
     s.isLoading = true; s.loadError = null; render();
     try {
-      const [teams, events] = await Promise.all([api('/teams'), api('/gateway/webhook-events')]);
-      // Only owners and admins may manage a team's webhooks.
-      s.teams = (teams.teams || []).filter((t) => t.role === 'owner' || t.role === 'admin');
+      const events = await api('/gateway/webhook-events');
       s.events = events.events || [];
       await loadEndpoints();
     } catch (err) {
@@ -54,7 +50,6 @@ registerRoute('/developer/webhooks', async (app) => {
     s.isCreating = true; s.formError = null; render();
     try {
       const body = { url: s.url.trim(), events: s.events.filter((x) => s.chosen.has(x)) };
-      if (s.scope) body.teamId = s.scope;
       const res = await api('/gateway/webhooks', { method: 'POST', body });
       s.revealed = { secret: res.secret, what: 'endpoint' };
       s.url = ''; s.chosen = new Set();
@@ -154,7 +149,6 @@ registerRoute('/developer/webhooks', async (app) => {
           <h2 class="biz-section-title">Add an endpoint</h2>
           <p class="biz-sub" style="margin-bottom:var(--sp-lg);">Desk sends a signed message to this address when the events you choose happen. It must start with https:// and be reachable from the internet. Failed deliveries are retried for about nine hours; an endpoint that fails ten times in a row is switched off.</p>
           <form id="wh-form" novalidate>
-            ${s.teams.length ? `<div class="field-header"><label for="wh-scope">For</label></div><select id="wh-scope" class="team-select" style="margin-bottom:var(--sp-md);"><option value="">Me</option>${s.teams.map((t) => `<option value="${esc(t.id)}" ${s.scope === t.id ? 'selected' : ''}>Team: ${esc(t.name)}</option>`).join('')}</select>` : ''}
             <div class="field-float has-icon"><span class="field-icon">${icon('link')}</span><label>Address (https://…)</label><input name="url" type="url" placeholder=" " maxlength="500" value="${esc(s.url)}" autocomplete="off" /></div>
             <div class="field-header"><label>Events</label></div>
             <div class="library-list">${s.events.map((x) => `<label class="library-row"><input type="checkbox" name="event" value="${esc(x)}" ${s.chosen.has(x) ? 'checked' : ''} /><span class="library-body"><span class="name">${esc(EVENT_LABELS[x] || x)}</span><span class="biz-sub">${esc(x)}</span></span></label>`).join('')}</div>
@@ -162,7 +156,7 @@ registerRoute('/developer/webhooks', async (app) => {
             <button type="submit" class="btn btn-primary" style="margin-top:var(--sp-lg);" ${s.isCreating ? 'disabled' : ''}>${s.isCreating ? spinnerBtn(true, '') : icon('link')}${s.isCreating ? '' : ' Add endpoint'}</button>
           </form>
         </div>
-        <h2 class="biz-section-title">${s.scope ? 'Team endpoints' : 'Your endpoints'}</h2>
+        <h2 class="biz-section-title">Your endpoints</h2>
         ${s.endpoints.length ? s.endpoints.map(endpointHtml).join('') : `<div class="state-card"><div class="biz-icon neutral">${icon('link')}</div><div class="biz-body"><div class="biz-title">No endpoints yet</div><div class="biz-sub">Add one above to start receiving events.</div></div></div>`}`;
     }
     const c = s.confirm;
@@ -180,8 +174,6 @@ registerRoute('/developer/webhooks', async (app) => {
     const $ = (id) => document.getElementById(id);
     app.querySelectorAll('[data-nav]').forEach((a) => a.addEventListener('click', (e) => { e.preventDefault(); navigate(a.dataset.nav); }));
     const retry = $('retry-btn'); if (retry) retry.addEventListener('click', load);
-    const scope = $('wh-scope');
-    if (scope) scope.addEventListener('change', async () => { s.scope = scope.value; s.deliveriesFor = null; s.isLoading = true; render(); try { await loadEndpoints(); } catch (err) { toast(friendlyError(err, 'Could not load that list.'), true); } finally { s.isLoading = false; if (isCurrent()) render(); } });
     const form = $('wh-form');
     if (form) {
       form.addEventListener('submit', createEndpoint); submitOnEnter(form);

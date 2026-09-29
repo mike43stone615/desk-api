@@ -2,7 +2,6 @@
 const ADMIN_TAB = { path: '/developer/admin', label: 'Administration' };
 export const TABS = [
   { path: '/developer', label: 'API keys' },
-  { path: '/developer/teams', label: 'Teams' },
   { path: '/developer/webhooks', label: 'Webhooks' },
   { path: '/developer/apps', label: 'Apps' },
   { path: '/developer/billing', label: 'Plans & billing' },

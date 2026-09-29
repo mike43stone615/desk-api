@@ -139,13 +139,8 @@ async function checkUsageThreshold(subjectType: SubjectType, subjectId: string, 
   const eightyPercent = Math.ceil(plan.includedAnalyses * 0.8);
   const percent = used === plan.includedAnalyses ? 100 : used === eightyPercent && eightyPercent < plan.includedAnalyses ? 80 : null;
   if (percent === null) return;
-  emitWebhookEvent(subjectType === 'team' ? { teamId: subjectId } : { userId: subjectId }, 'usage.threshold_reached', { percent, used, included: plan.includedAnalyses, month: monthKey() });
-  const recipients = subjectType === 'user'
-    ? (await pool.query<{ email: string }>(`SELECT email FROM users WHERE id = $1`, [subjectId])).rows.map((r) => r.email)
-    : (await pool.query<{ email: string }>(
-        `SELECT u.email FROM team_members tm JOIN users u ON u.id = tm.user_id WHERE tm.team_id = $1 AND tm.role IN ('owner', 'admin') AND tm.accepted_at IS NOT NULL`,
-        [subjectId],
-      )).rows.map((r) => r.email);
+  emitWebhookEvent({ userId: subjectId }, 'usage.threshold_reached', { percent, used, included: plan.includedAnalyses, month: monthKey() });
+  const recipients = (await pool.query<{ email: string }>(`SELECT email FROM users WHERE id = $1`, [subjectId])).rows.map((r) => r.email);
   for (const email of recipients) sendUsageThresholdEmail(config, email, percent, used, plan.includedAnalyses).catch(() => {});
 }
 

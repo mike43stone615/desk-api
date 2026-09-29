@@ -101,9 +101,6 @@ const PASSTHROUGH_HEADERS = ['content-type', 'retry-after', 'x-ratelimit-limit',
 
 const MARKET_ANALYSIS_DAILY: Limit = { name: 'market-analysis-key-day', max: Number(process.env.MARKET_ANALYSES_PER_KEY_PER_DAY) || 200, windowMs: 24 * 60 * 60 * 1000, what: 'market analyses' };
 
-// A team's analyses are counted together (twice a single key's number, since several people use them).
-const MARKET_ANALYSIS_TEAM_DAILY: Limit = { ...MARKET_ANALYSIS_DAILY, name: 'market-analysis-team-day', max: MARKET_ANALYSIS_DAILY.max * 2 };
-
 async function forward(service: BrokeredService, request: FastifyRequest, reply: FastifyReply) {
   const presented = request.headers['x-api-key'];
   if (!looksLikeGatewayKey(presented)) throw new HttpError(401, 'An API key is required (x-api-key header).', 'api_key_required');
@@ -152,12 +149,11 @@ async function forward(service: BrokeredService, request: FastifyRequest, reply:
 
   // A market analysis costs real money upstream (outside data and AI): each key may make a limited number a day.
   if (service === 'market_validation_api' && route.method === 'POST' && upstreamPath === '/research/analyze') {
-    const cap = verified.teamId ? MARKET_ANALYSIS_TEAM_DAILY : MARKET_ANALYSIS_DAILY;
-    const wait = await hit(cap, verified.teamId ?? verified.id);
+    const wait = await hit(MARKET_ANALYSIS_DAILY, verified.id);
     if (wait > 0) {
       reply.header('Retry-After', String(wait));
-      emitWebhookEvent({ userId: verified.ownerUserId, teamId: verified.teamId ?? undefined }, 'usage.cap_reached', { keyId: verified.id, cap: cap.max, what: 'market analyses per day' });
-      throw new HttpError(429, `${verified.teamId ? 'This team has' : 'This key has'} used its ${cap.max} market analyses for today. Try again in ${Math.ceil(wait / 3600)} hours, or ask for a higher limit.`, 'market_analysis_daily_cap');
+      emitWebhookEvent({ userId: verified.ownerUserId }, 'usage.cap_reached', { keyId: verified.id, cap: MARKET_ANALYSIS_DAILY.max, what: 'market analyses per day' });
+      throw new HttpError(429, `This key has used its ${MARKET_ANALYSIS_DAILY.max} market analyses for today. Try again in ${Math.ceil(wait / 3600)} hours, or ask for a higher limit.`, 'market_analysis_daily_cap');
     }
   }
 
