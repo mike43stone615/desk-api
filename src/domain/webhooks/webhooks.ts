@@ -14,7 +14,12 @@ import { config } from '../../config';
 import { decryptSecret, encryptSecret } from '../gateway/crypto';
 import { subscriptionFor } from '../billing/plans';
 
-export const WEBHOOK_EVENTS = ['key.created', 'key.revoked', 'plan.changed', 'oauth.app_authorized', 'usage.cap_reached', 'usage.threshold_reached', 'webhook.test'] as const;
+export const WEBHOOK_EVENTS = [
+  'key.created', 'key.rotated', 'key.suspended', 'key.resumed', 'key.revoked',
+  'key.service_added', 'key.service_removed',
+  'key.share_invited', 'key.share_accepted', 'key.share_removed',
+  'plan.changed', 'oauth.app_authorized', 'usage.cap_reached', 'usage.threshold_reached', 'webhook.test',
+] as const;
 export type WebhookEvent = (typeof WEBHOOK_EVENTS)[number];
 
 const BACKOFF_SECONDS = [60, 300, 1800, 7200, 21600];

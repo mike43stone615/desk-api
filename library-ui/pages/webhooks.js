@@ -10,6 +10,11 @@ const when = (iso) => {
   const d = new Date(iso);
   return Number.isNaN(d.getTime()) ? '' : d.toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
 };
+/** Hoverable (not clickable) "i" badge: a small themed tooltip instead of the native title attribute. Matches pages/developer.js. */
+function infoIcon(text) {
+  if (!text) return '';
+  return `<span class="info-icon" tabindex="0">${icon('info_outline')}<span class="info-tooltip" role="tooltip">${esc(text)}</span></span>`;
+}
 
 registerRoute('/developer/webhooks', async (app) => {
   const myEpoch = currentEpoch();
@@ -145,19 +150,25 @@ registerRoute('/developer/webhooks', async (app) => {
             <div class="reveal-key"><input id="wh-secret" readonly value="${esc(s.revealed.secret)}" aria-label="Signing secret" /><button type="button" class="btn btn-primary" id="wh-copy">${icon('content_copy')} Copy</button></div>
             <button type="button" class="btn" id="wh-dismiss" style="margin-top:var(--sp-lg);">I've saved it</button>
           </div>` : ''}
-        <div class="card" style="margin-bottom:var(--sp-lg);">
-          <h2 class="biz-section-title">Add an endpoint</h2>
-          <p class="biz-sub" style="margin-bottom:var(--sp-lg);">Desk sends a signed message to this address when the events you choose happen. It must start with https:// and be reachable from the internet. Failed deliveries are retried for about nine hours; an endpoint that fails ten times in a row is switched off.</p>
-          <form id="wh-form" novalidate>
-            <div class="field-float has-icon"><span class="field-icon">${icon('link')}</span><label>Address (https://…)</label><input name="url" type="url" placeholder=" " maxlength="500" value="${esc(s.url)}" autocomplete="off" /></div>
-            <div class="field-header"><label>Events</label></div>
-            <div class="library-list">${s.events.map((x) => `<label class="library-row"><input type="checkbox" name="event" value="${esc(x)}" ${s.chosen.has(x) ? 'checked' : ''} /><span class="library-body"><span class="name">${esc(EVENT_LABELS[x] || x)}</span><span class="biz-sub">${esc(x)}</span></span></label>`).join('')}</div>
-            ${s.formError ? statusMsg('error', s.formError, animate) : ''}
-            <button type="submit" class="btn btn-primary" style="margin-top:var(--sp-lg);" ${s.isCreating ? 'disabled' : ''}>${s.isCreating ? spinnerBtn(true, '') : icon('link')}${s.isCreating ? '' : ' Add endpoint'}</button>
-          </form>
-        </div>
-        <h2 class="biz-section-title">Your endpoints</h2>
-        ${s.endpoints.length ? s.endpoints.map(endpointHtml).join('') : `<div class="state-card"><div class="biz-icon neutral">${icon('link')}</div><div class="biz-body"><div class="biz-title">No endpoints yet</div><div class="biz-sub">Add one above to start receiving events.</div></div></div>`}`;
+        <div class="developer-split">
+          <div class="card">
+            <h2 class="biz-section-title">Add an endpoint</h2>
+            <form id="wh-form" novalidate>
+              <div class="field-float has-icon"><span class="field-icon">${icon('link')}</span><label>Address (https://…)</label><input name="url" type="url" placeholder=" " maxlength="500" value="${esc(s.url)}" autocomplete="off" /></div>
+              <div class="field-header" style="display:flex;align-items:center;gap:var(--sp-xs);"><label style="margin:0;">Events</label>${infoIcon('Desk sends a signed message to this address when the events you choose happen. It must start with https:// and be reachable from the internet. Failed deliveries are retried for about nine hours; an endpoint that fails ten times in a row is switched off.')}</div>
+              <div class="library-list">${s.events.map((x) => `<label class="library-row"><input type="checkbox" name="event" value="${esc(x)}" ${s.chosen.has(x) ? 'checked' : ''} /><span class="library-body"><span class="name">${esc(EVENT_LABELS[x] || x)}</span></span></label>`).join('')}</div>
+              ${s.formError ? statusMsg('error', s.formError, animate) : ''}
+              <div class="wizard-actions">
+                <div></div>
+                <div><button type="submit" class="btn btn-primary" ${s.isCreating ? 'disabled' : ''}>${s.isCreating ? spinnerBtn(true, '') : icon('link')}${s.isCreating ? '' : ' Add endpoint'}</button></div>
+              </div>
+            </form>
+          </div>
+          <div>
+            <h2 class="biz-section-title">Your endpoints</h2>
+            ${s.endpoints.length ? s.endpoints.map(endpointHtml).join('') : `<div class="state-card"><div class="biz-icon neutral">${icon('link')}</div><div class="biz-body"><div class="biz-title">No endpoints yet</div><div class="biz-sub">Add one above to start receiving events.</div></div></div>`}
+          </div>
+        </div>`;
     }
     const c = s.confirm;
     app.innerHTML = `

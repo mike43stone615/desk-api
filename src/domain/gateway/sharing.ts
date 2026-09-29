@@ -105,16 +105,21 @@ export const keyShares = {
     return out;
   },
 
-  /** Accepts a pending share. */
-  async accept(userId: string, shareId: string): Promise<void> {
-    const res = await pool.query(`UPDATE gateway_key_shares SET accepted_at = ${NOW_SQL} WHERE id = $1 AND shared_with_user_id = $2 AND accepted_at IS NULL`, [shareId, userId]);
+  /** Accepts a pending share. Returns the key and its owner (for the owner's "someone joined" webhook event). */
+  async accept(userId: string, shareId: string): Promise<{ apiKeyId: string; ownerUserId: string | null }> {
+    const res = await pool.query<{ api_key_id: string }>(`UPDATE gateway_key_shares SET accepted_at = ${NOW_SQL} WHERE id = $1 AND shared_with_user_id = $2 AND accepted_at IS NULL RETURNING api_key_id`, [shareId, userId]);
     if (!res.rowCount) throw new ShareError('not_found', 'Invitation not found.');
+    const apiKeyId = res.rows[0].api_key_id;
+    return { apiKeyId, ownerUserId: await ownerOf(apiKeyId) };
   },
 
-  /** Declines a pending share, or removes yourself from one you'd already accepted. */
-  async decline(userId: string, shareId: string): Promise<void> {
-    const res = await pool.query(`DELETE FROM gateway_key_shares WHERE id = $1 AND shared_with_user_id = $2`, [shareId, userId]);
+  /** Declines a pending share, or removes yourself from one you'd already accepted. Returns the key and its owner
+      (for the owner's "someone was removed" webhook event). */
+  async decline(userId: string, shareId: string): Promise<{ apiKeyId: string; ownerUserId: string | null }> {
+    const res = await pool.query<{ api_key_id: string }>(`DELETE FROM gateway_key_shares WHERE id = $1 AND shared_with_user_id = $2 RETURNING api_key_id`, [shareId, userId]);
     if (!res.rowCount) throw new ShareError('not_found', 'Share not found.');
+    const apiKeyId = res.rows[0].api_key_id;
+    return { apiKeyId, ownerUserId: await ownerOf(apiKeyId) };
   },
 
   /** The owner removes someone a key was shared with (pending or already accepted). */

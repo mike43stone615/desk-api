@@ -940,12 +940,12 @@ export function createFakeDb() {
     if (s.startsWith('UPDATE gateway_key_shares SET accepted_at')) {
       const r = [...gatewayKeyShares.values()].find((row) => row.id === p[0] && row.shared_with_user_id === p[1] && !row.accepted_at);
       if (r) r.accepted_at = nowIso();
-      return { rows: [], rowCount: r ? 1 : 0 };
+      return { rows: r ? [{ api_key_id: r.api_key_id }] : [], rowCount: r ? 1 : 0 };
     }
     if (s.startsWith('DELETE FROM gateway_key_shares WHERE id = $1 AND shared_with_user_id = $2')) {
       const r = [...gatewayKeyShares.values()].find((row) => row.id === p[0] && row.shared_with_user_id === p[1]);
       if (r) gatewayKeyShares.delete(r.id as string);
-      return { rows: [], rowCount: r ? 1 : 0 };
+      return { rows: r ? [{ api_key_id: r.api_key_id }] : [], rowCount: r ? 1 : 0 };
     }
     if (s.startsWith('DELETE FROM gateway_key_shares WHERE id = $1 AND api_key_id = $2')) {
       const r = [...gatewayKeyShares.values()].find((row) => row.id === p[0] && row.api_key_id === p[1]);

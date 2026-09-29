@@ -429,10 +429,11 @@ registerRoute('/developer', async (app) => {
   }
 
   /** One SVG bar per day, oldest to last on the right; a native <title> gives the per-bar hover readout. Clicking a
-      bar (there is no per-call log to drill into — see docs/API-LIMITS.md) just picks that day's totals below. */
-  function barChartSvg(filled, key, cssClass) {
+      bar (there is no per-call log to drill into — see docs/API-LIMITS.md) just picks that day's totals below.
+      The axes are plain HTML around the SVG (see chartAxesHtml), not SVG text: the chart itself still stretches
+      freely to fill its column (preserveAspectRatio="none"), which would distort any text drawn inside it. */
+  function barChartSvg(filled, key, cssClass, max) {
     const w = 600, h = 70;
-    const max = Math.max(1, ...filled.map((x) => x[key]));
     const barW = filled.length ? w / filled.length : w;
     const bars = filled.map((d, i) => {
       const val = d[key];
@@ -443,6 +444,23 @@ registerRoute('/developer', async (app) => {
       return `<rect class="chart-bar ${cssClass}${d.day === s.selectedDay ? ' selected' : ''}" data-day="${esc(d.day)}" x="${x}" y="${y}" width="${Math.max(0, barW - 1).toFixed(1)}" height="${barH || 1}" rx="1"><title>${esc(label)}</title></rect>`;
     }).join('');
     return `<svg class="usage-chart" viewBox="0 0 ${w} ${h}" preserveAspectRatio="none" role="img" aria-label="${key} per day, last ${filled.length} days">${bars}</svg>`;
+  }
+
+  const shortDate = (iso) => new Date(`${iso}T00:00:00Z`).toLocaleDateString(undefined, { month: 'short', day: 'numeric', timeZone: 'UTC' });
+
+  /** A y-axis (0 and the peak count, over the chart) and an x-axis (a handful of evenly spaced, non-overlapping
+      dates, under it) around one bar chart — plain HTML so the labels never stretch with the SVG. */
+  function chartAxesHtml(filled, key, cssClass, max) {
+    const labelCount = Math.min(5, filled.length);
+    const step = filled.length > 1 ? (filled.length - 1) / (labelCount - 1) : 0;
+    const xLabels = Array.from({ length: labelCount }, (_, i) => filled[Math.round(i * step)].day);
+    return `
+      <div class="chart-plot">
+        <div class="chart-y-axis"><span>${max}</span><span>0</span></div>
+        ${barChartSvg(filled, key, cssClass, max)}
+      </div>
+      <div class="chart-x-axis">${xLabels.map((day) => `<span>${esc(shortDate(day))}</span>`).join('')}</div>
+    `;
   }
 
   function chartsHtml(k) {
@@ -457,8 +475,8 @@ registerRoute('/developer', async (app) => {
         <span class="chart-legend-item"><span class="chart-legend-dot errors-bar"></span>Errors, last ${d.usage.days} days</span>
       </div>
       <div class="usage-charts-row">
-        ${barChartSvg(filled, 'calls', 'calls-bar')}
-        ${barChartSvg(filled, 'errors', 'errors-bar')}
+        <div class="chart-col">${chartAxesHtml(filled, 'calls', 'calls-bar', Math.max(1, ...filled.map((x) => x.calls)))}</div>
+        <div class="chart-col">${chartAxesHtml(filled, 'errors', 'errors-bar', Math.max(1, ...filled.map((x) => x.errors)))}</div>
       </div>
       ${picked ? `<div class="biz-sub" style="margin-top:var(--sp-sm);">${esc(picked.day)} — ${picked.calls} ${picked.calls === 1 ? 'call' : 'calls'}, ${picked.errors} ${picked.errors === 1 ? 'error' : 'errors'}</div>` : ''}
     `;
@@ -486,7 +504,7 @@ registerRoute('/developer', async (app) => {
           <h2 id="add-api-title">Add an API to "${esc(k.label)}"</h2>
           <div class="library-list">
             ${canAdd.map((x) => `
-              <button type="button" class="library-row" data-add-api-choice="${esc(k.id)}::${esc(x.service)}" style="width:100%;text-align:left;">
+              <button type="button" class="library-row" data-add-api-choice="${esc(k.id)}::${esc(x.service)}">
                 <span class="library-icon">${icon(SERVICE_ICONS[x.service] || 'category_outlined')}</span>
                 <span class="library-body"><span class="name">${esc(x.name)}</span><span class="biz-sub">${esc(x.description)}</span></span>
               </button>`).join('')}
@@ -510,12 +528,12 @@ registerRoute('/developer', async (app) => {
               <span class="meta-chip">${esc(personLabel(sh.sharedWith))}${sh.acceptedAt ? '' : ' (pending)'} <button type="button" class="chip-x" data-remove-share="${esc(k.id)}::${esc(sh.id)}" aria-label="Remove ${esc(personLabel(sh.sharedWith))} from ${esc(k.label)}" ${s.busyKeys.has(sh.id) ? 'disabled' : ''}>✕</button></span>
             `).join('')}
           </div>`}
-      <form id="share-form" data-share-key="${esc(k.id)}" style="display:flex;gap:var(--sp-sm);align-items:flex-start;margin-top:var(--sp-sm);">
+      <form id="share-form" data-share-key="${esc(k.id)}" style="display:flex;gap:var(--sp-sm);align-items:stretch;margin-top:var(--sp-sm);">
         <div class="field-float" style="flex:1;margin:0;">
           <label>Invite by email</label>
           <input name="shareEmail" placeholder=" " value="${esc(s.shareEmail)}" autocomplete="off" />
         </div>
-        <button type="submit" class="btn btn-sm" ${s.shareBusy ? 'disabled' : ''}>${s.shareBusy ? spinnerBtn(true, '') : '+ Invite'}</button>
+        <button type="submit" class="btn btn-primary" style="flex-shrink:0;" ${s.shareBusy ? 'disabled' : ''}>${s.shareBusy ? spinnerBtn(true, '') : '+ Invite'}</button>
       </form>
       ${s.shareError ? `<div class="error-text">${esc(s.shareError)}</div>` : ''}
     `;
@@ -641,7 +659,7 @@ registerRoute('/developer', async (app) => {
             <h2 class="biz-section-title">Your keys</h2>
             ${s.keys.length
               ? s.keys.map(keyCardHtml).join('')
-              : `<div class="state-card"><div class="biz-icon neutral">${icon('key')}</div><div class="biz-body"><div class="biz-title">No API keys yet</div></div></div>`}
+              : `<div class="state-card"><div class="biz-icon neutral">${icon('key')}</div><div class="biz-body"><div class="biz-title">No API keys yet</div><div class="biz-sub">Create one above to get started.</div></div></div>`}
             ${s.sharedKeys.length ? `
               <h2 class="biz-section-title" style="margin-top:var(--sp-xl);">Key shared with me</h2>
               ${s.sharedKeys.map(sharedKeyCardHtml).join('')}

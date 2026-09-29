@@ -455,6 +455,9 @@ input[type="password"]::-ms-reveal { display: none; }
 .library-row {
   position: relative; display: flex; align-items: flex-start; gap: var(--sp-md); padding: var(--sp-md) var(--sp-lg);
   background: var(--input-bg); border: 1px solid var(--line); border-radius: var(--r-md); cursor: pointer;
+  /* A <button>-based row (the "add an API" popup) does not inherit text color like a <label>-based one does — a
+     native button defaults to the browser's own ButtonText color, which reads as washed-out on a dark theme. */
+  color: inherit; font: inherit; text-align: left; width: 100%;
 }
 .library-row:hover { border-color: var(--line-strong); }
 .library-row:has(input:checked) { border-color: var(--accent); background: var(--accent-soft); }
@@ -698,9 +701,14 @@ table.admin-table td.admin-actions-cell { white-space: nowrap; }
 .chart-legend-dot.calls-bar { background: var(--accent); }
 .chart-legend-dot.errors-bar { background: var(--error); }
 .usage-charts-row { display: flex; gap: var(--sp-lg); }
-.usage-charts-row .usage-chart { flex: 1; min-width: 0; }
+.chart-col { flex: 1; min-width: 0; margin-bottom: var(--sp-md); }
 @media (max-width: 640px) { .usage-charts-row { flex-direction: column; } }
-.usage-chart { display: block; width: 100%; height: 90px; margin-bottom: var(--sp-md); }
+/* Left gutter reserved for the y-axis (0 / peak); the SVG itself still stretches edge to edge beside it, so its
+   own bars are never distorted by text sharing the viewBox (see chartAxesHtml in pages/developer.js). */
+.chart-plot { position: relative; display: flex; align-items: stretch; gap: var(--sp-xs); }
+.chart-y-axis { flex-shrink: 0; width: 26px; display: flex; flex-direction: column; justify-content: space-between; text-align: right; font-size: .7rem; font-weight: 600; color: var(--ink-faint); font-variant-numeric: tabular-nums; padding: 2px 0; }
+.usage-chart { display: block; flex: 1; min-width: 0; height: 70px; }
+.chart-x-axis { display: flex; justify-content: space-between; margin-left: 34px; margin-top: var(--sp-2xs); font-size: .7rem; font-weight: 600; color: var(--ink-faint); }
 .chart-bar { cursor: pointer; }
 .chart-bar.calls-bar { fill: var(--accent); }
 .chart-bar.calls-bar:hover, .chart-bar.calls-bar.selected { fill: var(--accent-hover); }

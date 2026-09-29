@@ -465,7 +465,7 @@ registerRoute('/developer/admin', async (app) => {
     }
     if (s.editingCell === editKey) {
       return `<td style="min-width:${columnWidth(col)}px;">
-        <textarea class="admin-cell-input" rows="2" data-edit-input="${esc(rowId)}::${esc(col)}">${esc(displayValue(value))}</textarea>
+        <textarea class="admin-cell-input" rows="1" data-edit-input="${esc(rowId)}::${esc(col)}">${esc(displayValue(value))}</textarea>
       </td>`;
     }
     if (!secret && typeof value === 'boolean') {

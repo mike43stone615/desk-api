@@ -25,7 +25,15 @@ export function usageShare(used, included) {
 
 export const EVENT_LABELS = {
   'key.created': 'An API key is created',
+  'key.rotated': 'An API key is rotated',
+  'key.suspended': 'An API key is switched off',
+  'key.resumed': 'An API key is switched on',
   'key.revoked': 'An API key is revoked',
+  'key.service_added': 'An API is enabled on an existing key',
+  'key.service_removed': 'An API is disabled on an existing key',
+  'key.share_invited': 'Someone is invited to a key',
+  'key.share_accepted': 'Someone joins a shared key',
+  'key.share_removed': 'Someone is removed from a shared key',
   'plan.changed': 'A plan changes',
   'oauth.app_authorized': 'An app is authorized',
   'usage.cap_reached': 'A daily usage cap is reached',

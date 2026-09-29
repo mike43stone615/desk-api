@@ -132,6 +132,7 @@ export async function addKeyServiceHandler(request: FastifyRequest, reply: Fasti
   try {
     const key = await gatewayApiKeys.addService(user.id, id, parsed.data.service);
     auditKey(request, 'gateway_key_service_added', { userId: user.id, keyId: id, service: parsed.data.service });
+    emitWebhookEvent({ userId: user.id }, 'key.service_added', { keyId: id, service: parsed.data.service });
     return reply.send({ apiKey: key });
   } catch (err) {
     return keyServiceError(err);
@@ -147,6 +148,7 @@ export async function removeKeyServiceHandler(request: FastifyRequest, reply: Fa
   try {
     const key = await gatewayApiKeys.removeService(user.id, id, service as GatewayService);
     auditKey(request, 'gateway_key_service_removed', { userId: user.id, keyId: id, service });
+    emitWebhookEvent({ userId: user.id }, 'key.service_removed', { keyId: id, service });
     return reply.send({ apiKey: key });
   } catch (err) {
     return keyServiceError(err);
@@ -182,6 +184,7 @@ export async function suspendGatewayKeyHandler(request: FastifyRequest, reply: F
   const user = request.currentUser!;
   if (!(await suspendKey(id, user.id, 'suspended by its owner', user.email))) throw new HttpError(404, 'That key does not exist, is not yours, or was revoked.', 'api_key_not_found');
   auditKey(request, 'gateway_key_suspended', { userId: user.id, keyId: id });
+  emitWebhookEvent({ userId: user.id }, 'key.suspended', { keyId: id });
   return reply.send({ ok: true, suspended: true });
 }
 
@@ -191,6 +194,7 @@ export async function resumeGatewayKeyHandler(request: FastifyRequest, reply: Fa
   const user = request.currentUser!;
   if (!(await resumeKey(id, user.id))) throw new HttpError(404, 'That key is not suspended, or is not yours.', 'api_key_not_found');
   auditKey(request, 'gateway_key_resumed', { userId: user.id, keyId: id });
+  emitWebhookEvent({ userId: user.id }, 'key.resumed', { keyId: id });
   return reply.send({ ok: true, suspended: false });
 }
 
@@ -204,6 +208,7 @@ export async function rotateGatewayKeyHandler(request: FastifyRequest, reply: Fa
     const rotated = await gatewayApiKeys.rotate(user.id, id);
     auditKey(request, 'gateway_key_rotated', { userId: user.id, keyId: id });
     notifySecurityEvent(request, user.email, 'api_key_rotated', rotated.label);
+    emitWebhookEvent({ userId: user.id }, 'key.rotated', { keyId: id });
     return reply.send({ apiKey: rotated });
   } catch (err) {
     return keyServiceError(err);
@@ -248,6 +253,7 @@ export async function shareGatewayKeyHandler(request: FastifyRequest, reply: Fas
     auditKey(request, 'gateway_key_shared', { userId: user.id, keyId: id, sharedWithEmail: parsed.data.email });
     const key = await gatewayApiKeys.summaryOf(id);
     void sendKeyShareEmail(config, share.sharedWith.email, key?.label ?? 'a key', user.email, request.id).catch(() => {});
+    emitWebhookEvent({ userId: user.id }, 'key.share_invited', { keyId: id, sharedWithEmail: parsed.data.email });
     return reply.status(201).send({ share });
   } catch (err) {
     return shareError(err);
@@ -272,6 +278,7 @@ export async function removeKeyShareHandler(request: FastifyRequest, reply: Fast
   try {
     await keyShares.removeByOwner(request.currentUser!.id, id, shareId);
     auditKey(request, 'gateway_key_share_removed', { userId: request.currentUser!.id, keyId: id, shareId });
+    emitWebhookEvent({ userId: request.currentUser!.id }, 'key.share_removed', { keyId: id, shareId });
     return reply.status(204).send();
   } catch (err) {
     return shareError(err);
@@ -283,8 +290,9 @@ export async function acceptKeyShareHandler(request: FastifyRequest, reply: Fast
   await requireAuth(request, reply);
   const { shareId } = request.params as { shareId: string };
   try {
-    await keyShares.accept(request.currentUser!.id, shareId);
+    const { apiKeyId, ownerUserId } = await keyShares.accept(request.currentUser!.id, shareId);
     auditKey(request, 'gateway_key_share_accepted', { userId: request.currentUser!.id, shareId });
+    if (ownerUserId) emitWebhookEvent({ userId: ownerUserId }, 'key.share_accepted', { keyId: apiKeyId, shareId });
     return reply.send({ ok: true });
   } catch (err) {
     return shareError(err);
@@ -296,8 +304,9 @@ export async function declineKeyShareHandler(request: FastifyRequest, reply: Fas
   await requireAuth(request, reply);
   const { shareId } = request.params as { shareId: string };
   try {
-    await keyShares.decline(request.currentUser!.id, shareId);
+    const { apiKeyId, ownerUserId } = await keyShares.decline(request.currentUser!.id, shareId);
     auditKey(request, 'gateway_key_share_declined', { userId: request.currentUser!.id, shareId });
+    if (ownerUserId) emitWebhookEvent({ userId: ownerUserId }, 'key.share_removed', { keyId: apiKeyId, shareId });
     return reply.status(204).send();
   } catch (err) {
     return shareError(err);
