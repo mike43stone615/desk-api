@@ -760,7 +760,7 @@ export function createFakeDb() {
 
     // ── API Library keys (src/domain/gateway/keys.ts) ──────────────────────
     if (s.startsWith('SELECT t.id, t.name, m.role, t.created_at, t.rate_limit_per_minute,')) return { rows: [], rowCount: 0 };
-    if (s.includes('FROM gateway_api_keys k WHERE k.revoked_at IS NULL AND k.owner_user_id = $1 AND k.team_id IS NULL ORDER BY')) {
+    if (s.includes('FROM gateway_api_keys k WHERE k.revoked_at IS NULL AND k.owner_user_id = $1')) {
       const rows = [...gatewayKeys.values()]
         .filter((k) => k.owner_user_id === p[0] && !k.revoked_at)
         .sort((a, b) => String(b.created_at).localeCompare(String(a.created_at)));
@@ -780,9 +780,9 @@ export function createFakeDb() {
       return { rows: [{ count: String(n) }], rowCount: 1 };
     }
     if (s.startsWith('INSERT INTO gateway_api_keys')) {
-      const [id, owner_user_id, label, key_hash, key_prefix, expires_at, desk_scopes, team_id, sandbox, allowed_ips, restricted_business_id] = p as unknown as [string, string, string, string, string, string | null, string[], string | null, boolean, string[] | null, string | null];
+      const [id, owner_user_id, label, key_hash, key_prefix, expires_at, desk_scopes, sandbox, allowed_ips, restricted_business_id] = p as unknown as [string, string, string, string, string, string | null, string[], boolean, string[] | null, string | null];
       const row: FakeRow = {
-        id, owner_user_id, label, key_hash, key_prefix, expires_at: expires_at ?? null, desk_scopes: desk_scopes ?? ['profile', 'drafts', 'businesses'], rate_limit_per_minute: null, team_id: team_id ?? null, sandbox: Boolean(sandbox),
+        id, owner_user_id, label, key_hash, key_prefix, expires_at: expires_at ?? null, desk_scopes: desk_scopes ?? ['profile', 'drafts', 'businesses'], rate_limit_per_minute: null, sandbox: Boolean(sandbox),
         allowed_ips: allowed_ips ?? null, restricted_business_id: restricted_business_id ?? null,
         created_at: nowIso(), last_used_at: null, revoked_at: null,
       };
@@ -809,9 +809,9 @@ export function createFakeDb() {
       if (k) { k.key_hash = p[1] as string; k.key_prefix = p[2] as string; }
       return { rows: [], rowCount: k ? 1 : 0 };
     }
-    if (s.startsWith('SELECT k.id, k.revoked_at, k.team_id, k.desk_scopes FROM gateway_api_keys k WHERE k.id = $1 AND k.owner_user_id = $2')) {
+    if (s.startsWith('SELECT k.id, k.revoked_at, k.desk_scopes FROM gateway_api_keys k WHERE k.id = $1 AND k.owner_user_id = $2')) {
       const k = gatewayKeys.get(p[0]);
-      const row = k && k.owner_user_id === p[1] ? [{ id: k.id, revoked_at: k.revoked_at, team_id: k.team_id ?? null, desk_scopes: k.desk_scopes ?? ['profile', 'drafts', 'businesses'] }] : [];
+      const row = k && k.owner_user_id === p[1] ? [{ id: k.id, revoked_at: k.revoked_at, desk_scopes: k.desk_scopes ?? ['profile', 'drafts', 'businesses'] }] : [];
       return { rows: row, rowCount: row.length };
     }
     if (s.startsWith('UPDATE gateway_api_keys SET allowed_ips = $2, restricted_business_id = $3 WHERE id = $1')) {
@@ -821,9 +821,9 @@ export function createFakeDb() {
       k.restricted_business_id = p[2] ?? null;
       return { rows: [{ ...k }], rowCount: 1 };
     }
-    if (s.startsWith('SELECT owner_user_id, team_id FROM gateway_api_keys WHERE id = $1')) {
+    if (s === 'SELECT owner_user_id FROM gateway_api_keys WHERE id = $1') {
       const k = gatewayKeys.get(p[0]);
-      return k ? { rows: [{ owner_user_id: k.owner_user_id, team_id: k.team_id ?? null }], rowCount: 1 } : { rows: [], rowCount: 0 };
+      return k ? { rows: [{ owner_user_id: k.owner_user_id }], rowCount: 1 } : { rows: [], rowCount: 0 };
     }
     if (s.startsWith('SELECT id, revoked_at FROM gateway_api_keys WHERE id = $1 AND owner_user_id = $2')) {
       const k = gatewayKeys.get(p[0]);
@@ -1049,9 +1049,9 @@ export function createFakeDb() {
       return { rows: [], rowCount: toDelete.length };
     }
     if (s.startsWith('SELECT s.id AS sid, s.status') || s.includes("FROM plans WHERE id = 'free'")) return { rows: [], rowCount: 0 };
-    if (s.startsWith('SELECT k.rate_limit_per_minute, k.team_id, t.rate_limit_per_minute AS team_limit')) {
+    if (s.startsWith('SELECT k.rate_limit_per_minute, p.per_minute_limit AS plan_limit')) {
       const k = [...gatewayKeys.values()].find((x) => x.key_hash === p[0]);
-      return { rows: k ? [{ rate_limit_per_minute: k.rate_limit_per_minute ?? null, team_id: k.team_id ?? null, team_limit: null }] : [], rowCount: k ? 1 : 0 };
+      return { rows: k ? [{ rate_limit_per_minute: k.rate_limit_per_minute ?? null, plan_limit: null }] : [], rowCount: k ? 1 : 0 };
     }
     if (s.startsWith('SELECT rate_limit_per_minute FROM gateway_api_keys WHERE key_hash = $1')) {
       const k = [...gatewayKeys.values()].find((x) => x.key_hash === p[0]);
@@ -1071,9 +1071,9 @@ export function createFakeDb() {
       k.rate_limit_per_minute = p[1];
       return { rows: [], rowCount: 1 };
     }
-    if (s.startsWith('SELECT id, owner_user_id, revoked_at, created_at, last_used_at, expires_at, desk_scopes, rate_limit_per_minute, team_id, sandbox, allowed_ips, restricted_business_id FROM gateway_api_keys WHERE key_hash = $1')) {
+    if (s.startsWith('SELECT id, owner_user_id, revoked_at, created_at, last_used_at, expires_at, desk_scopes, rate_limit_per_minute, sandbox, allowed_ips, restricted_business_id FROM gateway_api_keys WHERE key_hash = $1')) {
       const k = [...gatewayKeys.values()].find((x) => x.key_hash === p[0]);
-      const rows = k ? [{ id: k.id, owner_user_id: k.owner_user_id, revoked_at: k.revoked_at, created_at: k.created_at, last_used_at: k.last_used_at, expires_at: k.expires_at ?? null, desk_scopes: k.desk_scopes, rate_limit_per_minute: k.rate_limit_per_minute ?? null, team_id: k.team_id ?? null, sandbox: k.sandbox === true, allowed_ips: k.allowed_ips ?? null, restricted_business_id: k.restricted_business_id ?? null }] : [];
+      const rows = k ? [{ id: k.id, owner_user_id: k.owner_user_id, revoked_at: k.revoked_at, created_at: k.created_at, last_used_at: k.last_used_at, expires_at: k.expires_at ?? null, desk_scopes: k.desk_scopes, rate_limit_per_minute: k.rate_limit_per_minute ?? null, sandbox: k.sandbox === true, allowed_ips: k.allowed_ips ?? null, restricted_business_id: k.restricted_business_id ?? null }] : [];
       return { rows, rowCount: rows.length };
     }
     if (s.startsWith('SELECT service FROM gateway_api_key_grants WHERE api_key_id = $1')) {

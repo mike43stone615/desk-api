@@ -25,7 +25,7 @@ const CRITICAL = {
   'src/domain/gateway/crypto.ts': [90, 80],
   'src/domain/oauth/oauth.ts': [90, 75],
   'src/domain/webhooks/webhooks.ts': [90, 75],
-  'src/domain/teams/teams.ts': [90, 75],
+  'src/domain/gateway/sharing.ts': [90, 70],
   'src/domain/billing/plans.ts': [90, 70],
   'src/domain/graphql/schema.ts': [90, 70],
 };

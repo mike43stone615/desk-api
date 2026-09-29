@@ -1084,7 +1084,6 @@ export const GATEWAY_EXAMPLES: Record<string, { status: number; request: unknown
             "key.created",
             "key.revoked"
           ],
-          "teamId": null,
           "active": true,
           "disabledReason": null,
           "createdAt": "2026-09-21T15:00:00Z",
@@ -1110,7 +1109,6 @@ export const GATEWAY_EXAMPLES: Record<string, { status: number; request: unknown
           "key.created",
           "key.revoked"
         ],
-        "teamId": null,
         "active": true,
         "disabledReason": null,
         "createdAt": "2026-09-21T15:00:00Z",

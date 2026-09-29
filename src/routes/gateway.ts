@@ -65,7 +65,7 @@ export async function createGatewayKeyHandler(request: FastifyRequest, reply: Fa
   const user = request.currentUser!;
 
   try {
-    const created = await gatewayApiKeys.create(user.id, parsed.data.label, parsed.data.services, parsed.data.expiresInDays, [...new Set(parsed.data.deskScopes)], undefined, parsed.data.sandbox === true, parsed.data.allowedIps, parsed.data.businessId);
+    const created = await gatewayApiKeys.create(user.id, parsed.data.label, parsed.data.services, parsed.data.expiresInDays, [...new Set(parsed.data.deskScopes)], parsed.data.sandbox === true, parsed.data.allowedIps, parsed.data.businessId);
     auditKey(request, 'gateway_key_created', {
       userId: user.id,
       keyId: created.id,
@@ -77,7 +77,8 @@ export async function createGatewayKeyHandler(request: FastifyRequest, reply: Fa
     return reply.status(201).send({ apiKey: created });
   } catch (err) {
     if (err instanceof GatewayKeyError) {
-      throw new HttpError(err.code === 'limit_reached' ? 409 : err.code === 'sandbox_desk_api' ? 400 : 503, err.message, `api_key_${err.code}`);
+      const status = err.code === 'limit_reached' ? 409 : err.code === 'sandbox_desk_api' ? 400 : err.code === 'not_found' ? 404 : 503;
+      throw new HttpError(status, err.message, `api_key_${err.code}`);
     }
     if (err instanceof BrokerError) {
       request.log.error({ err }, 'gateway key provisioning failed');

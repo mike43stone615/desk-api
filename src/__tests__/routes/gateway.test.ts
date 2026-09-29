@@ -237,6 +237,22 @@ describe('creating keys', () => {
     for (let i = 0; i < 10; i += 1) expect((await createKey(user, ['desk_api'], `k${i}`)).statusCode).toBe(201);
     expect((await createKey(user, ['desk_api'], 'one too many')).statusCode).toBe(409);
   });
+
+  it('can be restricted to one business right at creation, but only with the Desk API and the "businesses" scope, and only to a business the owner belongs to', async () => {
+    const user = seedUser('restrict-create@example.com');
+    const noDeskApi = await app.inject({ method: 'POST', url: '/gateway/api-keys', headers: user.headers, payload: { label: 'no desk api', services: ['registry_api'], businessId: 'biz-1' } });
+    expect(noDeskApi.statusCode).toBe(400);
+    const noScope = await app.inject({ method: 'POST', url: '/gateway/api-keys', headers: user.headers, payload: { label: 'no scope', services: ['desk_api'], deskScopes: ['profile'], businessId: 'biz-1' } });
+    expect(noScope.statusCode).toBe(400);
+    const notMine = await app.inject({ method: 'POST', url: '/gateway/api-keys', headers: user.headers, payload: { label: 'not mine', services: ['desk_api'], deskScopes: ['profile', 'businesses'], businessId: 'nope' } });
+    expect(notMine.statusCode).toBe(404);
+
+    fakeDb.businesses.set('biz-1', { id: 'biz-1', user_id: user.id, name: 'Restricted Co', industry: null, business_json: '{}', created_at: new Date().toISOString(), updated_at: new Date().toISOString() });
+    fakeDb.memberships.set('mem-1', { id: 'mem-1', business_id: 'biz-1', user_id: user.id, role: 'owner', accepted_at: new Date().toISOString(), created_at: new Date().toISOString(), updated_at: new Date().toISOString() });
+    const ok = await app.inject({ method: 'POST', url: '/gateway/api-keys', headers: user.headers, payload: { label: 'restricted', services: ['desk_api'], deskScopes: ['profile', 'businesses'], businessId: 'biz-1' } });
+    expect(ok.statusCode, ok.body).toBe(201);
+    expect(JSON.parse(ok.body).apiKey.restrictedBusinessId).toBe('biz-1');
+  });
 });
 
 describe('listing and revoking are scoped to the owner', () => {

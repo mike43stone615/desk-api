@@ -191,9 +191,9 @@ async function forward(service: BrokeredService, request: FastifyRequest, reply:
     verified.id,
   );
 
-  // Every successful market analysis is counted exactly for billing: against the team when the key is a team's.
+  // Every successful market analysis is counted exactly for billing.
   if (service === 'market_validation_api' && route.method === 'POST' && upstreamPath === '/research/analyze' && upstream.status < 400) {
-    meterAnalysis(verified.teamId ? 'team' : 'user', verified.teamId ?? verified.ownerUserId);
+    meterAnalysis('user', verified.ownerUserId);
   }
 
   // A 401/403 from upstream means OUR brokered credential was refused — not

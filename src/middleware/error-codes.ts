@@ -62,7 +62,6 @@ export const ERROR_CODES: Record<string, string> = {
   api_key_service_unavailable: 'One of the chosen APIs is not available for new keys right now.',
   api_key_not_found: 'That key does not exist or is not yours.',
   api_key_already_revoked: 'That key was already revoked.',
-  api_key_team_desk_api: 'A team key cannot carry the Desk API (it would act as one person); use a personal key for that.',
   api_key_sandbox_desk_api: 'A sandbox key cannot carry the Desk API; it only gives sample answers.',
   sandbox_no_sample: 'The sandbox has no sample answer for that endpoint; use a live key.',
   webhook_invalid_url: 'The webhook address or event list was not acceptable (https only, public addresses only).',
