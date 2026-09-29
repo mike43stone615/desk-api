@@ -68,18 +68,19 @@ export async function sendBusinessInviteEmail(
   config: AppConfig,
   to: string,
   businessName: string,
-  inviterEmail: string,
   requestId: string,
 ): Promise<void> {
   const signInUrl = `${config.appBaseUrl}/login`;
   await sendEmail(config, {
     to,
-    subject: `You've been added to ${businessName} on Desk`,
+    subject: `You've been added to ${businessName} on Desk Business`,
     html: themedEmailHtml({
       title: `You've been added to ${businessName}`,
-      body: `${inviterEmail} added you to ${businessName} on Desk. Sign in and open your pending invites to accept or decline.`,
+      body: `You have been added to ${businessName} on Desk Business.`,
       actionLabel: 'Sign in',
       actionUrl: signInUrl,
+      // Deliberately unchanged for now (pending clarification): this note still reads like it was reused from a
+      // security notice rather than written for this email.
       note: 'If you were not expecting this, you can decline the invite once signed in, or ignore this email — declining removes your access.',
     }),
     requestId,
@@ -89,6 +90,15 @@ export async function sendBusinessInviteEmail(
   });
 }
 
+export interface SecurityNoticeOptions {
+  showAction?: boolean;
+  /** Where the "Sign in" button (and the buttonless emails' logo) should point — the app or the API library,
+      whichever the triggering request actually came from. Defaults to the app. */
+  actionUrl?: string;
+  /** Overrides the shared "if this was not you..." line below the button, for a notice where it does not fit. */
+  note?: string;
+}
+
 /** A heads-up about something that happened on the account (new sign-in, password change, new API key). */
 export async function sendSecurityNoticeEmail(
   config: AppConfig,
@@ -96,7 +106,7 @@ export async function sendSecurityNoticeEmail(
   title: string,
   body: string,
   requestId: string,
-  showAction: boolean = true,
+  opts: SecurityNoticeOptions = {},
 ): Promise<void> {
   await sendEmail(config, {
     to,
@@ -104,10 +114,10 @@ export async function sendSecurityNoticeEmail(
     html: themedEmailHtml({
       title,
       body,
-      showAction,
-      actionLabel: 'Review your account activity',
-      actionUrl: `${config.appBaseUrl}/account/sessions`,
-      note: 'If this was not you, reset your password right away and sign out all devices from the page above. You cannot unsubscribe from security notices.',
+      showAction: opts.showAction ?? true,
+      actionLabel: 'Sign in',
+      actionUrl: opts.actionUrl ?? `${config.appBaseUrl}/login`,
+      note: opts.note ?? 'If this was not you, reset your password right away and sign out all devices from the page above. You cannot unsubscribe from security notices.',
     }),
     requestId,
     skippedEvent: 'security_notice_email_skipped',
@@ -127,11 +137,11 @@ export async function sendBusinessInviteSignupEmail(
   const signUpUrl = `${config.appBaseUrl}/login`;
   await sendEmail(config, {
     to,
-    subject: `You've been invited to ${businessName} on Desk`,
+    subject: `You've been invited to join ${businessName} on Desk Business`,
     html: themedEmailHtml({
-      title: `You've been invited to ${businessName}`,
-      body: `${inviterEmail} invited you to ${businessName} on Desk. Create an account with this email address and confirm it, then open your pending invites to accept or decline.`,
-      actionLabel: 'Create your account',
+      title: `You've been invited to join ${businessName} on Desk Business`,
+      body: `${inviterEmail} invited you to ${businessName} on Desk Business. Sign in or create an account with this email address and confirm it, then open your pending invites to accept or decline.`,
+      actionLabel: 'Sign in or create your account',
       actionUrl: signUpUrl,
       note: 'If you were not expecting this, you can ignore this email — nothing happens unless you sign up with this address.',
     }),
@@ -161,8 +171,8 @@ export async function sendKeyShareEmail(config: AppConfig, to: string, keyLabel:
   });
 }
 
-/** The API Library's own address (key-share invitations are answered there, not in the Desk app). */
-function libraryBase(): string {
+/** The API Library's own address (key-share invitations, usage/plan links, and API-key security notices are all answered there, not in the Desk app). */
+export function libraryBase(): string {
   return (process.env.API_PUBLIC_URL || 'https://api.deskbusiness.co').replace(/\/+$/, '');
 }
 
@@ -175,7 +185,7 @@ export async function sendUsageThresholdEmail(config: AppConfig, to: string, per
     html: themedEmailHtml({
       title: atCap ? "You've reached this month's included amount" : `You've used ${percent}% of this month's included amount`,
       body: `${used.toLocaleString('en-US')} of ${included.toLocaleString('en-US')} included market analyses used this month.${atCap ? ' Further analyses may cost extra or be refused, depending on your plan.' : ''}`,
-      actionLabel: 'View your plan and usage',
+      actionLabel: 'Sign in to view your plan and usage',
       actionUrl: `${libraryBase()}/developer/billing`,
       note: 'This is sent once per threshold each month, not on every call.',
     }),
@@ -183,44 +193,6 @@ export async function sendUsageThresholdEmail(config: AppConfig, to: string, per
     skippedEvent: 'usage_threshold_email_skipped',
     failedEvent: 'usage_threshold_email_failed',
     sentEvent: 'usage_threshold_email_sent',
-  });
-}
-
-/** Confirms an address wants status-page updates (double opt-in: nobody is subscribed, or e-mailed again, without clicking this). */
-export async function sendStatusSubscribeConfirmEmail(config: AppConfig, to: string, confirmToken: string, requestId = 'status-subscribe'): Promise<void> {
-  await sendEmail(config, {
-    to,
-    subject: 'Confirm: Desk status updates',
-    html: themedEmailHtml({
-      title: 'Confirm you want Desk status updates',
-      body: 'Click below to start getting an e-mail when something changes on the Desk status page. If you did not ask for this, ignore it: nothing happens unless you confirm.',
-      actionLabel: 'Confirm subscription',
-      actionUrl: `${libraryBase()}/status/subscribe/confirm?token=${encodeURIComponent(confirmToken)}`,
-      note: 'This link expires in 7 days.',
-    }),
-    requestId,
-    skippedEvent: 'status_subscribe_email_skipped',
-    failedEvent: 'status_subscribe_email_failed',
-    sentEvent: 'status_subscribe_email_sent',
-  });
-}
-
-/** One incident update, to one confirmed subscriber (their own unsubscribe link at the bottom). */
-export async function sendIncidentNoticeEmail(config: AppConfig, to: string, unsubscribeToken: string, title: string, status: string, message: string, requestId = 'status-incident'): Promise<void> {
-  await sendEmail(config, {
-    to,
-    subject: `Desk status: ${title} (${status})`,
-    html: themedEmailHtml({
-      title,
-      body: `${status[0].toUpperCase()}${status.slice(1)}: ${message}`,
-      actionLabel: 'View the status page',
-      actionUrl: `${libraryBase()}/status`,
-      note: `You get this because you subscribed to Desk status updates. <a href="${libraryBase()}/status/subscribe/unsubscribe?token=${encodeURIComponent(unsubscribeToken)}">Unsubscribe</a>.`,
-    }),
-    requestId,
-    skippedEvent: 'status_incident_email_skipped',
-    failedEvent: 'status_incident_email_failed',
-    sentEvent: 'status_incident_email_sent',
   });
 }
 

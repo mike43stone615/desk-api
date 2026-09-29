@@ -540,21 +540,6 @@ const BASE_SPEC = {
     '/.well-known/oauth-authorization-server': {
       get: { tags: ['OAuth'], summary: 'OAuth discovery document (RFC 8414)', responses: { '200': { description: 'Endpoints, grant types and scopes' } } },
     },
-    '/status/subscribe': {
-      post: {
-        tags: ['System'],
-        summary: 'Ask to be e-mailed when the status page changes (public; double opt-in)',
-        description: 'Form or JSON body: { "email": string }. Always redirects to /status with a banner; the answer is the same whether or not the address was already subscribed.',
-        requestBody: { required: true, content: { 'application/x-www-form-urlencoded': { schema: { type: 'object', required: ['email'], properties: { email: { type: 'string' } } } }, 'application/json': { schema: { type: 'object', required: ['email'], properties: { email: { type: 'string' } } } } } },
-        responses: { '302': { description: 'Redirects to /status?banner=subscribed (or subscribe_error for a bad address)' } },
-      },
-    },
-    '/status/subscribe/confirm': {
-      get: { tags: ['System'], summary: 'Confirms a status subscription from its emailed link (public)', parameters: [{ name: 'token', in: 'query', required: true, schema: { type: 'string' } }], responses: { '302': { description: 'Redirects to /status?banner=confirmed (or subscribe_error)' } } },
-    },
-    '/status/subscribe/unsubscribe': {
-      get: { tags: ['System'], summary: 'One-click unsubscribe from status e-mails (public; the link in every notice)', parameters: [{ name: 'token', in: 'query', required: true, schema: { type: 'string' } }], responses: { '302': { description: 'Redirects to /status?banner=unsubscribed' } } },
-    },
     '/status/incidents': {
       get: { tags: ['System'], summary: 'Open incidents and the last 30 days of resolved ones (public)', responses: { '200': { description: 'active and recent incidents, each with its updates' } } },
     },

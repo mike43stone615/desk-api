@@ -755,7 +755,7 @@ describe('business membership invites', () => {
     expect(JSON.parse(invitedBusinesses.body).businesses).toHaveLength(0);
   });
 
-  it('sends a notification email to the invited user, with the inviter and business name in the body', async () => {
+  it('sends a notification email to the invited user, with the business name in the body', async () => {
     fakeDb.businesses.clear();
     fakeDb.memberships.clear();
     const businessId = await createOwnedBusiness();
@@ -783,7 +783,7 @@ describe('business membership invites', () => {
     const sentBody = JSON.parse(fetchSpy.mock.calls[0][1]!.body as string);
     expect(sentBody.to).toEqual([invitedEmail]);
     expect(sentBody.html).toContain('Acme Invites Co');
-    expect(sentBody.html).toContain('owner@example.com');
+    expect(sentBody.html).toContain('You have been added to Acme Invites Co on Desk Business.');
     fetchSpy.mockRestore();
   });
 

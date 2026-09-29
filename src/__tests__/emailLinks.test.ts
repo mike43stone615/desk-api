@@ -35,14 +35,14 @@ describe('emailed links', () => {
 });
 
 describe('the security-notice email', () => {
-  it('drops the "review your account activity" button when told to', async () => {
-    const html = await sentHtml(() => sendSecurityNoticeEmail(config, 'a@example.com', 'Your password was reset', 'The password for your Desk account was reset.', 'req-5', false));
-    expect(html).toContain('The password for your Desk account was reset.');
-    expect(html).not.toContain('Review your account activity');
-    expect(html).not.toContain('/account/sessions');
+  it('drops the "Sign in" button when told to', async () => {
+    const html = await sentHtml(() => sendSecurityNoticeEmail(config, 'a@example.com', 'Your Desk account was deleted', 'Your Desk account has been permanently deleted.', 'req-5', { showAction: false }));
+    expect(html).toContain('Your Desk account has been permanently deleted.');
+    expect(html).not.toContain('>Sign in<');
   });
-  it('keeps the button by default', async () => {
-    const html = await sentHtml(() => sendSecurityNoticeEmail(config, 'a@example.com', 'Your password was changed', 'The password for your Desk account was changed.', 'req-6'));
-    expect(html).toContain('Review your account activity');
+  it('keeps the button by default, pointed at the given URL', async () => {
+    const html = await sentHtml(() => sendSecurityNoticeEmail(config, 'a@example.com', 'Your password was changed', 'The password for your Desk account was changed.', 'req-6', { actionUrl: 'https://app.example.com/account/sessions' }));
+    expect(html).toContain('>Sign in<');
+    expect(html).toContain('https://app.example.com/account/sessions');
   });
 });

@@ -56,6 +56,7 @@ registerRoute('/developer', async (app) => {
     loadError: null,
     services: [],
     keys: [],
+    sharedKeys: [], // keys other people have shared with this account (pending and accepted) — see SharedKeySummary
     label: '',
     selected: new Set(),
     isCreating: false,
@@ -67,9 +68,13 @@ registerRoute('/developer', async (app) => {
     expiresInDays: 0,
     detailFor: null, // the id of the key whose usage/settings popup is open, or null
     details: {}, // key id -> { loading, error, usage }
+    keyShares: {}, // key id -> { loading, error, shares } — owner-only, who the key is shared with
+    shareEmail: '',
+    shareError: null,
+    shareBusy: false,
     selectedDay: null, // the day (YYYY-MM-DD) picked by clicking a chart bar in the open detail popup, or null
     addServiceFor: null, // the id of the key whose "add an API" popup is open, or null
-    busyKeys: new Set(), // key ids with a change in flight
+    busyKeys: new Set(), // key or share ids with a change in flight
     confirmRevoke: null,
     isRevoking: false,
     confirmRotate: null,
@@ -88,9 +93,10 @@ registerRoute('/developer', async (app) => {
     s.loadError = null;
     render();
     try {
-      const [catalog, list] = await Promise.all([api('/gateway/services'), api('/gateway/api-keys')]);
+      const [catalog, list, shared] = await Promise.all([api('/gateway/services'), api('/gateway/api-keys'), api('/gateway/shared-keys')]);
       s.services = catalog.services || [];
       s.keys = list.apiKeys || [];
+      s.sharedKeys = shared.sharedKeys || [];
     } catch (err) {
       reportHandledException(err, 'loadApiLibrary');
       s.loadError = friendlyError(err, 'We could not load your API keys.');
@@ -213,10 +219,29 @@ registerRoute('/developer', async (app) => {
     if (isCurrent()) render();
   }
 
+  async function loadShares(id) {
+    s.keyShares[id] = { loading: true, error: null, shares: [] };
+    render();
+    try {
+      const res = await api(`/gateway/api-keys/${encodeURIComponent(id)}/shares`);
+      s.keyShares[id] = { loading: false, error: null, shares: res.shares || [] };
+    } catch (err) {
+      reportHandledException(err, 'loadKeyShares');
+      s.keyShares[id] = { loading: false, error: friendlyError(err, 'We could not load who this is shared with.'), shares: [] };
+    }
+    if (isCurrent()) render();
+  }
+
   function openDetails(id) {
     s.detailFor = id;
     s.selectedDay = null;
-    if (!s.details[id] || s.details[id].error) loadUsage(id); else render();
+    s.shareEmail = '';
+    s.shareError = null;
+    const needsUsage = !s.details[id] || s.details[id].error;
+    if (needsUsage) loadUsage(id);
+    const isOwner = s.keys.some((k) => k.id === id);
+    if (isOwner && (!s.keyShares[id] || s.keyShares[id].error)) loadShares(id);
+    if (!needsUsage) render();
   }
 
   async function changeKey(id, what, fn, failText) {
@@ -244,6 +269,86 @@ registerRoute('/developer', async (app) => {
     if (res && res.apiKey) replaceKey(res.apiKey); else replaceKey({ id: k.id, services: (k.services || []).filter((x) => x !== service) });
     toast(`${serviceName(service)} removed from the key.`);
   }, 'Could not remove that API.');
+
+  // ── sharing a key with one other person at a time ─────────────────────────────────────────────────────────────
+  async function submitShare(e) {
+    e.preventDefault();
+    const keyId = e.currentTarget.dataset.shareKey;
+    const email = s.shareEmail.trim();
+    if (!email) return;
+    s.shareBusy = true;
+    s.shareError = null;
+    render();
+    try {
+      const res = await api(`/gateway/api-keys/${encodeURIComponent(keyId)}/shares`, { method: 'POST', body: { email } });
+      const cur = s.keyShares[keyId] || { loading: false, error: null, shares: [] };
+      s.keyShares[keyId] = { ...cur, shares: [...cur.shares, res.share] };
+      s.shareEmail = '';
+      toast(`Invited ${email}.`);
+    } catch (err) {
+      reportHandledException(err, 'shareApiKey');
+      s.shareError = friendlyError(err, 'Could not share that key. Please try again.');
+    } finally {
+      s.shareBusy = false;
+      if (isCurrent()) render();
+    }
+  }
+
+  async function removeShareAction(keyId, shareId) {
+    if (s.busyKeys.has(shareId)) return;
+    s.busyKeys.add(shareId); render();
+    try {
+      await api(`/gateway/api-keys/${encodeURIComponent(keyId)}/shares/${encodeURIComponent(shareId)}`, { method: 'DELETE' });
+      const cur = s.keyShares[keyId];
+      if (cur) s.keyShares[keyId] = { ...cur, shares: cur.shares.filter((x) => x.id !== shareId) };
+      toast('Removed.');
+    } catch (err) {
+      reportHandledException(err, 'removeKeyShare');
+      toast(friendlyError(err, 'Could not remove that share. Please try again.'), true);
+    } finally {
+      s.busyKeys.delete(shareId);
+      if (isCurrent()) render();
+    }
+  }
+
+  async function acceptShareAction(shareId) {
+    if (s.busyKeys.has(shareId)) return;
+    s.busyKeys.add(shareId); render();
+    try {
+      await api(`/gateway/shares/${encodeURIComponent(shareId)}/accept`, { method: 'POST', body: {} });
+      const res = await api('/gateway/shared-keys');
+      s.sharedKeys = res.sharedKeys || [];
+      toast('Key accepted.');
+    } catch (err) {
+      reportHandledException(err, 'acceptKeyShare');
+      toast(friendlyError(err, 'Could not accept that invitation. Please try again.'), true);
+    } finally {
+      s.busyKeys.delete(shareId);
+      if (isCurrent()) render();
+    }
+  }
+
+  async function declineShareAction(shareId) {
+    if (s.busyKeys.has(shareId)) return;
+    s.busyKeys.add(shareId); render();
+    try {
+      await api(`/gateway/shares/${encodeURIComponent(shareId)}`, { method: 'DELETE' });
+      s.sharedKeys = s.sharedKeys.filter((k) => k.shareId !== shareId);
+      toast('Declined.');
+    } catch (err) {
+      reportHandledException(err, 'declineKeyShare');
+      toast(friendlyError(err, 'Could not decline that invitation. Please try again.'), true);
+    } finally {
+      s.busyKeys.delete(shareId);
+      if (isCurrent()) render();
+    }
+  }
+
+  function personLabel(p) {
+    if (!p) return 'someone whose account has since been removed';
+    const name = [p.firstName, p.lastName].filter(Boolean).join(' ').trim();
+    return name ? `${name} (${p.email})` : p.email;
+  }
 
   async function copyRevealedKey() {
     const input = document.getElementById('reveal-input');
@@ -355,7 +460,7 @@ registerRoute('/developer', async (app) => {
         ${barChartSvg(filled, 'calls', 'calls-bar')}
         ${barChartSvg(filled, 'errors', 'errors-bar')}
       </div>
-      ${picked ? `<div class="biz-sub" style="margin-top:var(--sp-sm);">${esc(picked.day)} — ${picked.calls} ${picked.calls === 1 ? 'call' : 'calls'}, ${picked.errors} ${picked.errors === 1 ? 'error' : 'errors'}${d.usage.sharedWithTeam ? ' (shared with the team)' : ''}</div>` : ''}
+      ${picked ? `<div class="biz-sub" style="margin-top:var(--sp-sm);">${esc(picked.day)} — ${picked.calls} ${picked.calls === 1 ? 'call' : 'calls'}, ${picked.errors} ${picked.errors === 1 ? 'error' : 'errors'}</div>` : ''}
     `;
   }
 
@@ -394,19 +499,43 @@ registerRoute('/developer', async (app) => {
     `;
   }
 
-  function detailModalHtml(k) {
+  function sharingHtml(k) {
+    const d = s.keyShares[k.id];
+    return `
+      <div class="field-header"><label>Shared with</label></div>
+      ${!d || d.loading ? `<div class="biz-sub">${spinnerBtn(true, '', { dark: true })}</div>`
+        : d.error ? `<div class="biz-sub">${esc(d.error)} <button type="button" class="btn-link" data-retry-shares="${esc(k.id)}">Try again</button></div>`
+        : `<div class="biz-chips">
+            ${d.shares.length === 0 ? '<span class="biz-sub">Not shared with anyone yet.</span>' : d.shares.map((sh) => `
+              <span class="meta-chip">${esc(personLabel(sh.sharedWith))}${sh.acceptedAt ? '' : ' (pending)'} <button type="button" class="chip-x" data-remove-share="${esc(k.id)}::${esc(sh.id)}" aria-label="Remove ${esc(personLabel(sh.sharedWith))} from ${esc(k.label)}" ${s.busyKeys.has(sh.id) ? 'disabled' : ''}>✕</button></span>
+            `).join('')}
+          </div>`}
+      <form id="share-form" data-share-key="${esc(k.id)}" style="display:flex;gap:var(--sp-sm);align-items:flex-start;margin-top:var(--sp-sm);">
+        <div class="field-float" style="flex:1;margin:0;">
+          <label>Invite by email</label>
+          <input name="shareEmail" placeholder=" " value="${esc(s.shareEmail)}" autocomplete="off" />
+        </div>
+        <button type="submit" class="btn btn-sm" ${s.shareBusy ? 'disabled' : ''}>${s.shareBusy ? spinnerBtn(true, '') : '+ Invite'}</button>
+      </form>
+      ${s.shareError ? `<div class="error-text">${esc(s.shareError)}</div>` : ''}
+    `;
+  }
+
+  function detailModalHtml(k, isOwner) {
     return `
       <div class="modal-backdrop" id="detail-modal-backdrop">
         <div class="modal modal-wide" role="dialog" aria-modal="true" aria-labelledby="detail-title">
           <h2 id="detail-title">${esc(k.label)}</h2>
+          ${!isOwner ? `<p class="biz-sub" style="margin-bottom:var(--sp-md);">Shared by ${esc(personLabel(k.owner))}. You can see its usage; only the owner can change it.</p>` : ''}
           ${chartsHtml(k)}
-          <div style="margin-top:var(--sp-lg);">${apisHtml(k)}</div>
+          ${isOwner ? `<div style="margin-top:var(--sp-lg);">${apisHtml(k)}</div>` : ''}
+          ${isOwner ? `<div style="margin-top:var(--sp-lg);">${sharingHtml(k)}</div>` : ''}
           <div style="display:flex;justify-content:flex-end;margin-top:var(--sp-xl);">
             <button type="button" class="btn" id="close-detail-btn">Close</button>
           </div>
         </div>
       </div>
-      ${s.addServiceFor === k.id ? addApiModalHtml(k) : ''}
+      ${isOwner && s.addServiceFor === k.id ? addApiModalHtml(k) : ''}
     `;
   }
 
@@ -433,6 +562,35 @@ registerRoute('/developer', async (app) => {
           <button type="button" class="btn btn-sm btn-suspend-toggle ${k.suspended ? 'btn-warn' : ''}" data-suspend="${esc(k.id)}" data-off="${k.suspended ? '0' : '1'}" ${busy ? 'disabled' : ''} aria-label="${k.suspended ? 'Switch on' : 'Switch off'} key ${esc(k.label)}">${k.suspended ? 'Switch on' : 'Switch off'}</button>
           <button type="button" class="btn btn-sm" data-rotate="${esc(k.id)}" ${busy ? 'disabled' : ''} aria-label="Rotate key ${esc(k.label)}">Rotate</button>
           <button type="button" class="btn btn-sm" data-revoke="${esc(k.id)}" aria-label="Revoke key ${esc(k.label)}">Revoke</button>
+        </div>
+      </div>
+    `;
+  }
+
+  function sharedKeyCardHtml(k) {
+    const pending = !k.shareAcceptedAt;
+    const busy = s.busyKeys.has(k.shareId);
+    const subParts = [`${k.keyPrefix}…`];
+    if (k.lastUsedAt) subParts.push(`Last used ${formatDate(k.lastUsedAt)}`);
+    const info = `Shared by ${personLabel(k.owner)} · Created ${formatDate(k.createdAt)} · ${expiryText(k)}`;
+    return `
+      <div class="state-card key-card">
+        <div class="biz-icon neutral">${icon('key')}</div>
+        <div class="biz-body">
+          <div class="biz-title-row"><div class="biz-title">${esc(k.label)}</div>${infoIcon(info)}</div>
+          <div class="biz-sub">${subParts.map((p) => esc(p)).join(' · ')}${pending ? ' · Invitation pending' : ''}</div>
+          <div class="biz-chips">
+            ${k.sandbox ? '<span class="meta-chip" title="Fixed sample answers; nothing real is called, counted or billed">Sandbox</span>' : ''}
+            ${(k.services || []).map((id) => `<span class="meta-chip">${esc(serviceName(id))}</span>`).join('')}
+          </div>
+        </div>
+        <div class="key-actions">
+          ${pending ? `
+            <button type="button" class="btn btn-sm btn-primary" data-accept-share="${esc(k.shareId)}" ${busy ? 'disabled' : ''} aria-label="Accept the key ${esc(k.label)}">Accept</button>
+            <button type="button" class="btn btn-sm" data-decline-share="${esc(k.shareId)}" ${busy ? 'disabled' : ''} aria-label="Decline the key ${esc(k.label)}">Decline</button>
+          ` : `
+            <button type="button" class="btn btn-sm" data-details="${esc(k.id)}" aria-label="Show usage for ${esc(k.label)}">Details</button>
+          `}
         </div>
       </div>
     `;
@@ -484,10 +642,18 @@ registerRoute('/developer', async (app) => {
             ${s.keys.length
               ? s.keys.map(keyCardHtml).join('')
               : `<div class="state-card"><div class="biz-icon neutral">${icon('key')}</div><div class="biz-body"><div class="biz-title">No API keys yet</div></div></div>`}
+            ${s.sharedKeys.length ? `
+              <h2 class="biz-section-title" style="margin-top:var(--sp-xl);">Key shared with me</h2>
+              ${s.sharedKeys.map(sharedKeyCardHtml).join('')}
+            ` : ''}
           </div>
         </div>
       `;
     }
+
+    const detail = s.detailFor && (s.keys.find((k) => k.id === s.detailFor) ? { key: s.keys.find((k) => k.id === s.detailFor), isOwner: true }
+      : s.sharedKeys.find((k) => k.id === s.detailFor) ? { key: s.sharedKeys.find((k) => k.id === s.detailFor), isOwner: false }
+      : null);
 
     app.innerHTML = `
       <div class="page">
@@ -501,7 +667,7 @@ registerRoute('/developer', async (app) => {
         ${body}
       </div>
       ${s.revealed ? revealModalHtml() : ''}
-      ${s.detailFor && s.keys.find((k) => k.id === s.detailFor) ? detailModalHtml(s.keys.find((k) => k.id === s.detailFor)) : ''}
+      ${detail ? detailModalHtml(detail.key, detail.isOwner) : ''}
       ${s.confirmRevoke ? `
         <div class="modal-backdrop" id="revoke-modal-backdrop">
           <div class="modal" role="dialog" aria-modal="true" aria-labelledby="revoke-title">
@@ -558,6 +724,18 @@ registerRoute('/developer', async (app) => {
     const addApiBackdrop = document.getElementById('add-api-modal-backdrop');
     if (addApiBackdrop) addApiBackdrop.addEventListener('click', (e) => { if (e.target === addApiBackdrop) { s.addServiceFor = null; render(); } });
     app.querySelectorAll('.chart-bar').forEach((bar) => bar.addEventListener('click', () => { s.selectedDay = bar.dataset.day === s.selectedDay ? null : bar.dataset.day; render(); }));
+
+    app.querySelectorAll('[data-retry-shares]').forEach((b) => b.addEventListener('click', () => loadShares(b.dataset.retryShares)));
+    app.querySelectorAll('[data-remove-share]').forEach((b) => b.addEventListener('click', () => { const [keyId, shareId] = b.dataset.removeShare.split('::'); removeShareAction(keyId, shareId); }));
+    app.querySelectorAll('[data-accept-share]').forEach((b) => b.addEventListener('click', () => acceptShareAction(b.dataset.acceptShare)));
+    app.querySelectorAll('[data-decline-share]').forEach((b) => b.addEventListener('click', () => declineShareAction(b.dataset.declineShare)));
+    const shareForm = document.getElementById('share-form');
+    if (shareForm) {
+      shareForm.addEventListener('submit', submitShare);
+      submitOnEnter(shareForm);
+      const emailInput = shareForm.querySelector('input[name="shareEmail"]');
+      if (emailInput) emailInput.addEventListener('input', (e) => { s.shareEmail = e.target.value; });
+    }
 
     const copy = document.getElementById('copy-key-btn');
     if (copy) copy.addEventListener('click', copyRevealedKey);

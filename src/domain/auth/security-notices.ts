@@ -3,8 +3,8 @@
 import type { FastifyRequest } from 'fastify';
 import { config } from '../../config';
 import { pool } from '../../db';
-import { getClientIp } from '../../middleware/api-protection';
-import { sendSecurityNoticeEmail } from '../../infrastructure/email/resend';
+import { sendSecurityNoticeEmail, libraryBase } from '../../infrastructure/email/resend';
+import { emailLinkBase } from '../email/link-base';
 
 const LOOKBACK_DAYS = 90;
 
@@ -38,35 +38,48 @@ export async function isNewSignInDevice(userId: string, ip: string, userAgent: s
 
 export type SecurityNotice = 'new_sign_in' | 'password_changed' | 'password_reset' | 'api_key_created' | 'api_key_rotated' | 'account_deleted' | 'two_factor_enabled' | 'two_factor_disabled';
 
-function describe(kind: SecurityNotice, request: FastifyRequest, extra: string | undefined): { title: string; body: string; showAction?: boolean } {
-  const ua = request.headers['user-agent'];
-  const where = `from ${getClientIp(request)}${typeof ua === 'string' && ua ? ` using ${ua.slice(0, 80)}` : ''}`;
+function describe(kind: SecurityNotice, extra: string | undefined): { title: string; body: string; showAction?: boolean; note?: string } {
   switch (kind) {
     case 'new_sign_in':
-      // No raw IP/user-agent in the body: "a browser or network we haven't seen" already says why this was sent,
-      // without reading like a server log.
       return { title: 'New sign-in to your account', body: 'Your Desk account was just signed in from a browser or network we have not seen for you recently.' };
     case 'password_changed':
-      return { title: 'Your password was changed', body: `The password for your Desk account was changed ${where}. Your other devices were signed out.` };
+      return { title: 'Your password was changed', body: 'The password for your Desk account was changed. Your other devices were signed out.' };
     case 'password_reset':
-      // Deliberately no IP/browser detail and no "review your account activity" button here — the person just used
-      // the emailed reset link themselves, so that detail is noise rather than a signal worth surfacing.
-      return { title: 'Your password was reset', body: 'The password for your Desk account was reset.', showAction: false };
+      return { title: 'Your password was reset', body: 'The password for your Desk account was reset.' };
     case 'account_deleted':
-      return { title: 'Your Desk account was deleted', body: `Your Desk account was deleted ${where}. Your sessions, API keys and the businesses only you owned were removed. If this was not you, reply to this email straight away.` };
+      // No button (the account is gone), and no accurate "reset your password" advice can follow — there is nothing
+      // left to sign into.
+      return {
+        title: 'Your Desk account was deleted',
+        body: 'Your Desk account has been permanently deleted, along with your sessions, API keys, and the businesses only you owned.',
+        showAction: false,
+        note: 'If this was not you, contact support right away.',
+      };
     case 'api_key_created':
       // Purely informational — there's nothing to act on unless the person signs in anyway, so no button either.
       return { title: 'A new API key was created', body: `An API key${extra ? ` named "${extra}"` : ''} was created for your Desk account.`, showAction: false };
     case 'api_key_rotated':
       return { title: 'An API key was rotated', body: `An API key${extra ? ` named "${extra}"` : ''} was given a new secret for your Desk account. Its old secret stopped working immediately.`, showAction: false };
     case 'two_factor_enabled':
-      return { title: 'Two-factor authentication turned on', body: `Two-factor authentication was turned on for your Desk account ${where}. A code from your authenticator app is now needed to sign in.` };
+      return { title: 'Two-factor authentication turned on', body: 'Two-factor authentication was turned on for your Desk account. A code from your authenticator app is now needed to sign in.' };
     case 'two_factor_disabled':
-      return { title: 'Two-factor authentication turned off', body: `Two-factor authentication was turned off for your Desk account ${where}. Signing in now needs only your password. If this was not you, turn it back on and change your password right away.` };
+      return {
+        title: 'Two-factor authentication turned off',
+        body: 'Two-factor authentication was turned off for your Desk account. Signing in now needs only your password.',
+        note: 'If this was not you, turn two-factor authentication back on and change your password right away, and sign out all devices from the page above. You cannot unsubscribe from security notices.',
+      };
   }
 }
 
+/** Where the "Sign in" button (and, for a buttonless notice, its logo) should point. API keys only ever come from
+    the API Library, whichever app the triggering request's Origin says — everything else follows the request. */
+function actionUrlFor(kind: SecurityNotice, request: FastifyRequest): string {
+  if (kind === 'api_key_created' || kind === 'api_key_rotated') return `${libraryBase()}/login`;
+  const base = emailLinkBase(request);
+  return base === config.appBaseUrl ? `${base}/account/sessions` : `${base}/login`;
+}
+
 export function notifySecurityEvent(request: FastifyRequest, email: string, kind: SecurityNotice, extra?: string): void {
-  const { title, body, showAction } = describe(kind, request, extra);
-  void sendSecurityNoticeEmail(config, email, title, body, request.id, showAction ?? true).catch(() => {});
+  const { title, body, showAction, note } = describe(kind, extra);
+  void sendSecurityNoticeEmail(config, email, title, body, request.id, { showAction, actionUrl: actionUrlFor(kind, request), note }).catch(() => {});
 }

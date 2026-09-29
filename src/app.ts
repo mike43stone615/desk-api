@@ -120,8 +120,6 @@ import { createWebhookHandler, deleteWebhookHandler, listWebhookEventsHandler, l
 import { authorizeDecisionHandler, authorizeHandler, authorizeInfoHandler, createClientHandler, deleteClientHandler, discoveryHandler, listAuthorizationsHandler, listClientsHandler, registerOAuthTokenRoutes, revokeAuthorizationHandler } from './routes/oauth';
 import { graphqlHandler } from './routes/graphql';
 import { changelogAtomHandler, changelogHandler, incidentsHandler, openIncidentHandler, updateIncidentHandler } from './routes/statusInfo';
-import { subscribe as subscribeToStatus, confirm as confirmStatusSubscription, unsubscribe as unsubscribeFromStatus } from './domain/status/subscribers';
-import { sendStatusSubscribeConfirmEmail } from './infrastructure/email/resend';
 import { listIncidents } from './domain/status/incidents';
 import { invoicesHandler, listPlansHandler, subscriptionHandler } from './routes/billing';
 import { adminAccessAddHandler, adminAccessListHandler, adminAccessRemoveHandler, adminMeHandler } from './routes/adminAccess';
@@ -432,43 +430,11 @@ export async function buildApp(options: { logStream?: { write: (line: string) =>
       if (base === '' && typeof req.headers.accept === 'string' && req.headers.accept.includes('text/html')) {
         reply.header('Content-Type', 'text/html; charset=utf-8').header('Cache-Control', 'no-store');
         applyHtmlCsp(reply, "default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'");
-        const banner = (req.query as { banner?: string }).banner;
-        const validBanner = banner === 'subscribed' || banner === 'confirmed' || banner === 'unsubscribed' || banner === 'subscribe_error' ? banner : undefined;
-        return reply.status(view.status === 'down' ? 503 : 200).send(statusHtml(view, validBanner));
+        return reply.status(view.status === 'down' ? 503 : 200).send(statusHtml(view));
       }
       reply.header('Cache-Control', 'no-store');
       return reply.status(view.status === 'down' ? 503 : 200).send(view);
     });
-    if (base === '') {
-      // A plain HTML <form> posts application/x-www-form-urlencoded, which Fastify does not parse by default; scoped here
-      // (like registerOAuthTokenRoutes) so nothing else in the API is affected.
-      void app.register(async (scope) => {
-        scope.addContentTypeParser('application/x-www-form-urlencoded', { parseAs: 'string', bodyLimit: 2_048 }, (_req, body, done) => {
-          try { done(null, Object.fromEntries(new URLSearchParams(body as string))); } catch (err) { done(err as Error); }
-        });
-        scope.post('/status/subscribe', { bodyLimit: 2_048 }, async (req, reply) => {
-          const body = req.body as { email?: string } | undefined;
-          const email = typeof body?.email === 'string' ? body.email.trim() : '';
-          if (!email || email.length > 254 || !/.+@.+\..+/.test(email)) return reply.redirect('/status?banner=subscribe_error');
-          const { confirmToken } = await subscribeToStatus(email);
-          if (confirmToken) await sendStatusSubscribeConfirmEmail(config, email, confirmToken);
-          return reply.redirect('/status?banner=subscribed');
-        });
-      });
-      app.get('/status/subscribe/confirm', async (req, reply) => {
-        const token = (req.query as { token?: string }).token;
-        // The confirmation e-mail's link carries "<confirmToken>.<unsubscribeToken>" (see subscribers.subscribe) so the
-        // route only needs one query param; only the part before the dot is the actual confirm token.
-        const confirmToken = typeof token === 'string' ? token.split('.')[0] : undefined;
-        const ok = typeof confirmToken === 'string' && confirmToken && (await confirmStatusSubscription(confirmToken));
-        return reply.redirect(ok ? '/status?banner=confirmed' : '/status?banner=subscribe_error');
-      });
-      app.get('/status/subscribe/unsubscribe', async (req, reply) => {
-        const token = (req.query as { token?: string }).token;
-        if (typeof token === 'string' && token) await unsubscribeFromStatus(token);
-        return reply.redirect('/status?banner=unsubscribed');
-      });
-    }
     app.get(`${base}/status/incidents`, incidentsHandler);
     app.get(`${base}/changelog`, changelogHandler);
     app.get(`${base}/changelog.atom`, changelogAtomHandler);

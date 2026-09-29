@@ -455,7 +455,7 @@ export async function inviteBusinessMemberHandler(request: FastifyRequest, reply
 
   // Best-effort: sendEmail already swallows its own failures (logged, not
   // thrown) so a Resend outage can't block the invite itself.
-  await sendBusinessInviteEmail(config, email, businessName, user.email, request.id);
+  await sendBusinessInviteEmail(config, email, businessName, request.id);
 
   return reply.send({ ok: true });
 }
