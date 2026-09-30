@@ -72,7 +72,6 @@ registerRoute('/developer', async (app) => {
     shareEmail: '',
     shareError: null,
     shareBusy: false,
-    selectedDay: null, // the day (YYYY-MM-DD) picked by clicking a chart bar in the open detail popup, or null
     addServiceFor: null, // the id of the key whose "add an API" popup is open, or null
     busyKeys: new Set(), // key or share ids with a change in flight
     confirmRevoke: null,
@@ -234,7 +233,6 @@ registerRoute('/developer', async (app) => {
 
   function openDetails(id) {
     s.detailFor = id;
-    s.selectedDay = null;
     s.shareEmail = '';
     s.shareError = null;
     const needsUsage = !s.details[id] || s.details[id].error;
@@ -428,10 +426,13 @@ registerRoute('/developer', async (app) => {
     return d.getTime() < Date.now() ? `Expired ${formatDate(k.expiresAt)}` : `Expires ${formatDate(k.expiresAt)}`;
   }
 
-  /** One SVG bar per day, oldest to last on the right; a native <title> gives the per-bar hover readout. Clicking a
-      bar (there is no per-call log to drill into — see docs/API-LIMITS.md) just picks that day's totals below.
-      The axes are plain HTML around the SVG (see chartAxesHtml), not SVG text: the chart itself still stretches
-      freely to fill its column (preserveAspectRatio="none"), which would distort any text drawn inside it. */
+  /** One SVG bar per day, oldest to last on the right. Hovering a bar (there is no per-call log to drill into — see
+      docs/API-LIMITS.md) shows a themed tooltip via JS (see the chart-bar mouseenter/mouseleave binding below) —
+      no native <title>, to match the rest of the app's hoverable "i" badges rather than an OS tooltip. Each bar
+      carries the day's calls and errors as data attributes so the tooltip and the same-day bar on the other chart
+      can be found without looking anything up again. The axes are plain HTML around the SVG (see chartAxesHtml),
+      not SVG text: the chart itself still stretches freely to fill its column (preserveAspectRatio="none"), which
+      would distort any text drawn inside it. */
   function barChartSvg(filled, key, cssClass, max) {
     const w = 600, h = 70;
     const barW = filled.length ? w / filled.length : w;
@@ -440,8 +441,7 @@ registerRoute('/developer', async (app) => {
       const barH = val > 0 ? Math.max(2, Math.round((val / max) * (h - 4))) : 0;
       const x = (i * barW).toFixed(1);
       const y = h - barH;
-      const label = `${d.day}: ${val} ${key === 'calls' ? (val === 1 ? 'call' : 'calls') : (val === 1 ? 'error' : 'errors')}`;
-      return `<rect class="chart-bar ${cssClass}${d.day === s.selectedDay ? ' selected' : ''}" data-day="${esc(d.day)}" x="${x}" y="${y}" width="${Math.max(0, barW - 1).toFixed(1)}" height="${barH || 1}" rx="1"><title>${esc(label)}</title></rect>`;
+      return `<rect class="chart-bar ${cssClass}" data-day="${esc(d.day)}" data-calls="${d.calls}" data-errors="${d.errors}" x="${x}" y="${y}" width="${Math.max(0, barW - 1).toFixed(1)}" height="${barH || 1}" rx="1"></rect>`;
     }).join('');
     return `<svg class="usage-chart" viewBox="0 0 ${w} ${h}" preserveAspectRatio="none" role="img" aria-label="${key} per day, last ${filled.length} days">${bars}</svg>`;
   }
@@ -458,6 +458,7 @@ registerRoute('/developer', async (app) => {
       <div class="chart-plot">
         <div class="chart-y-axis"><span>${max}</span><span>0</span></div>
         ${barChartSvg(filled, key, cssClass, max)}
+        <div class="chart-tooltip" role="tooltip"></div>
       </div>
       <div class="chart-x-axis">${xLabels.map((day) => `<span>${esc(shortDate(day))}</span>`).join('')}</div>
     `;
@@ -468,7 +469,6 @@ registerRoute('/developer', async (app) => {
     if (!d || d.loading) return `<div class="empty-state">${spinnerBtn(true, '', { dark: true })}</div>`;
     if (d.error) return `<div class="biz-sub">${esc(d.error)} <button type="button" class="btn-link" data-retry-usage="${esc(k.id)}">Try again</button></div>`;
     const filled = fillDailyRange(d.usage.daily, d.usage.days);
-    const picked = s.selectedDay && filled.find((x) => x.day === s.selectedDay);
     return `
       <div class="chart-legend">
         <span class="chart-legend-item"><span class="chart-legend-dot calls-bar"></span>Calls, last ${d.usage.days} days</span>
@@ -478,7 +478,6 @@ registerRoute('/developer', async (app) => {
         <div class="chart-col">${chartAxesHtml(filled, 'calls', 'calls-bar', Math.max(1, ...filled.map((x) => x.calls)))}</div>
         <div class="chart-col">${chartAxesHtml(filled, 'errors', 'errors-bar', Math.max(1, ...filled.map((x) => x.errors)))}</div>
       </div>
-      ${picked ? `<div class="biz-sub" style="margin-top:var(--sp-sm);">${esc(picked.day)} — ${picked.calls} ${picked.calls === 1 ? 'call' : 'calls'}, ${picked.errors} ${picked.errors === 1 ? 'error' : 'errors'}</div>` : ''}
     `;
   }
 
@@ -741,7 +740,30 @@ registerRoute('/developer', async (app) => {
     if (closeAddApi) { closeAddApi.addEventListener('click', () => { s.addServiceFor = null; render(); }); closeAddApi.focus(); }
     const addApiBackdrop = document.getElementById('add-api-modal-backdrop');
     if (addApiBackdrop) addApiBackdrop.addEventListener('click', (e) => { if (e.target === addApiBackdrop) { s.addServiceFor = null; render(); } });
-    app.querySelectorAll('.chart-bar').forEach((bar) => bar.addEventListener('click', () => { s.selectedDay = bar.dataset.day === s.selectedDay ? null : bar.dataset.day; render(); }));
+    // Hovering a bar highlights it and the same day's bar on the other chart (calls <-> errors), and shows a
+    // themed tooltip with that day's totals — matching the info-icon hover pattern rather than a click/native
+    // title. Pure DOM manipulation, not render(): a full re-render per bar hovered would be needlessly heavy and
+    // would risk losing the browser's own :hover state mid-move.
+    app.querySelectorAll('.usage-charts-row').forEach((row) => {
+      row.querySelectorAll('.chart-bar').forEach((bar) => {
+        bar.addEventListener('mouseenter', () => {
+          const { day, calls, errors } = bar.dataset;
+          const sameDayBars = row.querySelectorAll(`.chart-bar[data-day="${CSS.escape(day)}"]`);
+          sameDayBars.forEach((b) => b.classList.add('hovered'));
+          const tooltip = bar.closest('.chart-plot').querySelector('.chart-tooltip');
+          const plotRect = tooltip.parentElement.getBoundingClientRect();
+          const barRect = bar.getBoundingClientRect();
+          tooltip.textContent = `${shortDate(day)} — ${calls} ${calls === '1' ? 'call' : 'calls'}, ${errors} ${errors === '1' ? 'error' : 'errors'}`;
+          tooltip.style.left = `${barRect.left - plotRect.left + barRect.width / 2}px`;
+          tooltip.classList.add('visible');
+        });
+        bar.addEventListener('mouseleave', () => {
+          const day = bar.dataset.day;
+          row.querySelectorAll(`.chart-bar[data-day="${CSS.escape(day)}"]`).forEach((b) => b.classList.remove('hovered'));
+          row.querySelectorAll('.chart-tooltip.visible').forEach((t) => t.classList.remove('visible'));
+        });
+      });
+    });
 
     app.querySelectorAll('[data-retry-shares]').forEach((b) => b.addEventListener('click', () => loadShares(b.dataset.retryShares)));
     app.querySelectorAll('[data-remove-share]').forEach((b) => b.addEventListener('click', () => { const [keyId, shareId] = b.dataset.removeShare.split('::'); removeShareAction(keyId, shareId); }));

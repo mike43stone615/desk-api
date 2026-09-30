@@ -445,6 +445,8 @@ input[type="password"]::-ms-reveal { display: none; }
    actions slot, the chip row (.biz-chips is otherwise scoped to .biz-card),
    the per-API checkbox rows, and the one-time key reveal. */
 .state-card .biz-chips { display: flex; gap: var(--sp-sm); flex-wrap: wrap; margin-top: var(--sp-xs); }
+/* The key-details modal's own "APIs enabled" row (apisHtml() in developer.js) isn't inside a .biz-card or .state-card. */
+.modal .biz-chips { display: flex; gap: var(--sp-sm); flex-wrap: wrap; margin-top: var(--sp-xs); }
 .key-card { margin-bottom: var(--sp-md); align-items: center; }
 .key-card > .btn { margin-left: auto; flex-shrink: 0; }
 /* On a narrow screen the text keeps a readable width and the buttons drop to their own line instead of squeezing it. */
@@ -709,8 +711,19 @@ table.admin-table td.admin-actions-cell { white-space: nowrap; }
 .chart-y-axis { flex-shrink: 0; width: 26px; display: flex; flex-direction: column; justify-content: space-between; text-align: right; font-size: .7rem; font-weight: 600; color: var(--ink-faint); font-variant-numeric: tabular-nums; padding: 2px 0; }
 .usage-chart { display: block; flex: 1; min-width: 0; height: 70px; }
 .chart-x-axis { display: flex; justify-content: space-between; margin-left: 34px; margin-top: var(--sp-2xs); font-size: .7rem; font-weight: 600; color: var(--ink-faint); }
-.chart-bar { cursor: pointer; }
+.chart-bar { cursor: default; }
 .chart-bar.calls-bar { fill: var(--accent); }
-.chart-bar.calls-bar:hover, .chart-bar.calls-bar.selected { fill: var(--accent-hover); }
+.chart-bar.calls-bar:hover, .chart-bar.calls-bar.hovered { fill: var(--accent-hover); }
 .chart-bar.errors-bar { fill: var(--error); }
-.chart-bar.errors-bar:hover, .chart-bar.errors-bar.selected { fill: #f87171; }
+.chart-bar.errors-bar:hover, .chart-bar.errors-bar.hovered { fill: #f87171; }
+/* A themed tooltip (matches .info-tooltip) instead of a native title, shown on hovering a bar — see the
+   mouseenter/mouseleave binding in pages/developer.js. Positioned by JS (left, in px, relative to .chart-plot,
+   which is the positioning parent) rather than CSS, since it must track whichever bar is hovered. */
+.chart-tooltip {
+  position: absolute; bottom: 100%; transform: translateX(-50%) translateY(-6px); z-index: 20;
+  width: max-content; max-width: 260px; background: var(--surface-2); border: 1px solid var(--line);
+  border-radius: var(--r-md); box-shadow: var(--shadow); padding: var(--sp-sm) var(--sp-md);
+  font-size: .78rem; font-weight: 500; line-height: 1.4; color: var(--ink-soft);
+  opacity: 0; pointer-events: none; transition: opacity 120ms ease, transform 120ms ease;
+}
+.chart-tooltip.visible { opacity: 1; transform: translateX(-50%) translateY(-10px); }
