@@ -122,7 +122,7 @@ describe('security emails', () => {
     await flush();
     expect(emailed.security.get(u.email)).toContain('Your password was changed');
     const detail = emailed.securityDetail.find((n) => n.to === u.email && n.title === 'Your password was changed');
-    expect(detail?.showAction).toBe(true);
+    expect(detail?.showAction).toBe(false);
   });
 
   it('a completed password reset emails the owner (the reset link alone proves nothing to them)', async () => {
@@ -132,10 +132,10 @@ describe('security emails', () => {
     expect((await app.inject({ method: 'POST', url: '/auth/password-reset/confirm', payload: { token, password: 'Reset!Pass123' } })).statusCode).toBe(200);
     await flush();
     expect(emailed.security.get(u.email)).toContain('Your password was reset');
-    // No IP/browser detail, but a "Sign in" button (origin-routed) is back, in case the reset was not really them.
+    // No IP/browser detail, and no button — just the "reset it again" advice, in case the reset was not really them.
     const detail = emailed.securityDetail.find((n) => n.to === u.email && n.title === 'Your password was reset');
     expect(detail?.body).toBe('The password for your Desk account was reset.');
-    expect(detail?.showAction).toBe(true);
+    expect(detail?.showAction).toBe(false);
     const t = tokenOf(await signIn(u.email, '203.0.113.5', 'me/1', 'Reset!Pass123'));
     await flush();
     expect((await activity(t)).map((e) => e.event)).toContain('password_reset_confirmed');

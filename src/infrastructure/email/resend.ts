@@ -79,8 +79,7 @@ export async function sendBusinessInviteEmail(
       body: `You have been added to ${businessName} on Desk Business.`,
       actionLabel: 'Sign in',
       actionUrl: signInUrl,
-      // Deliberately unchanged for now (pending clarification): this note still reads like it was reused from a
-      // security notice rather than written for this email.
+      showAction: false,
       note: 'If you were not expecting this, you can decline the invite once signed in, or ignore this email — declining removes your access.',
     }),
     requestId,

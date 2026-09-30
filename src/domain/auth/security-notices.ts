@@ -41,11 +41,26 @@ export type SecurityNotice = 'new_sign_in' | 'password_changed' | 'password_rese
 function describe(kind: SecurityNotice, extra: string | undefined): { title: string; body: string; showAction?: boolean; note?: string } {
   switch (kind) {
     case 'new_sign_in':
-      return { title: 'New sign-in to your account', body: 'Your Desk account was just signed in from a browser or network we have not seen for you recently.' };
+      return {
+        title: 'New sign-in to your account',
+        body: 'Your Desk account was just signed in from a browser or network we have not seen for you recently.',
+        showAction: false,
+        note: 'If this was not you, sign in and reset your password right away, then sign out all other devices from your account settings. You cannot unsubscribe from security notices.',
+      };
     case 'password_changed':
-      return { title: 'Your password was changed', body: 'The password for your Desk account was changed. Your other devices were signed out.' };
+      return {
+        title: 'Your password was changed',
+        body: 'The password for your Desk account was changed. Your other devices were signed out.',
+        showAction: false,
+        note: 'If this was not you, reset your password right away from the sign-in page. You cannot unsubscribe from security notices.',
+      };
     case 'password_reset':
-      return { title: 'Your password was reset', body: 'The password for your Desk account was reset.' };
+      return {
+        title: 'Your password was reset',
+        body: 'The password for your Desk account was reset.',
+        showAction: false,
+        note: 'If this was not you, reset your password again right away from the sign-in page, and consider what else the person may have accessed. You cannot unsubscribe from security notices.',
+      };
     case 'account_deleted':
       // No button (the account is gone), and no accurate "reset your password" advice can follow — there is nothing
       // left to sign into.
