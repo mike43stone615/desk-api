@@ -409,6 +409,7 @@ input[type="password"]::-ms-reveal { display: none; }
    which nearer ancestor actually establishes its position: absolute containing block. */
 .biz-title-row { display: flex; align-items: center; gap: var(--sp-xs); margin: 0 0 var(--sp-xs); }
 .biz-title-row .biz-title { margin: 0; min-width: 0; }
+.biz-title-row .info-icon { flex-shrink: 0; } /* a long title is cut short with "...", never the badge */
 /* The one card-subtitle style, shared by every card (.biz-card, .state-card,
    .create-biz-card, library rows, card section notes). Do not use .hint for a
    card's subtitle: it is smaller and lighter. */
@@ -481,6 +482,12 @@ input[type="password"]::-ms-reveal { display: none; }
 .modal-backdrop { position: fixed; inset: 0; background: var(--overlay); display: flex; align-items: center; justify-content: center; z-index: 50; }
 .modal { background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-xl); padding: var(--sp-2xl); width: 480px; max-width: 92vw; max-height: 86vh; overflow-y: auto; box-shadow: var(--shadow); }
 .modal h2 { margin-top: 0; font-size: 1.25rem; font-weight: 700; }
+/* One body-text and one button-row format for every pop-up (create/rotate key reveal, revoke, rotate, add an API,
+   webhooks, apps), so their text size, colour and spacing match exactly. */
+.modal .modal-text { margin: 0; color: var(--ink-faint); font-size: .85rem; font-weight: 500; line-height: 1.5; }
+.modal .modal-text + .modal-text, .modal .modal-text + .reveal-key, .modal .modal-text + .library-list, .modal .modal-text + .deliveries-body,
+.modal .modal-text + .chart-legend, .modal .field-header + .reveal-key { margin-top: var(--sp-lg); }
+.modal-actions { display: flex; justify-content: flex-end; gap: var(--sp-sm); margin-top: var(--sp-xl); }
 
 /* ---- Setup wizard ---- */
 .wizard-shell { display: grid; grid-template-columns: 260px 1fr; gap: var(--sp-2xl); align-items: start; }
@@ -687,6 +694,8 @@ table.admin-table td.admin-actions-cell { white-space: nowrap; }
 .info-icon { position: relative; display: inline-flex; vertical-align: middle; color: var(--ink-faint); cursor: default; }
 .info-icon:hover, .info-icon:focus-visible { color: var(--ink-soft); outline: none; }
 .info-icon.corner { position: absolute; top: var(--sp-md); right: var(--sp-md); }
+/* For a badge near the left edge (e.g. beside a left-column heading), where opening leftwards would be cut off. */
+.info-icon.open-right .info-tooltip { right: auto; left: 0; }
 .info-tooltip {
   position: absolute; top: 100%; right: 0; margin-top: var(--sp-xs); z-index: 20; width: max-content; max-width: 260px;
   background: var(--surface-2); border: 1px solid var(--line); border-radius: var(--r-md); box-shadow: var(--shadow);
@@ -727,3 +736,23 @@ table.admin-table td.admin-actions-cell { white-space: nowrap; }
   opacity: 0; pointer-events: none; transition: opacity 120ms ease, transform 120ms ease;
 }
 .chart-tooltip.visible { opacity: 1; transform: translateX(-50%) translateY(-10px); }
+
+/* A heading with an info badge right after it (Webhooks: "Add an endpoint"). */
+.section-title-row { margin-bottom: var(--sp-md); }
+.section-title-row .biz-section-title { margin: 0; }
+
+/* Webhooks: the Deliveries pop-up table (pages/webhooks.js). */
+.deliveries-body { overflow-x: auto; }
+.deliveries-table td { vertical-align: middle; }
+.deliveries-table .progress-cell { min-width: 140px; }
+.delivery-progress { height: 8px; border-radius: var(--r-pill); background: var(--line); overflow: hidden; }
+.delivery-fill { height: 100%; width: 100%; border-radius: inherit; background: var(--accent); }
+.delivery-progress.done .delivery-fill { background: var(--success); }
+.delivery-progress.failed .delivery-fill { background: var(--error); }
+/* Fills from how far the current wait has got (--from) to full, over the time left until the next try. */
+.delivery-fill.filling { width: var(--from); animation-name: delivery-fill; animation-timing-function: linear; animation-fill-mode: forwards; }
+@keyframes delivery-fill { from { width: var(--from); } to { width: 100%; } }
+.delivery-next { margin-top: var(--sp-2xs); font-size: .72rem; font-weight: 500; color: var(--ink-faint); }
+.delivery-result { display: inline-flex; align-items: center; gap: var(--sp-xs); font-weight: 600; white-space: nowrap; }
+.delivery-result.sent { color: var(--success); }
+.delivery-result.failed { color: var(--error); }

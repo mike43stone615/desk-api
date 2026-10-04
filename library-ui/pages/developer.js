@@ -406,12 +406,12 @@ registerRoute('/developer', async (app) => {
       <div class="modal-backdrop" id="reveal-modal-backdrop">
         <div class="modal" role="dialog" aria-modal="true" aria-labelledby="reveal-title">
           <h2 id="reveal-title">${r.rotated ? 'Copy your new secret' : 'Copy your new key'}</h2>
-          <p class="biz-sub" style="margin-bottom:var(--sp-md);">This is the only time the full key is shown. Store it somewhere safe — if you lose it, ${r.rotated ? 'rotate it again' : 'revoke it and create a new one'}.</p>
+          <p class="modal-text">This is the only time the full key is shown. Store it somewhere safe — if you lose it, rotate it or revoke it and create a new one.</p>
           <div class="reveal-key">
             <input id="reveal-input" readonly value="${esc(r.key)}" aria-label="Your new API key" />
             <button type="button" class="btn btn-primary" id="copy-key-btn">${icon('content_copy')} Copy</button>
           </div>
-          <div style="display:flex;justify-content:flex-end;margin-top:var(--sp-lg);">
+          <div class="modal-actions">
             <button type="button" class="btn" id="dismiss-reveal-btn">I've saved my key</button>
           </div>
         </div>
@@ -508,7 +508,7 @@ registerRoute('/developer', async (app) => {
                 <span class="library-body"><span class="name">${esc(x.name)}</span><span class="biz-sub">${esc(x.description)}</span></span>
               </button>`).join('')}
           </div>
-          <div style="display:flex;justify-content:flex-end;margin-top:var(--sp-lg);">
+          <div class="modal-actions">
             <button type="button" class="btn" id="close-add-api-btn">Cancel</button>
           </div>
         </div>
@@ -543,11 +543,11 @@ registerRoute('/developer', async (app) => {
       <div class="modal-backdrop" id="detail-modal-backdrop">
         <div class="modal modal-wide" role="dialog" aria-modal="true" aria-labelledby="detail-title">
           <h2 id="detail-title">${esc(k.label)}</h2>
-          ${!isOwner ? `<p class="biz-sub" style="margin-bottom:var(--sp-md);">Shared by ${esc(personLabel(k.owner))}. You can see its usage; only the owner can change it.</p>` : ''}
+          ${!isOwner ? `<p class="modal-text">Shared by ${esc(personLabel(k.owner))}. You can see its usage; only the owner can change it.</p>` : ''}
           ${chartsHtml(k)}
           ${isOwner ? `<div style="margin-top:var(--sp-lg);">${apisHtml(k)}</div>` : ''}
           ${isOwner ? `<div style="margin-top:var(--sp-lg);">${sharingHtml(k)}</div>` : ''}
-          <div style="display:flex;justify-content:flex-end;margin-top:var(--sp-xl);">
+          <div class="modal-actions">
             <button type="button" class="btn" id="close-detail-btn">Close</button>
           </div>
         </div>
@@ -634,7 +634,7 @@ registerRoute('/developer', async (app) => {
                 <input name="label" placeholder=" " maxlength="${MAX_LABEL_LENGTH}" value="${esc(s.label)}" autocomplete="off" class="${s.fieldErrors.label ? 'invalid' : ''}" />
               </div>
               ${errText('label')}
-              <label class="library-row" id="sandbox-row"><input type="checkbox" name="sandbox" ${s.sandbox ? 'checked' : ''} /><span class="library-body"><span class="name">Sandbox Key</span><span class="biz-sub">Fixed sample answers for the Registry and Market APIs — nothing real is called or counted. Not available with the Desk API.</span></span></label>
+              <label class="library-row" id="sandbox-row"><input type="checkbox" name="sandbox" ${s.sandbox ? 'checked' : ''} /><span class="library-body"><span class="name">Sandbox Key</span><span class="biz-sub">Fixed sample answers for available API services — nothing real is called or counted. Some API services will be disabled with a sandbox key on.</span></span></label>
               <div class="field-header"><label>APIs this key can call</label></div>
               <div class="library-list" id="service-list">${s.services.map(serviceRowHtml).join('')}</div>
               ${errText('services')}
@@ -658,7 +658,7 @@ registerRoute('/developer', async (app) => {
             <h2 class="biz-section-title">Your keys</h2>
             ${s.keys.length
               ? s.keys.map(keyCardHtml).join('')
-              : `<div class="state-card"><div class="biz-icon neutral">${icon('key')}</div><div class="biz-body"><div class="biz-title">No API keys yet</div><div class="biz-sub">Create one above to get started.</div></div></div>`}
+              : `<div class="state-card"><div class="biz-icon neutral">${icon('key')}</div><div class="biz-body"><div class="biz-title">No API keys yet</div><div class="biz-sub">Create one to get started.</div></div></div>`}
             ${s.sharedKeys.length ? `
               <h2 class="biz-section-title" style="margin-top:var(--sp-xl);">Key shared with me</h2>
               ${s.sharedKeys.map(sharedKeyCardHtml).join('')}
@@ -689,8 +689,8 @@ registerRoute('/developer', async (app) => {
         <div class="modal-backdrop" id="revoke-modal-backdrop">
           <div class="modal" role="dialog" aria-modal="true" aria-labelledby="revoke-title">
             <h2 id="revoke-title">Revoke key</h2>
-            <p>Revoke "${esc(s.confirmRevoke.label)}"? Anything using it will stop working immediately. This cannot be undone.</p>
-            <div style="display:flex;justify-content:flex-end;gap:var(--sp-sm);margin-top:var(--sp-xl);">
+            <p class="modal-text">Revoke "${esc(s.confirmRevoke.label)}"? Anything using it will stop working immediately. This cannot be undone.</p>
+            <div class="modal-actions">
               <button type="button" class="btn" id="cancel-revoke-btn" ${s.isRevoking ? 'disabled' : ''}>Cancel</button>
               <button type="button" class="btn btn-danger" id="confirm-revoke-btn" ${s.isRevoking ? 'disabled' : ''}>${s.isRevoking ? spinnerBtn(true, '') : 'Revoke'}</button>
             </div>
@@ -701,8 +701,8 @@ registerRoute('/developer', async (app) => {
         <div class="modal-backdrop" id="rotate-modal-backdrop">
           <div class="modal" role="dialog" aria-modal="true" aria-labelledby="rotate-title">
             <h2 id="rotate-title">Rotate key</h2>
-            <p>Rotate "${esc(s.confirmRotate.label)}"? Its current secret stops working immediately and a new one is shown once. Anything still using the old secret will need the new one.</p>
-            <div style="display:flex;justify-content:flex-end;gap:var(--sp-sm);margin-top:var(--sp-xl);">
+            <p class="modal-text">Rotate "${esc(s.confirmRotate.label)}"? Its current secret stops working immediately and a new one is shown once. Anything still using the old secret will need the new one.</p>
+            <div class="modal-actions">
               <button type="button" class="btn" id="cancel-rotate-btn" ${s.isRotating ? 'disabled' : ''}>Cancel</button>
               <button type="button" class="btn btn-primary" id="confirm-rotate-btn" ${s.isRotating ? 'disabled' : ''}>${s.isRotating ? spinnerBtn(true, '') : 'Rotate'}</button>
             </div>
@@ -754,7 +754,11 @@ registerRoute('/developer', async (app) => {
           const plotRect = tooltip.parentElement.getBoundingClientRect();
           const barRect = bar.getBoundingClientRect();
           tooltip.textContent = `${shortDate(day)} — ${calls} ${calls === '1' ? 'call' : 'calls'}, ${errors} ${errors === '1' ? 'error' : 'errors'}`;
-          tooltip.style.left = `${barRect.left - plotRect.left + barRect.width / 2}px`;
+          // Centred on the bar, but clamped so the whole tooltip stays inside the chart: centring it on one of the
+          // last (or first) bars would push it past the pop-up's edge and give the pop-up a sideways scroll bar.
+          const half = tooltip.offsetWidth / 2;
+          const centre = barRect.left - plotRect.left + barRect.width / 2;
+          tooltip.style.left = `${Math.min(Math.max(centre, half), Math.max(half, plotRect.width - half))}px`;
           tooltip.classList.add('visible');
         });
         bar.addEventListener('mouseleave', () => {

@@ -495,13 +495,22 @@ const BASE_SPEC = {
       delete: { tags: ['Webhooks'], summary: 'Remove a webhook endpoint', security: [{ SessionToken: [] }], parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }], responses: { '204': { description: 'Removed' }, '404': { description: 'Not your endpoint' } } },
     },
     '/gateway/webhooks/{id}/rotate-secret': {
-      post: { tags: ['Webhooks'], summary: 'Make a new signing secret (shown once) and switch the endpoint back on', security: [{ SessionToken: [] }], parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }], responses: { '200': { description: 'The new secret' }, '404': { description: 'Not your endpoint' } } },
+      post: { tags: ['Webhooks'], summary: 'Make a new signing secret (shown once)', security: [{ SessionToken: [] }], parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }], responses: { '200': { description: 'The new secret' }, '404': { description: 'Not your endpoint' } } },
+    },
+    '/gateway/webhooks/{id}/suspend': {
+      post: { tags: ['Webhooks'], summary: 'Switch an endpoint off: nothing is sent to it until it is switched back on', security: [{ SessionToken: [] }], parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }], responses: { '200': { description: 'The endpoint' }, '404': { description: 'Not your endpoint' } } },
+    },
+    '/gateway/webhooks/{id}/resume': {
+      post: { tags: ['Webhooks'], summary: 'Switch an endpoint back on (also after it was switched off for repeated failures)', security: [{ SessionToken: [] }], parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }], responses: { '200': { description: 'The endpoint' }, '404': { description: 'Not your endpoint' } } },
+    },
+    '/gateway/webhooks/{id}/events': {
+      put: { tags: ['Webhooks'], summary: 'Replace the events an endpoint listens for', security: [{ SessionToken: [] }], parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }], requestBody: { required: true, content: { 'application/json': { schema: { type: 'object', required: ['events'], properties: { events: { type: 'array', items: { type: 'string' } } } } } } }, responses: { '200': { description: 'The endpoint' }, '400': { description: 'No events, or an unknown one' }, '404': { description: 'Not your endpoint' } } },
     },
     '/gateway/webhooks/{id}/test': {
       post: { tags: ['Webhooks'], summary: 'Send a test event to one endpoint', security: [{ SessionToken: [] }], parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }], responses: { '202': { description: 'Queued' }, '404': { description: 'Not your endpoint' } } },
     },
     '/gateway/webhooks/{id}/deliveries': {
-      get: { tags: ['Webhooks'], summary: 'The last 50 deliveries to an endpoint, with their results', security: [{ SessionToken: [] }], parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }], responses: { '200': { description: 'The deliveries' }, '404': { description: 'Not your endpoint' } } },
+      get: { tags: ['Webhooks'], summary: 'The last 30 days of deliveries to an endpoint, with their results and retry progress', security: [{ SessionToken: [] }], parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }], responses: { '200': { description: 'The deliveries' }, '404': { description: 'Not your endpoint' } } },
     },
     '/gateway/webhooks/{id}/deliveries/{deliveryId}/retry': {
       post: { tags: ['Webhooks'], summary: 'Puts one failed delivery back in line right now, with a fresh set of tries', security: [{ SessionToken: [] }], parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }, { name: 'deliveryId', in: 'path', required: true, schema: { type: 'string' } }], responses: { '202': { description: 'Queued' }, '404': { description: 'Not your endpoint, or that delivery has not failed' } } },

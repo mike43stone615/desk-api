@@ -12,6 +12,8 @@ const CreateSchema = z.object({
   events: z.array(z.enum(WEBHOOK_EVENTS.filter((e) => e !== 'webhook.test') as [string, ...string[]])).min(1, 'Choose at least one event.').max(20),
 });
 
+const EventsSchema = z.object({ events: CreateSchema.shape.events });
+
 function fail(err: unknown): never {
   if (err instanceof WebhookError) {
     const status = err.code === 'not_found' ? 404 : err.code === 'forbidden' ? 403 : err.code === 'limit_reached' ? 409 : err.code === 'unavailable' ? 503 : 400;
@@ -68,7 +70,36 @@ export async function rotateWebhookSecretHandler(request: FastifyRequest, reply:
   const secret = await webhooks.rotateSecret(request.currentUser!.id, id);
   if (!secret) throw new HttpError(404, 'No such webhook endpoint.', 'webhook_not_found');
   audit(request, 'webhook_secret_rotated', { userId: request.currentUser!.id, endpointId: id });
-  return reply.send({ secret, note: 'This is the only time the signing secret is shown. The endpoint is switched on again.' });
+  return reply.send({ secret, note: 'This is the only time the signing secret is shown.' });
+}
+
+/** Switch an endpoint off (nothing is sent to it) or back on — the same switch an endpoint flips by itself after ten failed deliveries. */
+async function setActive(request: FastifyRequest, reply: FastifyReply, on: boolean) {
+  await requireAuth(request, reply);
+  const { id } = request.params as { id: string };
+  const endpoint = await webhooks.setActive(request.currentUser!.id, id, on);
+  if (!endpoint) throw new HttpError(404, 'No such webhook endpoint.', 'webhook_not_found');
+  audit(request, on ? 'webhook_resumed' : 'webhook_suspended', { userId: request.currentUser!.id, endpointId: id });
+  return reply.send({ endpoint });
+}
+export const suspendWebhookHandler = (request: FastifyRequest, reply: FastifyReply) => setActive(request, reply, false);
+export const resumeWebhookHandler = (request: FastifyRequest, reply: FastifyReply) => setActive(request, reply, true);
+
+/** Replace the events an endpoint listens for. */
+export async function setWebhookEventsHandler(request: FastifyRequest, reply: FastifyReply) {
+  await requireAuth(request, reply);
+  const { id } = request.params as { id: string };
+  const parsed = EventsSchema.safeParse(request.body ?? {});
+  if (!parsed.success) throw validationError(parsed.error);
+  let endpoint;
+  try {
+    endpoint = await webhooks.setEvents(request.currentUser!.id, id, parsed.data.events);
+  } catch (err) {
+    return fail(err);
+  }
+  if (!endpoint) throw new HttpError(404, 'No such webhook endpoint.', 'webhook_not_found');
+  audit(request, 'webhook_events_changed', { userId: request.currentUser!.id, endpointId: id });
+  return reply.send({ endpoint });
 }
 
 export async function testWebhookHandler(request: FastifyRequest, reply: FastifyReply) {

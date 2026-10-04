@@ -116,7 +116,7 @@ import {
   acceptKeyShareHandler,
   declineKeyShareHandler,
 } from './routes/gateway';
-import { createWebhookHandler, deleteWebhookHandler, listWebhookEventsHandler, listWebhooksHandler, rotateWebhookSecretHandler, testWebhookHandler, webhookDeliveriesHandler, retryWebhookDeliveryHandler } from './routes/webhooksOut';
+import { createWebhookHandler, deleteWebhookHandler, listWebhookEventsHandler, listWebhooksHandler, rotateWebhookSecretHandler, testWebhookHandler, webhookDeliveriesHandler, retryWebhookDeliveryHandler, suspendWebhookHandler, resumeWebhookHandler, setWebhookEventsHandler } from './routes/webhooksOut';
 import { authorizeDecisionHandler, authorizeHandler, authorizeInfoHandler, createClientHandler, deleteClientHandler, discoveryHandler, listAuthorizationsHandler, listClientsHandler, registerOAuthTokenRoutes, revokeAuthorizationHandler } from './routes/oauth';
 import { graphqlHandler } from './routes/graphql';
 import { changelogAtomHandler, changelogHandler, incidentsHandler, openIncidentHandler, updateIncidentHandler } from './routes/statusInfo';
@@ -607,6 +607,9 @@ async function registerLegacyAndVersionedRoutes(instance: FastifyInstance) {
   instance.delete('/gateway/webhooks/:id', deleteWebhookHandler);
   instance.post('/gateway/webhooks/:id/rotate-secret', small, rotateWebhookSecretHandler);
   instance.post('/gateway/webhooks/:id/test', small, testWebhookHandler);
+  instance.post('/gateway/webhooks/:id/suspend', small, suspendWebhookHandler);
+  instance.post('/gateway/webhooks/:id/resume', small, resumeWebhookHandler);
+  instance.put('/gateway/webhooks/:id/events', small, setWebhookEventsHandler);
   instance.get('/gateway/webhooks/:id/deliveries', webhookDeliveriesHandler);
   instance.post('/gateway/webhooks/:id/deliveries/:deliveryId/retry', small, retryWebhookDeliveryHandler);
 

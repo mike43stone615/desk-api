@@ -980,10 +980,22 @@ export function createFakeDb() {
       const e = webhookEndpoints.get(p[0]);
       if (!e) return { rows: [], rowCount: 0 };
       e.secret_enc = p[1];
-      e.active = true;
-      e.consecutive_failures = 0;
-      e.disabled_reason = null;
       return { rows: [], rowCount: 1 };
+    }
+    if (s.startsWith('UPDATE webhook_endpoints SET active = TRUE, consecutive_failures = 0, disabled_reason = NULL WHERE id = $1 RETURNING')
+      || s.startsWith("UPDATE webhook_endpoints SET active = FALSE, disabled_reason = 'Switched off by you.' WHERE id = $1 RETURNING")) {
+      const e = webhookEndpoints.get(p[0]);
+      if (!e) return { rows: [], rowCount: 0 };
+      const on = s.includes('active = TRUE');
+      e.active = on;
+      if (on) { e.consecutive_failures = 0; e.disabled_reason = null; } else e.disabled_reason = 'Switched off by you.';
+      return { rows: [e], rowCount: 1 };
+    }
+    if (s.startsWith('UPDATE webhook_endpoints SET events = $2 WHERE id = $1 RETURNING')) {
+      const e = webhookEndpoints.get(p[0]);
+      if (!e) return { rows: [], rowCount: 0 };
+      e.events = p[1];
+      return { rows: [e], rowCount: 1 };
     }
     if (s.startsWith("UPDATE webhook_deliveries SET status = 'pending', attempts = 0, next_attempt_at = $3")) {
       const d = webhookDeliveries.find((x) => x.id === p[0] && x.endpoint_id === p[1] && x.status === 'failed');
@@ -1002,7 +1014,7 @@ export function createFakeDb() {
       }
       return { rows: [], rowCount: e ? 1 : 0 };
     }
-    if (s.startsWith('SELECT id, event_id, event_type, status, attempts, last_status, last_error, created_at, delivered_at FROM webhook_deliveries WHERE endpoint_id = $1')) {
+    if (s.startsWith('SELECT id, event_id, event_type, status, attempts, last_status, last_error, created_at, delivered_at, next_attempt_at FROM webhook_deliveries WHERE endpoint_id = $1')) {
       const rows = webhookDeliveries.filter((d) => d.endpoint_id === p[0]);
       return { rows, rowCount: rows.length };
     }

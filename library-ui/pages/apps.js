@@ -1,5 +1,6 @@
 // Apps: register an app that signs people in with Desk (OAuth 2.0), and see/revoke the apps you yourself have let into your
 // account. Backed by /oauth/clients and /oauth/authorizations (src/routes/oauth.ts). A client secret is shown once.
+// Laid out like the API keys page (pages/developer.js): the form on the left, the cards on the right, details in "i" badges.
 import {
   registerRoute, api, esc, icon, spinnerBtn, statusMsg, friendlyError, toast, reportHandledException, currentEpoch, submitOnEnter, navigate,
 } from '../app.js';
@@ -11,6 +12,12 @@ const when = (iso) => {
   const d = new Date(iso);
   return Number.isNaN(d.getTime()) ? '' : d.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
 };
+/** Hoverable (not clickable) "i" badge: a small themed tooltip instead of the native title attribute. Matches pages/developer.js.
+    `openRight`: the tooltip opens to the right, for a badge near the left edge where opening left would be cut off. */
+function infoIcon(text, openRight = false) {
+  if (!text) return '';
+  return `<span class="info-icon${openRight ? ' open-right' : ''}" tabindex="0">${icon('info_outline')}<span class="info-tooltip" role="tooltip">${esc(text)}</span></span>`;
+}
 
 registerRoute('/developer/apps', async (app) => {
   const myEpoch = currentEpoch();
@@ -75,7 +82,9 @@ registerRoute('/developer/apps', async (app) => {
   }
   const onKeydown = (e) => {
     if (!isCurrent()) { document.removeEventListener('keydown', onKeydown); return; }
-    if (e.key === 'Escape' && s.confirm && !s.isBusy) { s.confirm = null; render(); }
+    if (e.key !== 'Escape') return;
+    if (s.confirm && !s.isBusy) { s.confirm = null; render(); return; }
+    if (s.revealed) { s.revealed = null; render(); }
   };
   document.addEventListener('keydown', onKeydown);
 
@@ -83,23 +92,43 @@ registerRoute('/developer/apps', async (app) => {
     <div class="state-card key-card">
       <div class="biz-icon neutral">${icon('category_outlined')}</div>
       <div class="biz-body">
-        <div class="biz-title">${esc(c.name)}</div>
-        <div class="biz-sub">Client id <code>${esc(c.id)}</code> · ${c.confidential ? 'has a client secret' : 'public app (PKCE only)'} · added ${esc(when(c.createdAt))}</div>
+        <div class="biz-title-row"><div class="biz-title">${esc(c.name)}</div>${infoIcon(`Created ${when(c.createdAt)} · ${c.confidential ? 'Has a client secret' : 'Public app (PKCE only)'}`)}</div>
+        <div class="biz-sub">Client id <code>${esc(c.id)}</code></div>
         <div class="biz-sub">Sends people back to: ${c.redirectUris.map((u) => `<code>${esc(u)}</code>`).join(', ')}</div>
         <div class="biz-chips">${c.scopes.map((x) => `<span class="meta-chip">${esc(SCOPE_LABELS[x] || x)}</span>`).join('')}</div>
       </div>
-      <button type="button" class="btn btn-sm" data-remove-client="${esc(c.id)}" data-name="${esc(c.name)}" aria-label="Remove app ${esc(c.name)}">Remove</button>
+      <div class="key-actions">
+        <button type="button" class="btn btn-sm" data-remove-client="${esc(c.id)}" data-name="${esc(c.name)}" aria-label="Remove app ${esc(c.name)}">Remove</button>
+      </div>
     </div>`;
   const authHtml = (a) => `
     <div class="state-card key-card">
       <div class="biz-icon neutral">${icon('check_circle_outline')}</div>
       <div class="biz-body">
-        <div class="biz-title">${esc(a.name)}</div>
-        <div class="biz-sub">Allowed ${esc(when(a.authorizedAt))}${a.lastUsedAt ? ` · last used ${esc(when(a.lastUsedAt))}` : ' · never used'}</div>
+        <div class="biz-title-row"><div class="biz-title">${esc(a.name)}</div>${infoIcon(`Allowed ${when(a.authorizedAt)} · ${a.lastUsedAt ? `Last used ${when(a.lastUsedAt)}` : 'Never used'}`)}</div>
         <div class="biz-chips">${a.scopes.map((x) => `<span class="meta-chip">${esc(SCOPE_LABELS[x] || x)}</span>`).join('')}</div>
       </div>
-      <button type="button" class="btn btn-sm" data-revoke-access="${esc(a.clientId)}" data-name="${esc(a.name)}" aria-label="Take away access from ${esc(a.name)}">Take away access</button>
+      <div class="key-actions">
+        <button type="button" class="btn btn-sm" data-revoke-access="${esc(a.clientId)}" data-name="${esc(a.name)}" aria-label="Take away access from ${esc(a.name)}">Take away access</button>
+      </div>
     </div>`;
+
+  function revealModalHtml() {
+    const r = s.revealed;
+    return `
+      <div class="modal-backdrop" id="app-reveal-backdrop">
+        <div class="modal" role="dialog" aria-modal="true" aria-labelledby="app-reveal-title">
+          <h2 id="app-reveal-title">${esc(r.client.name)} is registered</h2>
+          <p class="modal-text">${r.secret ? 'Copy the client secret now: it is only shown this once.' : 'This is a public app: it has no secret and must use PKCE.'}</p>
+          <div class="field-header"><label for="app-id">Client id</label></div>
+          <div class="reveal-key"><input id="app-id" readonly value="${esc(r.client.id)}" /><button type="button" class="btn" id="copy-id">${icon('content_copy')} Copy</button></div>
+          ${r.secret ? `<div class="field-header"><label for="app-secret">Client secret</label></div><div class="reveal-key"><input id="app-secret" readonly value="${esc(r.secret)}" /><button type="button" class="btn btn-primary" id="copy-secret">${icon('content_copy')} Copy</button></div>` : ''}
+          <div class="modal-actions">
+            <button type="button" class="btn" id="dismiss">I've saved it</button>
+          </div>
+        </div>
+      </div>`;
+  }
 
   function render() {
     let body;
@@ -108,34 +137,31 @@ registerRoute('/developer/apps', async (app) => {
     else {
       const animate = s.formError !== s._lastFormError; s._lastFormError = s.formError;
       body = `
-        ${s.revealed ? `
-          <div class="card" style="margin-bottom:var(--sp-lg);">
-            <h2 class="biz-section-title">${esc(s.revealed.client.name)} is registered</h2>
-            <p class="biz-sub" style="margin-bottom:var(--sp-md);">${s.revealed.secret ? 'Copy the client secret now: it is only shown this once.' : 'This is a public app: it has no secret and must use PKCE.'}</p>
-            <div class="field-header"><label for="app-id">Client id</label></div>
-            <div class="reveal-key"><input id="app-id" readonly value="${esc(s.revealed.client.id)}" /><button type="button" class="btn" id="copy-id">${icon('content_copy')} Copy</button></div>
-            ${s.revealed.secret ? `<div class="field-header" style="margin-top:var(--sp-md);"><label for="app-secret">Client secret</label></div><div class="reveal-key"><input id="app-secret" readonly value="${esc(s.revealed.secret)}" /><button type="button" class="btn btn-primary" id="copy-secret">${icon('content_copy')} Copy</button></div>` : ''}
-            <button type="button" class="btn" id="dismiss" style="margin-top:var(--sp-lg);">I've saved it</button>
-          </div>` : ''}
-        <div class="card" style="margin-bottom:var(--sp-lg);">
-          <h2 class="biz-section-title">Register an app</h2>
-          <p class="biz-sub" style="margin-bottom:var(--sp-lg);">For an app that lets people sign in with Desk and read part of their account, with their approval. It can only read; it can never change anything. Every app must use PKCE.</p>
-          <form id="app-form" novalidate>
-            <div class="field-float has-icon"><span class="field-icon">${icon('category_outlined')}</span><label>App name</label><input name="name" placeholder=" " maxlength="64" value="${esc(s.name)}" autocomplete="off" /></div>
-            <div class="field-header"><label for="redirects">Redirect addresses (one per line)</label></div>
-            <textarea id="redirects" name="redirects" rows="3" class="team-select" style="width:100%;" placeholder="https://yourapp.example.com/callback" maxlength="1500">${esc(s.redirects)}</textarea>
-            <p class="biz-sub">https addresses only (http is allowed for localhost while you build). The app can only send people back to these exact addresses.</p>
-            <div class="field-header"><label>What the app may read</label></div>
-            <div class="library-list">${SCOPES.map((x) => `<label class="library-row"><input type="checkbox" name="scope" value="${x}" ${s.chosen.has(x) ? 'checked' : ''} /><span class="library-body"><span class="name">${esc(SCOPE_LABELS[x])}</span></span></label>`).join('')}</div>
-            <label class="library-row" style="margin-top:var(--sp-md);"><input type="checkbox" name="confidential" ${s.confidential ? 'checked' : ''} /><span class="library-body"><span class="name">The app has a server that can keep a secret</span><span class="biz-sub">Untick for a mobile or single-page app: it then gets no secret and relies on PKCE alone.</span></span></label>
-            ${s.formError ? statusMsg('error', s.formError, animate) : ''}
-            <button type="submit" class="btn btn-primary" style="margin-top:var(--sp-lg);" ${s.isCreating ? 'disabled' : ''}>${s.isCreating ? spinnerBtn(true, '') : icon('category_outlined')}${s.isCreating ? '' : ' Register app'}</button>
-          </form>
-        </div>
-        <h2 class="biz-section-title">Apps you registered</h2>
-        ${s.clients.length ? s.clients.map(clientHtml).join('') : `<div class="state-card"><div class="biz-icon neutral">${icon('category_outlined')}</div><div class="biz-body"><div class="biz-title">No apps yet</div><div class="biz-sub">Register one above.</div></div></div>`}
-        <h2 class="biz-section-title" style="margin-top:var(--sp-xl);">Apps you have let into your account</h2>
-        ${s.authorizations.length ? s.authorizations.map(authHtml).join('') : `<div class="state-card"><div class="biz-icon neutral">${icon('check_circle_outline')}</div><div class="biz-body"><div class="biz-title">No apps have access</div><div class="biz-sub">When you approve an app on its sign-in screen it appears here, and you can take its access away.</div></div></div>`}`;
+        <div class="developer-split">
+          <div class="card">
+            <div class="biz-title-row section-title-row"><h2 class="biz-section-title">Register an app</h2>${infoIcon('For an app that lets people sign in with Desk and read part of their account, with their approval. It can only read; it can never change anything. Every app must use PKCE.', true)}</div>
+            <form id="app-form" novalidate>
+              <div class="field-float has-icon"><span class="field-icon">${icon('category_outlined')}</span><label>App name</label><input name="name" placeholder=" " maxlength="64" value="${esc(s.name)}" autocomplete="off" /></div>
+              <div class="field-header"><label for="redirects">Redirect addresses (one per line)</label></div>
+              <textarea id="redirects" name="redirects" rows="3" class="team-select" style="width:100%;" placeholder="https://yourapp.example.com/callback" maxlength="1500">${esc(s.redirects)}</textarea>
+              <p class="biz-sub">https addresses only (http is allowed for localhost while you build). The app can only send people back to these exact addresses.</p>
+              <div class="field-header"><label>What the app may read</label></div>
+              <div class="library-list">${SCOPES.map((x) => `<label class="library-row"><input type="checkbox" name="scope" value="${x}" ${s.chosen.has(x) ? 'checked' : ''} /><span class="library-body"><span class="name">${esc(SCOPE_LABELS[x])}</span></span></label>`).join('')}</div>
+              <label class="library-row" style="margin-top:var(--sp-md);"><input type="checkbox" name="confidential" ${s.confidential ? 'checked' : ''} /><span class="library-body"><span class="name">The app has a server that can keep a secret</span><span class="biz-sub">Untick for a mobile or single-page app: it then gets no secret and relies on PKCE alone.</span></span></label>
+              ${s.formError ? statusMsg('error', s.formError, animate) : ''}
+              <div class="wizard-actions">
+                <div></div>
+                <div><button type="submit" class="btn btn-primary" ${s.isCreating ? 'disabled' : ''}>${s.isCreating ? spinnerBtn(true, '') : icon('category_outlined')}${s.isCreating ? '' : ' Register app'}</button></div>
+              </div>
+            </form>
+          </div>
+          <div>
+            <h2 class="biz-section-title">Apps you registered</h2>
+            ${s.clients.length ? s.clients.map(clientHtml).join('') : `<div class="state-card"><div class="biz-icon neutral">${icon('category_outlined')}</div><div class="biz-body"><div class="biz-title">No apps yet</div><div class="biz-sub">Register one to get started.</div></div></div>`}
+            <h2 class="biz-section-title" style="margin-top:var(--sp-xl);">Apps you have let into your account</h2>
+            ${s.authorizations.length ? s.authorizations.map(authHtml).join('') : `<div class="state-card"><div class="biz-icon neutral">${icon('check_circle_outline')}</div><div class="biz-body"><div class="biz-title">No apps have access</div><div class="biz-sub">When you approve an app on its sign-in screen it appears here, and you can take its access away.</div></div></div>`}
+          </div>
+        </div>`;
     }
     const c = s.confirm;
     app.innerHTML = `
@@ -144,7 +170,18 @@ registerRoute('/developer/apps', async (app) => {
         ${tabsHtml('/developer/apps')}
         ${body}
       </div>
-      ${c ? `<div class="modal-backdrop" id="app-backdrop"><div class="modal" role="dialog" aria-modal="true" aria-labelledby="app-modal-title"><h2 id="app-modal-title">${c.kind === 'client' ? 'Remove app' : 'Take away access'}</h2><p>${c.kind === 'client' ? `Remove ${esc(c.name)}? People can no longer sign in with it, and every token it holds stops working immediately.` : `Take away ${esc(c.name)}'s access to your account? It stops working immediately.`}</p><div style="display:flex;justify-content:flex-end;gap:var(--sp-sm);margin-top:var(--sp-xl);"><button type="button" class="btn" id="app-cancel" ${s.isBusy ? 'disabled' : ''}>Cancel</button><button type="button" class="btn btn-danger" id="app-confirm" ${s.isBusy ? 'disabled' : ''}>${s.isBusy ? spinnerBtn(true, '') : (c.kind === 'client' ? 'Remove' : 'Take away')}</button></div></div></div>` : ''}`;
+      ${s.revealed ? revealModalHtml() : ''}
+      ${c ? `
+        <div class="modal-backdrop" id="app-backdrop">
+          <div class="modal" role="dialog" aria-modal="true" aria-labelledby="app-modal-title">
+            <h2 id="app-modal-title">${c.kind === 'client' ? 'Remove app' : 'Take away access'}</h2>
+            <p class="modal-text">${c.kind === 'client' ? `Remove ${esc(c.name)}? People can no longer sign in with it, and every token it holds stops working immediately.` : `Take away ${esc(c.name)}'s access to your account? It stops working immediately.`}</p>
+            <div class="modal-actions">
+              <button type="button" class="btn" id="app-cancel" ${s.isBusy ? 'disabled' : ''}>Cancel</button>
+              <button type="button" class="btn btn-danger" id="app-confirm" ${s.isBusy ? 'disabled' : ''}>${s.isBusy ? spinnerBtn(true, '') : (c.kind === 'client' ? 'Remove' : 'Take away')}</button>
+            </div>
+          </div>
+        </div>` : ''}`;
     wire();
   }
 
@@ -165,6 +202,7 @@ registerRoute('/developer/apps', async (app) => {
       const cs = $('copy-secret'); if (cs) cs.addEventListener('click', () => copyValue('app-secret', s.revealed.secret, 'Client secret'));
     }
     const dismiss = $('dismiss'); if (dismiss) dismiss.addEventListener('click', () => { s.revealed = null; render(); });
+    const revealBackdrop = $('app-reveal-backdrop'); if (revealBackdrop) revealBackdrop.addEventListener('click', (e) => { if (e.target === revealBackdrop) { s.revealed = null; render(); } });
     app.querySelectorAll('[data-remove-client]').forEach((b) => b.addEventListener('click', () => { s.confirm = { kind: 'client', id: b.dataset.removeClient, name: b.dataset.name }; render(); }));
     app.querySelectorAll('[data-revoke-access]').forEach((b) => b.addEventListener('click', () => { s.confirm = { kind: 'access', id: b.dataset.revokeAccess, name: b.dataset.name }; render(); }));
     const cancel = $('app-cancel'); if (cancel) { cancel.addEventListener('click', () => { s.confirm = null; render(); }); cancel.focus(); }

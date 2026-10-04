@@ -3,7 +3,7 @@
 //   * signed:   `Desk-Signature: t=<unix seconds>,v1=<hex HMAC-SHA256 of "<t>.<body>" with the endpoint's secret>`, so the receiver
 //               can prove it came from Desk and reject a replay (an old `t`);
 //   * retried:  after 1 minute, 5 minutes, 30 minutes, 2 hours and 6 hours, then marked failed; an endpoint that fails ten
-//               deliveries in a row is switched off (its owner re-enables it by rotating the secret);
+//               deliveries in a row is switched off (its owner switches it back on, the same switch they can flip by hand);
 //   * safe:     https only, and never to a private, loopback or link-local address (checked when the endpoint is made and again
 //               at every delivery); redirects are not followed; the reply body is never read.
 import { createHmac, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
@@ -23,6 +23,9 @@ export const WEBHOOK_EVENTS = [
 export type WebhookEvent = (typeof WEBHOOK_EVENTS)[number];
 
 const BACKOFF_SECONDS = [60, 300, 1800, 7200, 21600];
+/** Every try a delivery gets: the first one plus one per backoff step. */
+export const MAX_DELIVERY_ATTEMPTS = BACKOFF_SECONDS.length + 1;
+const DELIVERY_HISTORY_DAYS = 30;
 const DISABLE_AFTER_FAILED_DELIVERIES = 10;
 const TOLERANCE_SECONDS = 300;
 
@@ -130,21 +133,51 @@ export const webhooks = {
     return true;
   },
 
-  /** A new secret (shown once); also switches the endpoint back on if it had been disabled after repeated failures. */
+  /** A new secret (shown once). Does not switch the endpoint on or off: that is setActive's job. */
   async rotateSecret(userId: string, id: string): Promise<string | null> {
     if (!(await this.manageable(userId, id))) return null;
     const secret = newSecret();
-    await pool.query(`UPDATE webhook_endpoints SET secret_enc = $2, active = TRUE, consecutive_failures = 0, disabled_reason = NULL WHERE id = $1`, [id, encryptSecret(secret, secretKey())]);
+    await pool.query(`UPDATE webhook_endpoints SET secret_enc = $2 WHERE id = $1`, [id, encryptSecret(secret, secretKey())]);
     return secret;
   },
 
-  async deliveries(userId: string, id: string): Promise<Array<{ id: string; eventId: string; eventType: string; status: string; attempts: number; lastStatus: number | null; lastError: string | null; createdAt: string; deliveredAt: string | null }> | null> {
+  /** Switches an endpoint off (nothing is sent to it; deliveries already queued fail) or back on (with a clean failure count). */
+  async setActive(userId: string, id: string, on: boolean): Promise<WebhookEndpoint | null> {
     if (!(await this.manageable(userId, id))) return null;
-    const { rows } = await pool.query<{ id: string; event_id: string; event_type: string; status: string; attempts: number; last_status: number | null; last_error: string | null; created_at: string; delivered_at: string | null }>(
-      `SELECT id, event_id, event_type, status, attempts, last_status, last_error, created_at, delivered_at FROM webhook_deliveries WHERE endpoint_id = $1 ORDER BY created_at DESC LIMIT 50`,
+    const { rows } = await pool.query<EndpointRow>(
+      on
+        ? `UPDATE webhook_endpoints SET active = TRUE, consecutive_failures = 0, disabled_reason = NULL WHERE id = $1 RETURNING ${COLS}`
+        : `UPDATE webhook_endpoints SET active = FALSE, disabled_reason = 'Switched off by you.' WHERE id = $1 RETURNING ${COLS}`,
       [id],
     );
-    return rows.map((r) => ({ id: r.id, eventId: r.event_id, eventType: r.event_type, status: r.status, attempts: r.attempts, lastStatus: r.last_status, lastError: r.last_error, createdAt: r.created_at, deliveredAt: r.delivered_at }));
+    return rows[0] ? toEndpoint(rows[0]) : null;
+  },
+
+  /** Replaces the events an endpoint listens for (at least one). */
+  async setEvents(userId: string, id: string, input: string[]): Promise<WebhookEndpoint | null> {
+    const events = [...new Set(input)];
+    if (events.length === 0 || events.some((e) => !(WEBHOOK_EVENTS as readonly string[]).includes(e) || e === 'webhook.test')) throw new WebhookError('invalid_url', 'Unknown event name.');
+    if (!(await this.manageable(userId, id))) return null;
+    const { rows } = await pool.query<EndpointRow>(`UPDATE webhook_endpoints SET events = $2 WHERE id = $1 RETURNING ${COLS}`, [id, events]);
+    return rows[0] ? toEndpoint(rows[0]) : null;
+  },
+
+  /**
+   * The last 30 days of deliveries, newest first. `nextAttemptAt` and `retryWaitSeconds` (the length of the wait it is in now)
+   * let a page draw how far along a pending delivery is toward its next try; `maxAttempts` is how many tries it gets in all.
+   */
+  async deliveries(userId: string, id: string): Promise<Array<{ id: string; eventId: string; eventType: string; status: string; attempts: number; maxAttempts: number; lastStatus: number | null; lastError: string | null; createdAt: string; deliveredAt: string | null; nextAttemptAt: string | null; retryWaitSeconds: number | null }> | null> {
+    if (!(await this.manageable(userId, id))) return null;
+    const { rows } = await pool.query<{ id: string; event_id: string; event_type: string; status: string; attempts: number; last_status: number | null; last_error: string | null; created_at: string; delivered_at: string | null; next_attempt_at: string | null }>(
+      `SELECT id, event_id, event_type, status, attempts, last_status, last_error, created_at, delivered_at, next_attempt_at FROM webhook_deliveries WHERE endpoint_id = $1 AND created_at >= $2 ORDER BY created_at DESC LIMIT 500`,
+      [id, new Date(Date.now() - DELIVERY_HISTORY_DAYS * 86_400_000).toISOString()],
+    );
+    return rows.map((r) => ({
+      id: r.id, eventId: r.event_id, eventType: r.event_type, status: r.status, attempts: r.attempts, maxAttempts: MAX_DELIVERY_ATTEMPTS,
+      lastStatus: r.last_status, lastError: r.last_error, createdAt: r.created_at, deliveredAt: r.delivered_at,
+      nextAttemptAt: r.status === 'pending' ? r.next_attempt_at : null,
+      retryWaitSeconds: r.status === 'pending' && r.attempts > 0 ? BACKOFF_SECONDS[r.attempts - 1] ?? null : null,
+    }));
   },
 
   /** Queues a `webhook.test` event to just this endpoint, so a developer can check their receiver. */
@@ -262,13 +295,13 @@ async function deliverOne(send: Sender, resolve?: (host: string) => Promise<stri
       if (done) {
         await client.query(`UPDATE webhook_deliveries SET status = 'delivered', attempts = $2, last_status = $3, last_error = NULL, delivered_at = $4, next_attempt_at = NULL WHERE id = $1`, [row.id, nextAttempt, status || null, new Date().toISOString()]);
         await client.query(`UPDATE webhook_endpoints SET consecutive_failures = 0 WHERE id = $1`, [row.endpoint_id]);
-      } else if (nextAttempt >= BACKOFF_SECONDS.length + 1 || !row.active) {
+      } else if (nextAttempt >= MAX_DELIVERY_ATTEMPTS || !row.active) {
         await client.query(`UPDATE webhook_deliveries SET status = 'failed', attempts = $2, last_status = $3, last_error = $4, next_attempt_at = NULL WHERE id = $1`, [row.id, nextAttempt, status || null, error]);
         if (row.active) {
           await client.query(
             `UPDATE webhook_endpoints SET consecutive_failures = consecutive_failures + 1,
                active = (consecutive_failures + 1) < $2,
-               disabled_reason = CASE WHEN (consecutive_failures + 1) >= $2 THEN 'Switched off after repeated failed deliveries. Rotate the secret to turn it back on.' ELSE disabled_reason END
+               disabled_reason = CASE WHEN (consecutive_failures + 1) >= $2 THEN 'Switched off after repeated failed deliveries. Switch it back on once your server is fixed.' ELSE disabled_reason END
              WHERE id = $1`,
             [row.endpoint_id, DISABLE_AFTER_FAILED_DELIVERIES],
           );

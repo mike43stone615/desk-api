@@ -1128,7 +1128,68 @@ export const GATEWAY_EXAMPLES: Record<string, { status: number; request: unknown
     "request": null,
     "response": {
       "secret": "whsec_fedcba9876543210fedcba9876543210fedcba9876543210",
-      "note": "This is the only time the signing secret is shown. The endpoint is switched on again."
+      "note": "This is the only time the signing secret is shown."
+    }
+  },
+  "POST /v1/gateway/webhooks/{id}/suspend": {
+    "status": 200,
+    "request": null,
+    "response": {
+      "endpoint": {
+        "id": "6f1c2e34-9a5b-4d1e-8c7f-0a1b2c3d4e5f",
+        "url": "https://example.com/desk-webhook",
+        "events": [
+          "key.created",
+          "key.revoked"
+        ],
+        "active": false,
+        "disabledReason": "Switched off by you.",
+        "createdAt": "2026-09-21T15:00:00Z",
+        "consecutiveFailures": 0
+      }
+    }
+  },
+  "POST /v1/gateway/webhooks/{id}/resume": {
+    "status": 200,
+    "request": null,
+    "response": {
+      "endpoint": {
+        "id": "6f1c2e34-9a5b-4d1e-8c7f-0a1b2c3d4e5f",
+        "url": "https://example.com/desk-webhook",
+        "events": [
+          "key.created",
+          "key.revoked"
+        ],
+        "active": true,
+        "disabledReason": null,
+        "createdAt": "2026-09-21T15:00:00Z",
+        "consecutiveFailures": 0
+      }
+    }
+  },
+  "PUT /v1/gateway/webhooks/{id}/events": {
+    "status": 200,
+    "request": {
+      "events": [
+        "key.created",
+        "key.rotated",
+        "key.revoked"
+      ]
+    },
+    "response": {
+      "endpoint": {
+        "id": "6f1c2e34-9a5b-4d1e-8c7f-0a1b2c3d4e5f",
+        "url": "https://example.com/desk-webhook",
+        "events": [
+          "key.created",
+          "key.rotated",
+          "key.revoked"
+        ],
+        "active": true,
+        "disabledReason": null,
+        "createdAt": "2026-09-21T15:00:00Z",
+        "consecutiveFailures": 0
+      }
     }
   },
   "POST /v1/gateway/webhooks/{id}/test": {
@@ -1154,7 +1215,24 @@ export const GATEWAY_EXAMPLES: Record<string, { status: number; request: unknown
           "lastStatus": 200,
           "lastError": null,
           "createdAt": "2026-09-21T15:00:01Z",
-          "deliveredAt": "2026-09-21T15:00:02Z"
+          "deliveredAt": "2026-09-21T15:00:02Z",
+          "maxAttempts": 6,
+          "nextAttemptAt": null,
+          "retryWaitSeconds": null
+        },
+        {
+          "id": "d2",
+          "eventId": "evt_89abcdef0123456789abcdef",
+          "eventType": "key.revoked",
+          "status": "pending",
+          "attempts": 2,
+          "lastStatus": 522,
+          "lastError": "receiver answered 522",
+          "createdAt": "2026-09-21T15:10:00Z",
+          "deliveredAt": null,
+          "maxAttempts": 6,
+          "nextAttemptAt": "2026-09-21T15:16:00Z",
+          "retryWaitSeconds": 300
         }
       ]
     }

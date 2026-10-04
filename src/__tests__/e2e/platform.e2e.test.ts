@@ -137,7 +137,7 @@ describe.skipIf(!hasDb)('E2E: plans, invoices and webhooks', () => {
     expect((await call('DELETE', `/v1/gateway/webhooks/${endpoint.id}`, stranger)).statusCode).toBe(404);
   });
 
-  it('a failing receiver is retried with growing gaps, then the delivery fails; ten failed deliveries switch the endpoint off; rotating the secret turns it back on', async () => {
+  it('a failing receiver is retried with growing gaps, then the delivery fails; ten failed deliveries switch the endpoint off; switching it on again clears that', async () => {
     const u = await mkUser('flaky');
     const made = (await call('POST', '/v1/gateway/webhooks', u, { url: PUBLIC_URL, events: ['key.revoked'] })).json();
     const bad: Sender = async () => ({ status: 500 });
@@ -162,9 +162,12 @@ describe.skipIf(!hasDb)('E2E: plans, invoices and webhooks', () => {
     }
     let ep = (await pool.query(`SELECT active, consecutive_failures, disabled_reason FROM webhook_endpoints WHERE id = $1`, [endpointId])).rows[0];
     expect(ep.active).toBe(false);
-    expect(ep.disabled_reason).toMatch(/Rotate the secret/);
+    expect(ep.disabled_reason).toMatch(/Switch it back on/);
     const rotated = await call('POST', `/v1/gateway/webhooks/${endpointId}/rotate-secret`, u);
     expect(rotated.statusCode).toBe(200);
+    expect((await pool.query(`SELECT active FROM webhook_endpoints WHERE id = $1`, [endpointId])).rows[0].active).toBe(false); // rotating is not switching on
+    const resumed = await call('POST', `/v1/gateway/webhooks/${endpointId}/resume`, u);
+    expect(resumed.statusCode).toBe(200);
     ep = (await pool.query(`SELECT active, consecutive_failures FROM webhook_endpoints WHERE id = $1`, [endpointId])).rows[0];
     expect(ep).toMatchObject({ active: true, consecutive_failures: 0 });
   });
