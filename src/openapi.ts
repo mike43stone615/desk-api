@@ -540,6 +540,12 @@ const BASE_SPEC = {
     '/oauth/clients/{id}': {
       delete: { tags: ['OAuth'], summary: 'Remove an app you registered: every token it holds stops working', security: [{ SessionToken: [] }], parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }], responses: { '204': { description: 'Removed' }, '404': { description: 'Not your app' } } },
     },
+    '/oauth/clients/{id}/redirect-uris': {
+      put: { tags: ['OAuth'], summary: 'Replace the redirect addresses of an app you registered (1 to 50; https, or http on localhost)', security: [{ SessionToken: [] }], parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }], requestBody: { required: true, content: { 'application/json': { schema: { type: 'object', required: ['redirectUris'], properties: { redirectUris: { type: 'array', items: { type: 'string' } } } } } } }, responses: { '200': { description: 'The app' }, '400': { description: 'An address is not allowed' }, '404': { description: 'Not your app' } } },
+    },
+    '/oauth/clients/{id}/rotate-secret': {
+      post: { tags: ['OAuth'], summary: 'Make a new client secret for a confidential app (shown once); the old one stops working', security: [{ SessionToken: [] }], parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }], responses: { '200': { description: 'The new secret' }, '400': { description: 'A public app has no secret' }, '404': { description: 'Not your app' } } },
+    },
     '/oauth/authorizations': {
       get: { tags: ['OAuth'], summary: 'The apps you have let into your account', security: [{ SessionToken: [] }], responses: { '200': { description: 'The apps and their scopes' } } },
     },

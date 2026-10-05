@@ -424,13 +424,15 @@ export async function signOutHandler(request: FastifyRequest, reply: FastifyRepl
 export async function sessionHandler(request: FastifyRequest, reply: FastifyReply) {
   await requireAuth(request, reply);
   const user = request.currentUser!;
+  // An app sees only the profile pieces the person approved (profile:name and/or profile:email); anyone else sees all of it.
+  const scopes = request.oauth?.scopes;
+  const showName = !scopes || scopes.has('profile:name');
+  const showEmail = !scopes || scopes.has('profile:email');
   return reply.send({
     user: {
       id: user.id,
-      email: user.email,
-      firstName: user.firstName,
-      lastName: user.lastName,
-      emailConfirmedAt: user.emailConfirmedAt,
+      ...(showEmail ? { email: user.email, emailConfirmedAt: user.emailConfirmedAt } : {}),
+      ...(showName ? { firstName: user.firstName, lastName: user.lastName } : {}),
     },
   });
 }

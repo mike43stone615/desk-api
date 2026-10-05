@@ -5,6 +5,7 @@ import { execute, GraphQLError, parse, validate, Kind, type DocumentNode, type F
 import { HttpError } from '../middleware/http-error';
 import { requireAuth } from '../middleware/auth';
 import { getSchema, ROOT_VALUE, type GraphQLContext } from '../domain/graphql/schema';
+import { expandKeyScopes } from '../domain/oauth/scopes';
 
 export const GRAPHQL_LIMITS = { maxQueryChars: 8000, maxDepth: 6, maxFields: 150, maxAliases: 10 } as const;
 
@@ -65,7 +66,8 @@ export async function graphqlHandler(request: FastifyRequest, reply: FastifyRepl
   if (m.aliases > GRAPHQL_LIMITS.maxAliases) return problem(reply, 400, `The query uses ${m.aliases} aliases; the limit is ${GRAPHQL_LIMITS.maxAliases}.`, 'QUERY_TOO_COSTLY');
 
   const user = request.currentUser!;
-  const scopes = request.gatewayKey ? new Set<string>(request.gatewayKey.deskScopes) : request.oauth ? new Set<string>(request.oauth.scopes) : null;
+  // Granular scopes either way: a key's Desk scopes are expanded here; an app's token is already expanded (verifyAccessToken).
+  const scopes: ReadonlySet<string> | null = request.gatewayKey ? expandKeyScopes(request.gatewayKey.deskScopes) : request.oauth ? request.oauth.scopes : null;
   const contextValue: GraphQLContext = { user: { id: user.id, email: user.email, firstName: user.firstName, lastName: user.lastName, emailConfirmedAt: user.emailConfirmedAt ?? null }, scopes, restrictedBusinessId: request.gatewayKey?.restrictedBusinessId ?? null };
   const result = await execute({
     schema,

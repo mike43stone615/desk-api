@@ -42,7 +42,39 @@ export const EVENT_LABELS = {
   // labels it where a test delivery can still show up: the deliveries history table.
 };
 
+/** What an app may read, one narrow piece each (the server's own list: src/domain/oauth/scopes.ts), grouped for the
+    registration form: [scope, short name, what it covers]. */
+export const SCOPE_GROUPS = [
+  { title: 'Profile', scopes: [
+    ['profile:name', 'Name', 'Your first and last name'],
+    ['profile:email', 'Email address', 'Your email address and whether it is confirmed'],
+  ] },
+  { title: 'Businesses', scopes: [
+    ['businesses:basic', 'Business list', "Your businesses' names and industries, and your role in each"],
+    ['businesses:formation', 'Formation details', 'Legal entity, tax election, special designation, state and city of formation, and partners'],
+    ['businesses:location', 'Address', "Each business's formation address"],
+    ['businesses:idea', 'Idea and scope', 'What each business does, its customers and their problem, where it sells, and other industries'],
+    ['businesses:plan', 'Business plan', 'Plan sections, pricing, competitors and validation plan'],
+    ['businesses:requirements', 'Compliance requirements', 'Compliance requirements and regulatory statuses, and which ones you have marked'],
+    ['businesses:name_check', 'Name check', 'Name-availability results'],
+    ['businesses:market_research', 'Market research', 'Market research results'],
+    ['businesses:registered_agent', 'Registered agent', "Each business's registered agent"],
+    ['businesses:members', 'Members', 'The people in each business: their names, email addresses and roles'],
+    ['businesses:invites', 'Invitations', "Invitations you have received to join someone else's business"],
+  ] },
+  { title: 'Unfinished setups', scopes: [
+    ['drafts:basic', 'Unfinished setups', 'Their names, how far along they are, and when they were last changed'],
+  ] },
+  { title: 'API Library', scopes: [
+    ['keys:read', 'API keys', 'Names, prefixes, dates and which APIs they can call (never the keys themselves)'],
+    ['plan:read', 'Plan', 'Your API Library plan and its limits'],
+    ['usage:read', 'Usage', 'Daily call and error counts for your API keys'],
+  ] },
+];
+
+/** A short name for every scope an app can hold: the granular ones, plus the four original ones older apps still use. */
 export const SCOPE_LABELS = {
+  ...Object.fromEntries(SCOPE_GROUPS.flatMap((g) => g.scopes.map(([id, name]) => [id, name]))),
   profile: 'Your name and email address',
   drafts: 'Unfinished business setups',
   businesses: 'Businesses and their members',

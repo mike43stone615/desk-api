@@ -12,6 +12,7 @@ import { config } from '../config';
 import { enforceUserRouteLimit, routeKey } from './route-limits';
 import { checkRateBucket, USER_BUCKET_FACTOR, getClientIp } from './api-protection';
 import { ACCESS_TOKEN_PREFIX, verifyAccessToken, type VerifiedOAuthToken } from '../domain/oauth/oauth';
+import type { GranularScope } from '../domain/oauth/scopes';
 import { isUserSuspended } from '../domain/suspension';
 import { isListedAdmin } from '../domain/admins';
 import type { User } from '../interfaces/database';
@@ -55,6 +56,16 @@ export const GATEWAY_ROUTE_SCOPES: Readonly<Record<string, DeskScope>> = {
   'GET /setup/invites': 'businesses',
 };
 
+/** For an OAuth app: the granular scopes (any one of them) that open each allowed route. GraphQL checks its own, per field. */
+export const OAUTH_ROUTE_SCOPES: Readonly<Record<string, readonly GranularScope[]>> = {
+  'GET /auth/session': ['profile:name', 'profile:email'],
+  'GET /setup/drafts': ['drafts:basic'],
+  'GET /setup/drafts/:id': ['drafts:basic'],
+  'GET /setup/businesses': ['businesses:basic'],
+  'GET /setup/businesses/:id/members': ['businesses:members'],
+  'GET /setup/invites': ['businesses:invites'],
+};
+
 /**
  * An OAuth access token (issued to a third-party app the person authorized) may reach exactly what an API key may: the same
  * short read-only list, limited further to the scopes the person approved. Everything else, including every route that
@@ -67,8 +78,12 @@ async function authenticateWithOAuthToken(request: FastifyRequest, raw: string):
   if (!matched || !GATEWAY_KEY_ALLOWED_ROUTES.has(matched)) {
     throw new HttpError(403, 'An app access token cannot call this endpoint.', 'oauth_endpoint_not_allowed');
   }
-  const scope = GATEWAY_ROUTE_SCOPES[matched];
-  if (scope && !verified.scopes.has(scope)) throw new HttpError(403, `The app was not given the "${scope}" scope.`, 'oauth_insufficient_scope');
+  // Any one of the listed scopes opens the route; what it then returns is trimmed to the scopes held (e.g. /auth/session
+  // leaves out the email address without profile:email — see sessionHandler).
+  const anyOf = OAUTH_ROUTE_SCOPES[matched];
+  if (anyOf && !anyOf.some((s) => verified.scopes.has(s))) {
+    throw new HttpError(403, `The app was not given the "${anyOf.join('" or "')}" scope.`, 'oauth_insufficient_scope');
+  }
   const owner = await authDb.findUserById(verified.userId);
   if (!owner) throw new HttpError(401, 'The access token is invalid, expired or revoked.', 'invalid_token');
   if (await isUserSuspended(owner.id)) throw new HttpError(403, 'This account is suspended.', 'account_suspended');

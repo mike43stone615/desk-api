@@ -30,7 +30,7 @@ describe.skipIf(!hasDb)('E2E: OAuth and GraphQL', () => {
     return { id, headers: { authorization: `Bearer ${token}` } as Record<string, string> };
   }
   const ip = () => ({ 'cf-connecting-ip': `203.0.113.${1 + Math.floor(Math.random() * 250)}` });
-  const call = (method: 'GET' | 'POST' | 'DELETE', url: string, headers: Record<string, string>, payload?: unknown) =>
+  const call = (method: 'GET' | 'POST' | 'PUT' | 'DELETE', url: string, headers: Record<string, string>, payload?: unknown) =>
     app.inject({ method, url, headers: { ...headers, ...ip() }, payload: payload as never });
   const gql = (headers: Record<string, string>, query: string, variables?: unknown) => call('POST', '/v1/graphql', headers, { query, variables });
 
@@ -72,6 +72,63 @@ describe.skipIf(!hasDb)('E2E: OAuth and GraphQL', () => {
     expect((await bad({ scope: 'drafts' })).error).toBe('invalid_scope'); // not registered for it
     expect((await bad({ scope: 'admin' })).error).toBe('invalid_scope');
     expect((await bad({ response_type: 'token' })).error).toBe('unauthorized_client');
+  });
+
+  it('granular scopes: an app gets only the pieces it was approved for, field by field', async () => {
+    const dev = await mkUser('granular-dev');
+    const person = await mkUser('granular');
+    const { client, clientSecret } = await registerApp(dev, ['profile:name', 'businesses:basic', 'businesses:formation']);
+    // asking for a piece the app did not register for is refused before anyone sees a consent page
+    const refused = await call('POST', '/v1/oauth/authorize/decision', person.headers, {
+      clientId: client.id, redirectUri: REDIRECT, scope: 'profile:email', state: 'x', codeChallenge: challengeOf(verifierFor()), codeChallengeMethod: 'S256', responseType: 'code', approve: true,
+    });
+    expect(refused.statusCode).toBe(400);
+    const v = verifierFor();
+    const code = await authorize(person, client.id, 'profile:name businesses:basic', v);
+    const tokens = (await tokenCall({ grant_type: 'authorization_code', client_id: client.id, client_secret: clientSecret!, code, redirect_uri: REDIRECT, code_verifier: v })).json();
+    const bearer = { authorization: `Bearer ${tokens.access_token}` };
+    // REST: the name without the email address
+    const me = (await call('GET', '/v1/auth/session', bearer)).json().user;
+    expect(me).toMatchObject({ id: person.id, firstName: 'granular' });
+    expect(me.email).toBeUndefined();
+    // GraphQL: the name answers, the email is refused on its own
+    const body = (await gql(bearer, '{ viewer { id firstName email } }')).json();
+    expect(body.data.viewer).toMatchObject({ id: person.id, firstName: 'granular', email: null });
+    expect(body.errors[0].extensions.code).toBe('SCOPE_MISSING');
+    // approved businesses:basic but not businesses:formation (registered, not asked for): the list works, the details don't
+    const biz = (await gql(bearer, '{ businesses { id formation { legalEntity } } }')).json();
+    expect(Array.isArray(biz.data.businesses)).toBe(true);
+    expect((await call('GET', '/v1/setup/businesses', bearer)).statusCode).toBe(200);
+    expect((await call('GET', '/v1/setup/invites', bearer)).statusCode).toBe(403);
+  });
+
+  it('the owner can change the redirect addresses of an app and rotate its secret; nobody else can', async () => {
+    const dev = await mkUser('redir-dev');
+    const other = await mkUser('redir-other');
+    const { client, clientSecret } = await registerApp(dev, ['profile:name']);
+    const uris = [REDIRECT, 'https://app.example.org/second', 'http://localhost:8080/cb'];
+    const changed = await call('PUT', `/v1/oauth/clients/${client.id}/redirect-uris`, dev.headers, { redirectUris: uris });
+    expect(changed.statusCode).toBe(200);
+    expect(changed.json().client.redirectUris).toEqual(uris);
+    expect((await call('PUT', `/v1/oauth/clients/${client.id}/redirect-uris`, dev.headers, { redirectUris: ['http://evil.example.org/cb'] })).statusCode).toBe(400);
+    expect((await call('PUT', `/v1/oauth/clients/${client.id}/redirect-uris`, other.headers, { redirectUris: uris })).statusCode).toBe(404);
+
+    const rotated = await call('POST', `/v1/oauth/clients/${client.id}/rotate-secret`, dev.headers, {});
+    expect(rotated.statusCode).toBe(200);
+    const newSecret = rotated.json().clientSecret as string;
+    expect(newSecret).toMatch(/^dsk_cs_/);
+    expect(newSecret).not.toBe(clientSecret);
+    expect((await call('POST', `/v1/oauth/clients/${client.id}/rotate-secret`, other.headers, {})).statusCode).toBe(404);
+    // the old secret no longer works at the token endpoint; the new one does
+    const v = verifierFor();
+    const person = await mkUser('redir-person');
+    const code = await authorize(person, client.id, 'profile:name', v);
+    expect((await tokenCall({ grant_type: 'authorization_code', client_id: client.id, client_secret: clientSecret!, code, redirect_uri: REDIRECT, code_verifier: v })).statusCode).toBe(401);
+    const code2 = await authorize(person, client.id, 'profile:name', v);
+    expect((await tokenCall({ grant_type: 'authorization_code', client_id: client.id, client_secret: newSecret, code: code2, redirect_uri: REDIRECT, code_verifier: v })).statusCode).toBe(200);
+    // a public app has no secret to rotate
+    const pub = await registerApp(dev, ['profile:name'], false);
+    expect((await call('POST', `/v1/oauth/clients/${pub.client.id}/rotate-secret`, dev.headers, {})).statusCode).toBe(400);
   });
 
   it('runs the whole flow: approve, exchange (PKCE), call the API within the scopes, refuse the rest', async () => {

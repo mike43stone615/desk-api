@@ -13,7 +13,7 @@ import { requireAuth, requireConfirmedEmail } from '../middleware/auth';
 import { recordSecurityEvent } from '../modules/audit/security-events';
 import { emitWebhookEvent } from '../domain/webhooks/webhooks';
 import {
-  OAUTH_SCOPES, SCOPE_DESCRIPTIONS, OAuthError, exchangeCode, issueCode, listAuthorizations, oauthClients, parseScopes, refreshTokens,
+  OAUTH_SCOPES, MAX_REDIRECT_URIS, SCOPE_DESCRIPTIONS, OAuthError, exchangeCode, issueCode, listAuthorizations, oauthClients, parseScopes, refreshTokens,
   revokeAuthorization, revokeToken, validateAuthorizeRequest, type AuthorizeRequest,
 } from '../domain/oauth/oauth';
 
@@ -149,7 +149,7 @@ export function registerOAuthTokenRoutes(instance: FastifyInstance): void {
 
 const CreateClientSchema = z.object({
   name: z.string().trim().min(1, 'An app name is required.').max(64, 'App name must be 64 characters or fewer.').transform((v) => v.normalize('NFC')),
-  redirectUris: z.array(z.string().max(500)).min(1).max(5),
+  redirectUris: z.array(z.string().max(500)).min(1).max(MAX_REDIRECT_URIS),
   scopes: z.array(z.enum(OAUTH_SCOPES)).min(1),
   confidential: z.boolean().default(true),
 });
@@ -167,6 +167,45 @@ export async function createClientHandler(request: FastifyRequest, reply: Fastif
     if (err instanceof OAuthError) throw new HttpError(err.code === 'limit_reached' ? 409 : 400, err.message, err.code === 'limit_reached' ? 'oauth_limit_reached' : 'oauth_invalid_request');
     throw err;
   }
+}
+
+const RedirectUrisSchema = z.object({ redirectUris: z.array(z.string().max(500)).min(1).max(MAX_REDIRECT_URIS) });
+
+function oauthHttpError(err: unknown): never {
+  if (err instanceof OAuthError) throw new HttpError(err.code === 'limit_reached' ? 409 : 400, err.message, err.code === 'limit_reached' ? 'oauth_limit_reached' : 'oauth_invalid_request');
+  throw err;
+}
+
+/** Replace an app's redirect addresses (its owner only). */
+export async function updateClientRedirectsHandler(request: FastifyRequest, reply: FastifyReply) {
+  await requireAuth(request, reply);
+  const { id } = request.params as { id: string };
+  const parsed = RedirectUrisSchema.safeParse(request.body ?? {});
+  if (!parsed.success) throw validationError(parsed.error);
+  let client;
+  try {
+    client = await oauthClients.setRedirectUris(request.currentUser!.id, id, parsed.data.redirectUris);
+  } catch (err) {
+    return oauthHttpError(err);
+  }
+  if (!client) throw new HttpError(404, 'No such app.', 'oauth_not_found');
+  audit(request, 'oauth_client_redirects_changed', { userId: request.currentUser!.id, clientId: id });
+  return reply.send({ client });
+}
+
+/** A new client secret for a confidential app (shown once); the old one stops working at once. */
+export async function rotateClientSecretHandler(request: FastifyRequest, reply: FastifyReply) {
+  await requireAuth(request, reply);
+  const { id } = request.params as { id: string };
+  let secret;
+  try {
+    secret = await oauthClients.rotateSecret(request.currentUser!.id, id);
+  } catch (err) {
+    return oauthHttpError(err);
+  }
+  if (!secret) throw new HttpError(404, 'No such app.', 'oauth_not_found');
+  audit(request, 'oauth_client_secret_rotated', { userId: request.currentUser!.id, clientId: id });
+  return reply.send({ clientSecret: secret, note: 'This is the only time the client secret is shown. The old secret has stopped working.' });
 }
 
 export async function listClientsHandler(request: FastifyRequest, reply: FastifyReply) {

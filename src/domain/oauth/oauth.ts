@@ -1,20 +1,19 @@
 // OAuth 2.0 for third-party apps: a person lets an app read their Desk data without giving it a password or a key.
 //   * authorization code flow with PKCE (S256), required for every client, public or confidential;
 //   * access tokens live one hour, refresh tokens 30 days and are replaced on every use (a refresh token works once; presenting a used one again ends the grant);
-//   * scopes are read-only: profile, drafts, businesses (the Desk API's own read scopes) and teams (API keys/plan/usage, GraphQL only — named "teams" for backward compatibility with apps that already requested it, from when it also covered the now-removed Teams feature);
+//   * scopes are read-only and granular (see scopes.ts): e.g. profile:name separately from profile:email; the four original
+//     scopes (profile, drafts, businesses, teams) are still accepted and expand to exactly what they covered;
 //   * tokens and client secrets are stored only as SHA-256 hashes; a person can list and revoke every app they authorized.
 // An access token carries the same restrictions as a Desk API key: it can only reach the read routes on the allow-list.
 import { createHash, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
 import { pool } from '../../db';
+import { ALL_OAUTH_SCOPES, SCOPE_DESCRIPTIONS, expandOAuthScopes, type GranularScope, type OAuthScope } from './scopes';
 
-export const OAUTH_SCOPES = ['profile', 'drafts', 'businesses', 'teams'] as const;
-export type OAuthScope = (typeof OAUTH_SCOPES)[number];
-export const SCOPE_DESCRIPTIONS: Record<OAuthScope, string> = {
-  profile: 'Read your name and e-mail address',
-  drafts: 'Read your unfinished business setups',
-  businesses: 'Read your businesses and their members',
-  teams: 'Read your API keys, plan and usage (never a key’s secret)',
-};
+export { SCOPE_DESCRIPTIONS, type OAuthScope };
+/** Every scope an app may register or ask for: the granular ones plus the four original ones (still accepted). */
+export const OAUTH_SCOPES = ALL_OAUTH_SCOPES;
+/** How many redirect addresses one app may register. */
+export const MAX_REDIRECT_URIS = 50;
 
 export const ACCESS_TOKEN_PREFIX = 'dsk_at_';
 const REFRESH_PREFIX = 'dsk_rt_';
@@ -69,13 +68,16 @@ export function validRedirectUri(uri: string): boolean {
 
 export interface OAuthClient { id: string; name: string; redirectUris: string[]; scopes: OAuthScope[]; confidential: boolean; createdAt: string }
 interface ClientRow { id: string; name: string; redirect_uris: string[]; scopes: OAuthScope[]; secret_hash: string | null; created_at: string; owner_user_id?: string }
+function assertRedirectUris(uris: string[]): void {
+  if (uris.length === 0 || uris.length > MAX_REDIRECT_URIS || !uris.every(validRedirectUri)) {
+    throw new OAuthError('invalid_request', `Give 1 to ${MAX_REDIRECT_URIS} redirect addresses: https, or http on localhost.`);
+  }
+}
 const toClient = (r: ClientRow): OAuthClient => ({ id: r.id, name: r.name, redirectUris: r.redirect_uris, scopes: r.scopes, confidential: r.secret_hash !== null, createdAt: r.created_at });
 
 export const oauthClients = {
   async create(ownerUserId: string, input: { name: string; redirectUris: string[]; scopes: OAuthScope[]; confidential: boolean }): Promise<{ client: OAuthClient; secret: string | null }> {
-    if (input.redirectUris.length === 0 || input.redirectUris.length > 5 || !input.redirectUris.every(validRedirectUri)) {
-      throw new OAuthError('invalid_request', 'Give one to five redirect addresses: https, or http on localhost.');
-    }
+    assertRedirectUris(input.redirectUris);
     const { rows: c } = await pool.query<{ n: string }>(`SELECT COUNT(*) AS n FROM oauth_clients WHERE owner_user_id = $1 AND revoked_at IS NULL`, [ownerUserId]);
     if (Number(c[0]?.n ?? 0) >= MAX_CLIENTS_PER_USER) throw new OAuthError('limit_reached', `You can register at most ${MAX_CLIENTS_PER_USER} apps.`);
     const id = `dsk_client_${randomBytes(12).toString('hex')}`;
@@ -99,6 +101,28 @@ export const oauthClients = {
     return r ? { ...toClient(r), secretHash: r.secret_hash, ownerUserId: r.owner_user_id } : null;
   },
 
+  /** Replaces an app's redirect addresses. A sign-in already in progress to a removed address fails at the token step. */
+  async setRedirectUris(ownerUserId: string, id: string, redirectUris: string[]): Promise<OAuthClient | null> {
+    const uris = [...new Set(redirectUris)];
+    assertRedirectUris(uris);
+    const { rows } = await pool.query<ClientRow>(
+      `UPDATE oauth_clients SET redirect_uris = $3 WHERE id = $1 AND owner_user_id = $2 AND revoked_at IS NULL
+       RETURNING id, name, redirect_uris, scopes, secret_hash, created_at`,
+      [id, ownerUserId, uris],
+    );
+    return rows[0] ? toClient(rows[0]) : null;
+  },
+
+  /** A new client secret for a confidential app (shown once); the old one stops working at once. People's grants are kept. */
+  async rotateSecret(ownerUserId: string, id: string): Promise<string | null> {
+    const client = await this.get(id);
+    if (!client || client.ownerUserId !== ownerUserId) return null;
+    if (!client.confidential) throw new OAuthError('invalid_request', 'This is a public app: it has no client secret to rotate.');
+    const secret = token(CLIENT_SECRET_PREFIX);
+    await pool.query(`UPDATE oauth_clients SET secret_hash = $3 WHERE id = $1 AND owner_user_id = $2 AND revoked_at IS NULL`, [id, ownerUserId, sha(secret)]);
+    return secret;
+  },
+
   /** Removes an app: it can no longer be authorized, and every token it holds stops working at once. */
   async remove(ownerUserId: string, id: string): Promise<boolean> {
     const res = await pool.query(`UPDATE oauth_clients SET revoked_at = $3 WHERE id = $1 AND owner_user_id = $2 AND revoked_at IS NULL`, [id, ownerUserId, now()]);
@@ -119,7 +143,10 @@ export async function validateAuthorizeRequest(q: AuthorizeRequest): Promise<{ c
   if (q.responseType !== 'code') throw new OAuthError('unauthorized_client', 'Only response_type=code is supported.');
   if (!q.codeChallenge || q.codeChallengeMethod !== 'S256' || !/^[A-Za-z0-9_-]{43}$/.test(q.codeChallenge)) throw new OAuthError('invalid_request', 'PKCE is required: send code_challenge (S256, 43 characters) and code_challenge_method=S256.');
   const scopes = parseScopes(q.scope);
-  const notAllowed = scopes.filter((s) => !client.scopes.includes(s));
+  // Compared piece by piece, so an app registered with an original scope (e.g. "profile") may ask for one of its parts
+  // (e.g. "profile:name"), and an app may never get a piece it did not register for.
+  const allowed = expandOAuthScopes(client.scopes);
+  const notAllowed = scopes.filter((s) => [...expandOAuthScopes([s])].some((g) => !allowed.has(g)));
   if (notAllowed.length) throw new OAuthError('invalid_scope', `This app is not registered for: ${notAllowed.join(', ')}.`);
   return { client, scopes };
 }
@@ -195,7 +222,8 @@ export async function revokeToken(clientId: string, clientSecret: string | undef
   await pool.query(`UPDATE oauth_tokens SET revoked_at = $3 WHERE client_id = $1 AND (access_hash = $2 OR refresh_hash = $2) AND revoked_at IS NULL`, [client.id, sha(raw), now()]);
 }
 
-export interface VerifiedOAuthToken { tokenId: string; userId: string; clientId: string; scopes: ReadonlySet<OAuthScope> }
+/** `scopes` is always the granular set (an original scope on an older token is expanded to its parts). */
+export interface VerifiedOAuthToken { tokenId: string; userId: string; clientId: string; scopes: ReadonlySet<GranularScope> }
 
 /** The token's owner and scopes, or null when it is unknown, expired or revoked. Never throws. */
 export async function verifyAccessToken(raw: string): Promise<VerifiedOAuthToken | null> {
@@ -209,7 +237,7 @@ export async function verifyAccessToken(raw: string): Promise<VerifiedOAuthToken
     const t = rows[0];
     if (!t) return null;
     if (!t.last_used_at || Date.now() - Date.parse(t.last_used_at) > 5 * 60_000) pool.query(`UPDATE oauth_tokens SET last_used_at = $2 WHERE id = $1`, [t.id, now()]).catch(() => {});
-    return { tokenId: t.id, userId: t.user_id, clientId: t.client_id, scopes: new Set(t.scopes) };
+    return { tokenId: t.id, userId: t.user_id, clientId: t.client_id, scopes: expandOAuthScopes(t.scopes) };
   } catch {
     return null;
   }
