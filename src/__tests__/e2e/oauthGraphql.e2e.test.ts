@@ -272,6 +272,60 @@ describe.skipIf(!hasDb)('E2E: OAuth and GraphQL', () => {
     expect((await app.inject({ method: 'POST', url: '/v1/graphql', headers: ip(), payload: { query: '{ viewer { id } }' } })).statusCode).toBe(401);
   });
 
+  it('GraphQL: business details come from the finished setup, each behind its own scope', async () => {
+    const owner = await mkUser('bizdetail');
+    const now = new Date().toISOString();
+    const full = {
+      legalEntity: 'LLC', businessStructure: 'llc', taxElection: 'S Corp', specialLegalDesignation: '', formationState: 'OH', formationCity: 'Anna',
+      hasPartners: true, numberOfPartners: 2, isRegisteredBusiness: false, formationAddress: '1 Main St, Anna, OH', formationPlaceId: 'place-1',
+      businessIdea: 'Mobile bike repair', customerType: 'B2C', customerProblem: 'No local shop', geographicScope: 'Local', industry: 'Repair',
+      additionalIndustries: ['Retail', '', 7], businessPlanSections: [{ title: 'Summary', content: 'Hi' }, null, { title: 'Second' }],
+      pricingHypothesis: '$40 a visit', competitors: 'None', validationPlan: 'Ask 20 people',
+      requirements: [{ id: 'r1', title: 'Village license', description: 'Yearly', category: 'LICENSE', selection: 'done' }, { title: 'no id' }, 'junk'],
+      regulatoryStatuses: ['none'], nameAvailability: { label: 'Available' }, marketResearch: { score: 61 },
+      registeredAgentStatus: 'has_one', registeredAgentName: 'Agent Co',
+    };
+    const fullId = rid();
+    const brokenId = rid();
+    for (const [id, name, json] of [[fullId, 'Full Biz', JSON.stringify(full)], [brokenId, 'Broken Biz', '{not json']] as const) {
+      await pool.query(`INSERT INTO businesses (id, user_id, name, industry, business_json, created_at, updated_at) VALUES ($1,$2,$3,'Repair',$4,$5,$5)`, [id, owner.id, name, json, now]);
+      await pool.query(`INSERT INTO business_memberships (id, business_id, user_id, role, accepted_at, created_at, updated_at) VALUES ($1,$2,$3,'owner',$4,$4,$4)`, [rid(), id, owner.id, now]);
+    }
+    const q = `{ businesses { id name formation { legalEntity taxElection formationState hasPartners numberOfPartners isRegisteredBusiness specialLegalDesignation }
+      location { address city state placeId } idea { description customerType additionalIndustries } plan { sections { title content } pricingHypothesis }
+      requirements { items { id title selection } regulatoryStatuses } nameCheck marketResearch registeredAgent { status name } members { role } } }`;
+    const res = (await gql(owner.headers, q)).json();
+    expect(res.errors).toBeUndefined();
+    const byName = Object.fromEntries(res.data.businesses.map((b: { name: string }) => [b.name, b]));
+    const b = byName['Full Biz'];
+    expect(b.formation).toEqual({ legalEntity: 'LLC', taxElection: 'S Corp', formationState: 'OH', hasPartners: true, numberOfPartners: 2, isRegisteredBusiness: false, specialLegalDesignation: null });
+    expect(b.location).toEqual({ address: '1 Main St, Anna, OH', city: 'Anna', state: 'OH', placeId: 'place-1' });
+    expect(b.idea.additionalIndustries).toEqual(['Retail']);
+    expect(b.plan.sections).toEqual([{ title: 'Summary', content: 'Hi' }, { title: 'Second', content: '' }]);
+    expect(b.requirements.items).toEqual([{ id: 'r1', title: 'Village license', selection: 'done' }]);
+    expect(JSON.parse(b.nameCheck)).toEqual({ label: 'Available' });
+    expect(JSON.parse(b.marketResearch)).toEqual({ score: 61 });
+    expect(b.registeredAgent).toEqual({ status: 'has_one', name: 'Agent Co' });
+    expect(b.members).toEqual([{ role: 'owner' }]);
+    // an unreadable stored setup still lists, with every detail empty rather than an error
+    const broken = byName['Broken Biz'];
+    expect(broken.formation.legalEntity).toBeNull();
+    expect(broken.plan.sections).toEqual([]);
+    expect(broken.nameCheck).toBeNull();
+
+    // an app approved only for businesses:basic gets the list, and each detail is refused on its own
+    const dev = await mkUser('bizdetail-dev');
+    const { client, clientSecret } = await registerApp(dev, ['businesses:basic', 'businesses:plan']);
+    const v = verifierFor();
+    const code = await authorize(owner, client.id, 'businesses:basic', v);
+    const tokens = (await tokenCall({ grant_type: 'authorization_code', client_id: client.id, client_secret: clientSecret!, code, redirect_uri: REDIRECT, code_verifier: v })).json();
+    const viaApp = (await gql({ authorization: `Bearer ${tokens.access_token}` }, '{ businesses { name plan { pricingHypothesis } location { city } } }')).json();
+    expect(viaApp.data.businesses.map((x: { name: string }) => x.name).sort()).toEqual(['Broken Biz', 'Full Biz']);
+    expect(viaApp.data.businesses.every((x: { plan: unknown; location: unknown }) => x.plan === null && x.location === null)).toBe(true);
+    expect(new Set(viaApp.errors.map((e: { extensions: { scope: string } }) => e.extensions.scope))).toEqual(new Set(['businesses:plan', 'businesses:location']));
+    await pool.query('DELETE FROM businesses WHERE id = ANY($1)', [[fullId, brokenId]]);
+  });
+
   it('GraphQL: an API key or an OAuth app sees only what its scopes allow', async () => {
     const u = await mkUser('gq2');
     const key = await gatewayApiKeys.create(u.id, 'profile only', ['desk_api'], undefined, ['profile']);
