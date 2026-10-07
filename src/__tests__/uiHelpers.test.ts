@@ -1,7 +1,7 @@
 // The small pure helpers behind the Webhooks, Apps and Plans & billing pages, and the shared tab row.
 import { describe, it, expect } from 'vitest';
 // @ts-expect-error plain browser module without type declarations
-import { formatMoney, monthLabel, usageShare, parseLines, statusChip, EVENT_LABELS, SCOPE_LABELS, SCOPE_GROUPS } from '../../library-ui/format.js';
+import { formatMoney, periodText, usageShare, parseLines, statusChip, EVENT_LABELS, SCOPE_LABELS, SCOPE_GROUPS } from '../../library-ui/format.js';
 import { ALL_OAUTH_SCOPES, APP_SCOPES } from '../domain/oauth/scopes';
 // @ts-expect-error plain browser module without type declarations
 import { TABS, tabsHtml, setAdminTab } from '../../library-ui/tabs.js';
@@ -20,12 +20,12 @@ describe('formatMoney', () => {
   });
 });
 
-describe('monthLabel', () => {
-  it('names the month in UTC so it never shifts with the reader\'s time zone', () => {
-    expect(monthLabel('2026-09-01T00:00:00.000Z')).toBe('September 2026');
-    expect(monthLabel('2026-01-01T00:00:00.000Z')).toBe('January 2026');
+describe('periodText', () => {
+  it("shows a period's first and last day in UTC (the stored end is the next period's first moment)", () => {
+    expect(periodText('2026-07-20T00:00:00.000Z', '2026-08-20T00:00:00.000Z')).toBe('July 20, 2026 - August 19, 2026');
+    expect(periodText('2026-10-01T00:00:00.000Z', '2026-11-01T00:00:00.000Z')).toBe('October 1, 2026 - October 31, 2026');
   });
-  it('is blank for a bad date', () => expect(monthLabel('nope')).toBe(''));
+  it('is blank for a bad date', () => expect(periodText('nope', 'nope')).toBe(''));
 });
 
 describe('usageShare', () => {

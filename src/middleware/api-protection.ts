@@ -249,6 +249,7 @@ export function registerApiProtection(app: FastifyInstance) {
     // shares its address. Keyed by a hash of whatever was presented, so the header value itself is never stored; a
     // made-up key still costs the address's own allowance below, so rotating fake keys gains nothing.
     const presentedKey = request.headers['x-api-key'];
+    let realKey: { limit: number; remaining: number; resetAt: number } | null = null;
     if (typeof presentedKey === 'string' && presentedKey.startsWith(GATEWAY_KEY_PREFIX)) {
       // An administrator can give a partner's key its own limit (keyRateFactor); otherwise half an address's.
       const info = await keyBucketInfo(presentedKey, config.rateLimitPerMinute);
@@ -258,6 +259,16 @@ export function registerApiProtection(app: FastifyInstance) {
       if (!keyResult.allowed) {
         return tooManyRequests(request, reply, keyResult.reason, keyResult.resetAt, scaled(config.rateLimitPerMinute, factor));
       }
+      if (info.known === true) realKey = { limit: scaled(config.rateLimitPerMinute, factor), remaining: keyResult.remaining, resetAt: keyResult.resetAt };
+    }
+    // A real key's calls are limited by its own bucket above and by its owner's plan (domain/billing/allowance.ts), so they
+    // skip the address's allowance: otherwise a Pro or Business server could never reach its plan's per-minute limits.
+    // A made-up key is not "known", so it still costs the address, and rotating fake keys gains nothing.
+    if (realKey) {
+      reply.header('X-RateLimit-Limit', String(realKey.limit));
+      reply.header('X-RateLimit-Remaining', String(realKey.remaining));
+      reply.header('X-RateLimit-Reset', String(realKey.resetAt));
+      return;
     }
 
     const bucketKey = `ip:${getClientIp(request)}`;

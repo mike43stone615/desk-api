@@ -8,13 +8,6 @@ export function formatMoney(cents, currency = 'usd') {
   }
 }
 
-/** "September 2026" for a period start such as 2026-09-01T00:00:00.000Z (UTC, so the month never shifts with the reader's time zone). */
-export function monthLabel(iso) {
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return '';
-  return d.toLocaleDateString('en-US', { month: 'long', year: 'numeric', timeZone: 'UTC' });
-}
-
 /** How much of the included allowance has been used, as a whole percent capped at 100, and whether it has gone over. */
 export function usageShare(used, included) {
   const u = Math.max(0, Number(used) || 0);
@@ -88,4 +81,13 @@ export function parseLines(text) {
 
 export function statusChip(delivery) {
   return { delivered: 'Delivered', pending: 'Waiting to retry', failed: 'Failed' }[delivery.status] || delivery.status;
+}
+
+/** "July 20, 2026 - August 19, 2026": a period's first and last day (its stored end is the next period's first moment). */
+export function periodText(start, end) {
+  const fmt = (d) => d.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric', timeZone: 'UTC' });
+  const first = new Date(start);
+  const last = new Date(new Date(end).getTime() - 86_400_000);
+  if (Number.isNaN(first.getTime()) || Number.isNaN(last.getTime())) return '';
+  return `${fmt(first)} - ${fmt(last)}`;
 }

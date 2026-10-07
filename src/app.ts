@@ -132,6 +132,7 @@ import { buildStatus, statusHtml } from './domain/health/status';
 import { ERROR_CODES } from './middleware/error-codes';
 import { registerPathParamCheck } from './middleware/path-params';
 import { recordKeyUsage } from './domain/gateway/usage';
+import { recordCall } from './domain/billing/allowance';
 import { routeKey } from './middleware/route-limits';
 import { sendWithEtag } from './middleware/etag';
 
@@ -487,7 +488,10 @@ export async function buildApp(options: { logStream?: { write: (line: string) =>
     // Calls made with an API Library key are counted per key and day (what the developer sees) and per API (metrics).
     if (request.gatewayKey) {
       const proxied = /\/gateway\/(registry|market)\//.exec(request.url);
-      recordKeyUsage(request.gatewayKey.id, proxied ? (proxied[1] === 'registry' ? 'registry_api' : 'market_validation_api') : 'desk_api', reply.statusCode);
+      const service = proxied ? (proxied[1] === 'registry' ? 'registry_api' : 'market_validation_api') : 'desk_api';
+      recordKeyUsage(request.gatewayKey.id, service, reply.statusCode);
+      // Plan allowance (domain/billing/allowance.ts): only calls that went through count; sandbox keys never do.
+      if (reply.statusCode < 400 && !request.gatewayKey.sandbox) recordCall(request.gatewayKey.ownerUserId, service);
     }
     if (start !== undefined) {
       httpRequestDurationMs.observe({ method, route }, Date.now() - start);

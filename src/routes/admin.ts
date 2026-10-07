@@ -236,8 +236,8 @@ const TABLES = {
   },
   plans: {
     primaryKey: 'id',
-    columns: ['id', 'name', 'description', 'monthly_price_cents', 'included_analyses', 'overage_cents_per_analysis', 'per_minute_limit', 'max_keys', 'max_webhooks', 'active', 'sort_order'],
-    editable: ['name', 'description', 'monthly_price_cents', 'included_analyses', 'overage_cents_per_analysis', 'per_minute_limit', 'max_keys', 'max_webhooks', 'active', 'sort_order'],
+    columns: ['id', 'name', 'description', 'monthly_price_cents', 'included_analyses', 'overage_cents_per_analysis', 'per_minute_limit', 'max_keys', 'max_webhooks', 'max_apps', 'service_per_minute', 'service_per_month', 'total_per_minute', 'total_per_month', 'overage_cents_per_call', 'active', 'sort_order'],
+    editable: ['name', 'description', 'monthly_price_cents', 'included_analyses', 'overage_cents_per_analysis', 'per_minute_limit', 'max_keys', 'max_webhooks', 'max_apps', 'service_per_minute', 'service_per_month', 'total_per_minute', 'total_per_month', 'overage_cents_per_call', 'active', 'sort_order'],
     secret: [],
     deletable: false, // switch a plan off (active = false) instead
   },
@@ -477,9 +477,10 @@ export function validateEditableValue(
 /** Columns edited as whole numbers, booleans, and which of the numbers may be left empty (NULL). */
 const INTEGER_COLUMNS = new Set([
   'teams.rate_limit_per_minute', 'plans.monthly_price_cents', 'plans.included_analyses', 'plans.overage_cents_per_analysis', 'plans.per_minute_limit',
-  'plans.max_keys', 'plans.max_webhooks', 'plans.sort_order', 'webhook_endpoints.consecutive_failures', 'gateway_api_keys.rate_limit_per_minute',
+  'plans.max_keys', 'plans.max_webhooks', 'plans.sort_order', 'plans.max_apps', 'plans.service_per_minute', 'plans.service_per_month',
+  'plans.total_per_minute', 'plans.total_per_month', 'plans.overage_cents_per_call', 'webhook_endpoints.consecutive_failures', 'gateway_api_keys.rate_limit_per_minute',
 ]);
-const NULLABLE_INTEGER_COLUMNS = new Set(['teams.rate_limit_per_minute', 'plans.overage_cents_per_analysis', 'plans.per_minute_limit', 'gateway_api_keys.rate_limit_per_minute']);
+const NULLABLE_INTEGER_COLUMNS = new Set(['teams.rate_limit_per_minute', 'plans.overage_cents_per_analysis', 'plans.per_minute_limit', 'plans.overage_cents_per_call', 'gateway_api_keys.rate_limit_per_minute']);
 const BOOLEAN_COLUMNS = new Set(['plans.active', 'webhook_endpoints.active']);
 
 /** A rule the database itself enforces (a limit, a link to another row, a duplicate) becomes a plain 400 rather than a 500. */

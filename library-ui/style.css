@@ -657,7 +657,7 @@ table.admin-table td.admin-actions-cell { white-space: nowrap; }
 .plan-list { margin: var(--sp-sm) 0 0; padding-left: 1.1rem; font-size: 0.9rem; }
 .usage-row span:last-child { white-space: nowrap; }
 .usage-row { display: flex; justify-content: space-between; gap: var(--sp-md); font-size: 0.9rem; margin-top: var(--sp-md); }
-.usage-bar { height: 10px; border-radius: 6px; background: var(--line); overflow: hidden; margin: var(--sp-xs, 4px) 0 var(--sp-sm); }
+.usage-bar { height: 10px; border-radius: 6px; background: var(--line); overflow: hidden; margin: var(--sp-xs) 0 var(--sp-sm); }
 .usage-fill { height: 100%; background: var(--accent); border-radius: 6px; }
 .usage-fill.over { background: var(--error); }
 .table-wrap { overflow-x: auto; padding: 0; }
@@ -783,3 +783,18 @@ table.admin-table td.admin-actions-cell { white-space: nowrap; }
 /* Pop-ups never scroll sideways, however long their contents. */
 .modal { overflow-x: hidden; }
 .modal input { min-width: 0; }
+
+/* Plans & billing: the three plan cards share one grid, and each card takes its rows from it (subgrid), so the same
+   section (Desk API, API keys, ...) sits at the same height in every card whatever its contents. */
+.plan-grid-aligned { grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); row-gap: 0; align-items: stretch; }
+.plan-grid-aligned .plan-card { display: grid; grid-row: span 10; grid-template-rows: subgrid; row-gap: var(--sp-md); margin-bottom: var(--sp-md); }
+.plan-row { min-width: 0; }
+.plan-row .usage-row { margin-top: var(--sp-xs); }
+.plan-row-title { font-weight: 600; font-size: 0.95rem; }
+.plan-head-row .plan-period { font-size: 0.85rem; color: var(--ink-soft); text-align: right; margin-top: var(--sp-xs); }
+.plan-price { margin: 0; }
+.meta-chip.plan-active { border-color: var(--accent); color: var(--accent); }
+.btn.btn-sm { padding: 4px 12px; min-height: 0; font-size: 0.85rem; }
+.invoice-list { display: flex; flex-direction: column; gap: var(--sp-sm); }
+.invoice-card { padding: var(--sp-md) var(--sp-lg); }
+.load-more-row { display: flex; justify-content: center; margin-top: var(--sp-md); }

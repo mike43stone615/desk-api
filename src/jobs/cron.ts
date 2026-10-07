@@ -29,6 +29,7 @@ import { revokeExpiredKeys } from '../domain/gateway/expiry';
 import { config } from '../config';
 import { deleteOldDeliveries, processDueDeliveries } from '../domain/webhooks/webhooks';
 import { generateInvoices } from '../domain/billing/plans';
+import { pruneMinuteUsage } from '../domain/billing/allowance';
 import { processOutbox } from '../domain/email/outbox';
 import { checkMailKeyIfChanged } from '../domain/email/key-check';
 
@@ -59,6 +60,10 @@ export function startCleanupCron(log: FastifyBaseLogger): void {
     deleteOldDeliveries().catch((err) => log.error({ err }, 'webhook clean-up failed'));
   });
   // Draft invoices for last month, on the 1st (safe to repeat: one invoice per subject per month).
+  // Per-minute plan counters are only needed for the current minute; keep a day of them, delete the rest.
+  cron.schedule('50 4 * * *', () => {
+    pruneMinuteUsage().catch((err) => log.error({ err }, 'api usage prune failed'));
+  });
   cron.schedule('20 4 1 * *', () => {
     generateInvoices().catch((err) => log.error({ err }, 'invoice run failed'));
   });

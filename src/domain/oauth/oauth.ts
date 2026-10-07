@@ -7,6 +7,7 @@
 // An access token carries the same restrictions as a Desk API key: it can only reach the read routes on the allow-list.
 import { createHash, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
 import { pool } from '../../db';
+import { subscriptionFor } from '../billing/plans';
 import { ALL_OAUTH_SCOPES, SCOPE_DESCRIPTIONS, expandOAuthScopes, type GranularScope, type OAuthScope } from './scopes';
 
 export { SCOPE_DESCRIPTIONS, type OAuthScope };
@@ -79,7 +80,9 @@ export const oauthClients = {
   async create(ownerUserId: string, input: { name: string; redirectUris: string[]; scopes: OAuthScope[]; confidential: boolean }): Promise<{ client: OAuthClient; secret: string | null }> {
     assertRedirectUris(input.redirectUris);
     const { rows: c } = await pool.query<{ n: string }>(`SELECT COUNT(*) AS n FROM oauth_clients WHERE owner_user_id = $1 AND revoked_at IS NULL`, [ownerUserId]);
-    if (Number(c[0]?.n ?? 0) >= MAX_CLIENTS_PER_USER) throw new OAuthError('limit_reached', `You can register at most ${MAX_CLIENTS_PER_USER} apps.`);
+    // The cap comes from the person's plan (Free 1, Pro 3, Business 10); MAX_CLIENTS_PER_USER stays the ceiling of any plan's.
+    const cap = Math.min((await subscriptionFor('user', ownerUserId)).plan.maxApps, MAX_CLIENTS_PER_USER);
+    if (Number(c[0]?.n ?? 0) >= cap) throw new OAuthError('limit_reached', `Your plan allows ${cap} app${cap === 1 ? '' : 's'}. Remove one first.`);
     const id = `dsk_client_${randomBytes(12).toString('hex')}`;
     const secret = input.confidential ? token(CLIENT_SECRET_PREFIX) : null;
     const { rows } = await pool.query<ClientRow>(

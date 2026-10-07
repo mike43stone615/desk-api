@@ -467,13 +467,13 @@ const BASE_SPEC = {
       delete: { tags: ['API Library'], summary: 'Decline a pending share, or remove yourself from one you had accepted', security: [{ SessionToken: [] }], parameters: [{ name: 'shareId', in: 'path', required: true, schema: { type: 'string' } }], responses: { '204': { description: 'Declined' }, '404': { description: 'No such share' } } },
     },
     '/billing/plans': {
-      get: { tags: ['Billing'], summary: 'The plans and what each includes (public). Prices are draft figures until billing is switched on', responses: { '200': { description: 'The plans' } } },
+      get: { tags: ['Billing'], summary: 'The plans and what each includes (public): price, calls a minute and a month for each API and for all three, the price of calls beyond the monthly limits (none on Free: they are refused), included market analyses, and key, webhook and app limits. Prices are draft figures until billing is switched on', responses: { '200': { description: 'The plans' } } },
     },
     '/billing/subscription': {
-      get: { tags: ['Billing'], summary: 'Your plan and this month\'s metered usage', security: [{ SessionToken: [] }], responses: { '200': { description: 'The subscription and usage' } } },
+      get: { tags: ['Billing'], summary: 'Your plan and your usage against it: calls made with your API keys in the current minute and month (per API and in total), market analyses this month, and how many keys, webhook endpoints and apps you have', security: [{ SessionToken: [] }], responses: { '200': { description: 'The subscription and usage' } } },
     },
     '/billing/invoices': {
-      get: { tags: ['Billing'], summary: 'Your invoices, newest first', security: [{ SessionToken: [] }], responses: { '200': { description: 'The invoices, newest first' } } },
+      get: { tags: ['Billing'], summary: 'Your invoices, newest first, a page at a time (hasMore says whether another page follows)', security: [{ SessionToken: [] }], parameters: [{ name: 'limit', in: 'query', required: false, schema: { type: 'integer', minimum: 1, maximum: 50, default: 10 } }, { name: 'offset', in: 'query', required: false, schema: { type: 'integer', minimum: 0, default: 0 } }], responses: { '200': { description: 'One page of invoices, newest first, with the account name' }, '400': { description: 'limit or offset out of range' } } },
     },
     '/admin/billing/{type}/{id}/plan': {
       post: { tags: ['Admin'], summary: 'Put a user on a plan (there is no payment provider yet)', security: [{ SessionToken: [] }], parameters: [{ name: 'type', in: 'path', required: true, schema: { type: 'string', enum: ['user'] } }, { name: 'id', in: 'path', required: true, schema: { type: 'string' } }], responses: { '200': { description: 'The new subscription' }, '400': { description: 'No such plan (code unknown_plan)' }, '404': { description: 'No such user' } } },

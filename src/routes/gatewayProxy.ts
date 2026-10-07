@@ -11,7 +11,8 @@
 // for the one parameterised endpoint, a strict slug pattern, so traversal
 // (`..`, encoded slashes) can't reach /admin or anything else.
 import { emitWebhookEvent } from '../domain/webhooks/webhooks';
-import { meterAnalysis } from '../domain/billing/plans';
+import { analysesInMonth, meterAnalysis, subscriptionFor } from '../domain/billing/plans';
+import { analysisRefusal, enforceCallAllowance, limitError } from '../domain/billing/allowance';
 import type { FastifyReply, FastifyRequest } from 'fastify';
 import { hit, type Limit } from '../middleware/route-limits';
 import { HttpError, problemBody } from '../middleware/http-error';
@@ -147,8 +148,15 @@ async function forward(service: BrokeredService, request: FastifyRequest, reply:
     return reply.status(sample.status).send(sample.body);
   }
 
-  // A market analysis costs real money upstream (outside data and AI): each key may make a limited number a day.
+  // The owner's plan limits for this API (per minute, and per month on Free).
+  await enforceCallAllowance(verified.ownerUserId, service);
+
+  // A market analysis costs real money upstream (outside data and AI): each key may make a limited number a day, and the
+  // Free plan stops at its included number a month (paid plans are billed for the extra).
   if (service === 'market_validation_api' && route.method === 'POST' && upstreamPath === '/research/analyze') {
+    const [{ plan }, analysesUsed] = await Promise.all([subscriptionFor('user', verified.ownerUserId), analysesInMonth('user', verified.ownerUserId)]);
+    const refusal = analysisRefusal(plan, analysesUsed);
+    if (refusal) throw limitError(refusal);
     const wait = await hit(MARKET_ANALYSIS_DAILY, verified.id);
     if (wait > 0) {
       reply.header('Retry-After', String(wait));

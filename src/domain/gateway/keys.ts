@@ -509,6 +509,8 @@ const FACTOR_TTL_MS = 60_000;
 export interface KeyBucketInfo {
   /** The share of an address's allowance the bucket gets; null for the standard share. */
   factor: number | null;
+  /** True when the key exists and is not revoked: its calls are then limited by its own bucket and its owner's plan. */
+  known?: boolean;
 }
 
 /**
@@ -523,8 +525,8 @@ export async function keyBucketInfo(plaintext: string, perMinuteOfAnAddress: num
   if (hit && now - hit.at < FACTOR_TTL_MS) return hit.info;
   let info: KeyBucketInfo;
   try {
-    const { rows } = await pool.query<{ rate_limit_per_minute: number | null; plan_limit: number | null }>(
-      `SELECT k.rate_limit_per_minute, p.per_minute_limit AS plan_limit
+    const { rows } = await pool.query<{ rate_limit_per_minute: number | null; plan_limit: number | null; revoked: boolean }>(
+      `SELECT k.rate_limit_per_minute, p.per_minute_limit AS plan_limit, k.revoked_at IS NOT NULL AS revoked
          FROM gateway_api_keys k
          LEFT JOIN subscriptions s ON s.subject_type = 'user' AND s.subject_id = k.owner_user_id AND s.status <> 'canceled'
          LEFT JOIN plans p ON p.id = s.plan_id
@@ -533,7 +535,7 @@ export async function keyBucketInfo(plaintext: string, perMinuteOfAnAddress: num
     );
     const r = rows[0];
     // Precedence: an administrator's limit for the key, then the plan's, then the standard one.
-    info = { factor: r?.rate_limit_per_minute ? r.rate_limit_per_minute / perMinuteOfAnAddress : r?.plan_limit ? r.plan_limit / perMinuteOfAnAddress : null };
+    info = { factor: r?.rate_limit_per_minute ? r.rate_limit_per_minute / perMinuteOfAnAddress : r?.plan_limit ? r.plan_limit / perMinuteOfAnAddress : null, known: Boolean(r && !r.revoked) };
   } catch {
     info = { factor: null };
   }

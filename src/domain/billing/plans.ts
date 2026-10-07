@@ -9,6 +9,7 @@ import { pool } from '../../db';
 import { config } from '../../config';
 import { emitWebhookEvent } from '../webhooks/webhooks';
 import { sendUsageThresholdEmail } from '../../infrastructure/email/resend';
+import { extraCalls, monthTally, type CallTally } from './allowance';
 
 export type SubjectType = 'user' | 'team';
 
@@ -22,21 +23,37 @@ export interface Plan {
   perMinuteLimit: number | null;
   maxKeys: number;
   maxWebhooks: number;
+  maxApps: number;
+  /** Calls a minute / a month to each API, and to all three together (migration 0030). */
+  servicePerMinute: number;
+  servicePerMonth: number;
+  totalPerMinute: number;
+  totalPerMonth: number;
+  /** What one call beyond a monthly limit costs; null = such calls are refused (Free). */
+  overageCentsPerCall: number | null;
 }
 
 interface PlanRow {
   id: string; name: string; description: string; monthly_price_cents: number; included_analyses: number;
   overage_cents_per_analysis: number | null; per_minute_limit: number | null; max_keys: number; max_webhooks: number;
+  max_apps: number; service_per_minute: number; service_per_month: number; total_per_minute: number; total_per_month: number;
+  overage_cents_per_call: number | null;
 }
-const PLAN_COLUMNS = 'id, name, description, monthly_price_cents, included_analyses, overage_cents_per_analysis, per_minute_limit, max_keys, max_webhooks';
+const PLAN_FIELDS = ['id', 'name', 'description', 'monthly_price_cents', 'included_analyses', 'overage_cents_per_analysis', 'per_minute_limit',
+  'max_keys', 'max_webhooks', 'max_apps', 'service_per_minute', 'service_per_month', 'total_per_minute', 'total_per_month', 'overage_cents_per_call'];
+const PLAN_COLUMNS = PLAN_FIELDS.join(', ');
+const PLAN_COLUMNS_P = PLAN_FIELDS.map((f) => `p.${f}`).join(', ');
 const toPlan = (r: PlanRow): Plan => ({
   id: r.id, name: r.name, description: r.description, monthlyPriceCents: r.monthly_price_cents, includedAnalyses: r.included_analyses,
   overageCentsPerAnalysis: r.overage_cents_per_analysis ?? null, perMinuteLimit: r.per_minute_limit ?? null, maxKeys: r.max_keys, maxWebhooks: r.max_webhooks,
+  maxApps: r.max_apps, servicePerMinute: r.service_per_minute, servicePerMonth: r.service_per_month, totalPerMinute: r.total_per_minute,
+  totalPerMonth: r.total_per_month, overageCentsPerCall: r.overage_cents_per_call ?? null,
 });
 
 /** The plan used when nothing is recorded (and if the plans table cannot be read): the limits that applied before plans. */
 export const FALLBACK_FREE_PLAN: Plan = {
-  id: 'free', name: 'Free', description: '', monthlyPriceCents: 0, includedAnalyses: 300, overageCentsPerAnalysis: null, perMinuteLimit: null, maxKeys: 10, maxWebhooks: 3,
+  id: 'free', name: 'Free', description: '', monthlyPriceCents: 0, includedAnalyses: 5, overageCentsPerAnalysis: null, perMinuteLimit: 100, maxKeys: 10, maxWebhooks: 3,
+  maxApps: 1, servicePerMinute: 60, servicePerMonth: 300, totalPerMinute: 100, totalPerMonth: 500, overageCentsPerCall: null,
 };
 
 export async function listPlans(): Promise<Plan[]> {
@@ -65,8 +82,7 @@ export async function subscriptionFor(subjectType: SubjectType, subjectId: strin
   const virtual = (plan: Plan): Subscription => ({ id: null, subjectType, subjectId, plan, status: 'active', periodStart: start.toISOString(), periodEnd: nextMonth(start).toISOString(), provider: 'manual' });
   try {
     const { rows } = await pool.query<PlanRow & { sid: string; status: Subscription['status']; period_start: string; period_end: string; provider: string }>(
-      `SELECT s.id AS sid, s.status, s.period_start, s.period_end, s.provider, p.id, p.name, p.description, p.monthly_price_cents, p.included_analyses,
-              p.overage_cents_per_analysis, p.per_minute_limit, p.max_keys, p.max_webhooks
+      `SELECT s.id AS sid, s.status, s.period_start, s.period_end, s.provider, ${PLAN_COLUMNS_P}
          FROM subscriptions s JOIN plans p ON p.id = s.plan_id
         WHERE s.subject_type = $1 AND s.subject_id = $2 AND s.status <> 'canceled'`,
       [subjectType, subjectId],
@@ -156,15 +172,21 @@ export interface InvoiceLine { description: string; quantity: number; unitCents:
 export interface Invoice {
   id: string; subjectType: SubjectType; subjectId: string; planId: string; periodStart: string; periodEnd: string; currency: string;
   lines: InvoiceLine[]; subtotalCents: number; status: 'draft' | 'open' | 'paid' | 'void'; createdAt: string;
+  /** The plan's name as it is now (e.g. "Pro"). */
+  planName: string;
 }
 
 /** The lines of one month's invoice for a subscription, from exact metering. Pure. */
-export function invoiceLines(plan: Plan, analyses: number): InvoiceLine[] {
+export function invoiceLines(plan: Plan, analyses: number, calls?: CallTally): InvoiceLine[] {
   const lines: InvoiceLine[] = [];
   if (plan.monthlyPriceCents > 0) lines.push({ description: `${plan.name} plan, one month`, quantity: 1, unitCents: plan.monthlyPriceCents, totalCents: plan.monthlyPriceCents });
   const extra = Math.max(0, analyses - plan.includedAnalyses);
   if (extra > 0 && plan.overageCentsPerAnalysis) {
     lines.push({ description: `Market analyses beyond the ${plan.includedAnalyses.toLocaleString('en-US')} included`, quantity: extra, unitCents: plan.overageCentsPerAnalysis, totalCents: extra * plan.overageCentsPerAnalysis });
+  }
+  const extraApiCalls = calls ? extraCalls(plan, calls) : 0;
+  if (extraApiCalls > 0 && plan.overageCentsPerCall) {
+    lines.push({ description: "API calls beyond the plan's monthly limits", quantity: extraApiCalls, unitCents: plan.overageCentsPerCall, totalCents: extraApiCalls * plan.overageCentsPerCall });
   }
   return lines;
 }
@@ -179,8 +201,7 @@ export async function generateInvoices(month?: string): Promise<number> {
   const start = new Date(`${target}-01T00:00:00Z`);
   const end = nextMonth(start);
   const { rows } = await pool.query<PlanRow & { subject_type: SubjectType; subject_id: string }>(
-    `SELECT s.subject_type, s.subject_id, p.id, p.name, p.description, p.monthly_price_cents, p.included_analyses, p.overage_cents_per_analysis,
-            p.per_minute_limit, p.max_keys, p.max_webhooks
+    `SELECT s.subject_type, s.subject_id, ${PLAN_COLUMNS_P}
        FROM subscriptions s JOIN plans p ON p.id = s.plan_id
       WHERE s.status <> 'canceled' AND s.created_at < $1`,
     [end.toISOString()],
@@ -188,7 +209,8 @@ export async function generateInvoices(month?: string): Promise<number> {
   let made = 0;
   for (const r of rows) {
     const plan = toPlan(r);
-    const lines = invoiceLines(plan, await analysesInMonth(r.subject_type, r.subject_id, target));
+    const calls = r.subject_type === 'user' ? await monthTally(r.subject_id, target) : undefined;
+    const lines = invoiceLines(plan, await analysesInMonth(r.subject_type, r.subject_id, target), calls);
     if (lines.length === 0) continue;
     const res = await pool.query(
       `INSERT INTO invoices (id, subject_type, subject_id, plan_id, period_start, period_end, lines, subtotal_cents)
@@ -200,13 +222,18 @@ export async function generateInvoices(month?: string): Promise<number> {
   return made;
 }
 
-export async function invoicesFor(subjectType: SubjectType, subjectId: string): Promise<Invoice[]> {
-  const { rows } = await pool.query<{ id: string; plan_id: string; period_start: string; period_end: string; currency: string; lines: string; subtotal_cents: number; status: Invoice['status']; created_at: string }>(
-    `SELECT id, plan_id, period_start, period_end, currency, lines, subtotal_cents, status, created_at FROM invoices
-      WHERE subject_type = $1 AND subject_id = $2 ORDER BY period_start DESC LIMIT 60`,
-    [subjectType, subjectId],
+/** One page of the subject's invoices, newest first. Asks for one more than `limit` to know whether more follow. */
+export async function invoicesFor(subjectType: SubjectType, subjectId: string, page: { limit?: number; offset?: number } = {}): Promise<{ invoices: Invoice[]; hasMore: boolean }> {
+  const limit = Math.min(Math.max(page.limit ?? 10, 1), 50);
+  const offset = Math.max(page.offset ?? 0, 0);
+  const { rows } = await pool.query<{ id: string; plan_id: string; period_start: string; period_end: string; currency: string; lines: string; subtotal_cents: number; status: Invoice['status']; created_at: string; plan_name: string | null }>(
+    `SELECT i.id, i.plan_id, i.period_start, i.period_end, i.currency, i.lines, i.subtotal_cents, i.status, i.created_at, p.name AS plan_name
+       FROM invoices i LEFT JOIN plans p ON p.id = i.plan_id
+      WHERE i.subject_type = $1 AND i.subject_id = $2 ORDER BY i.period_start DESC, i.id LIMIT $3 OFFSET $4`,
+    [subjectType, subjectId, limit + 1, offset],
   );
-  return rows.map((r) => ({ id: r.id, subjectType, subjectId, planId: r.plan_id, periodStart: r.period_start, periodEnd: r.period_end, currency: r.currency, lines: JSON.parse(r.lines) as InvoiceLine[], subtotalCents: r.subtotal_cents, status: r.status, createdAt: r.created_at }));
+  const invoices = rows.slice(0, limit).map((r) => ({ id: r.id, subjectType, subjectId, planId: r.plan_id, periodStart: r.period_start, periodEnd: r.period_end, currency: r.currency, lines: JSON.parse(r.lines) as InvoiceLine[], subtotalCents: r.subtotal_cents, status: r.status, createdAt: r.created_at, planName: r.plan_name ?? r.plan_id }));
+  return { invoices, hasMore: rows.length > limit };
 }
 
 export async function setInvoiceStatus(id: string, status: Invoice['status']): Promise<boolean> {

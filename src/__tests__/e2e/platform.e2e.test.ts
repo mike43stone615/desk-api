@@ -9,6 +9,7 @@ import { buildApp } from '../../app';
 import { config } from '../../config';
 import { subscriptionFor, meterAnalysis, generateInvoices, invoicesFor } from '../../domain/billing/plans';
 import { keyBucketInfo, forgetKeyRateFactors } from '../../domain/gateway/keys';
+import { callCounts, enforceCallAllowance, ownedCounts, pruneMinuteUsage, recordCall } from '../../domain/billing/allowance';
 import { emitWebhookEvent, processDueDeliveries, verifySignature, type Sender } from '../../domain/webhooks/webhooks';
 import type { FastifyInstance } from 'fastify';
 
@@ -62,7 +63,7 @@ describe.skipIf(!hasDb)('E2E: plans, invoices and webhooks', () => {
     if (!adminUser.headers) return; // the shared admin address already existed from another run
     const res = await call('POST', `/v1/admin/billing/user/${u.id}/plan`, adminUser as { headers: Record<string, string> }, { planId: 'developer' });
     expect(res.statusCode).toBe(200);
-    expect((await subscriptionFor('user', u.id)).plan).toMatchObject({ id: 'developer', perMinuteLimit: 120, maxKeys: 25 });
+    expect((await subscriptionFor('user', u.id)).plan).toMatchObject({ id: 'developer', name: 'Pro', monthlyPriceCents: 1500, perMinuteLimit: 1000, maxKeys: 25, maxApps: 3, servicePerMinute: 600, totalPerMonth: 5000, overageCentsPerCall: 5 });
     expect((await call('POST', `/v1/admin/billing/user/${u.id}/plan`, adminUser as { headers: Record<string, string> }, { planId: 'nonsense' })).statusCode).toBe(400);
     // the key of a person on the Developer plan is limited to the plan's number of calls a minute
     const keyId = rid();
@@ -70,7 +71,7 @@ describe.skipIf(!hasDb)('E2E: plans, invoices and webhooks', () => {
     const { hashGatewayKey } = await import('../../domain/gateway/keys');
     await pool.query(`UPDATE gateway_api_keys SET key_hash = $2 WHERE id = $1`, [keyId, hashGatewayKey('deskgw_plan_limit_probe')]);
     forgetKeyRateFactors();
-    expect((await keyBucketInfo('deskgw_plan_limit_probe', 120)).factor).toBeCloseTo(1);
+    expect((await keyBucketInfo('deskgw_plan_limit_probe', 120))).toMatchObject({ known: true, factor: 1000 / 120 });
     // back to Free
     await call('POST', `/v1/admin/billing/user/${u.id}/plan`, adminUser as { headers: Record<string, string> }, { planId: 'free' });
     forgetKeyRateFactors();
@@ -83,20 +84,55 @@ describe.skipIf(!hasDb)('E2E: plans, invoices and webhooks', () => {
     const month = new Date().toISOString().slice(0, 7);
     await pool.query(`INSERT INTO usage_meter (subject_type, subject_id, month, metric, quantity) VALUES ('user',$1,$2,'market_analyses',3010)`, [u.id, month]);
     meterAnalysis('user', u.id);
+    // 3,010 Registry API calls this month: 10 beyond the Pro plan's 3,000 for one API (and within its 5,000 in total)
+    await pool.query(`INSERT INTO api_usage (user_id, service, window_key, calls) VALUES ($1,'registry_api',$2,3010)`, [u.id, `M${month}`]);
     await new Promise((r) => setTimeout(r, 150));
     expect((await pool.query(`SELECT quantity FROM usage_meter WHERE subject_id = $1`, [u.id])).rows[0].quantity).toBe(3011);
     await generateInvoices(month);
     await generateInvoices(month); // running it again makes nothing new
-    const invoices = await invoicesFor('user', u.id);
+    const { invoices, hasMore } = await invoicesFor('user', u.id);
     expect(invoices).toHaveLength(1);
-    expect(invoices[0].lines.map((l) => l.totalCents)).toEqual([2900, 55]); // 11 analyses beyond 3,000 at 5 cents
-    expect(invoices[0].subtotalCents).toBe(2955);
-    expect(invoices[0].status).toBe('draft');
+    expect(hasMore).toBe(false);
+    // the Pro fee, 2,936 analyses beyond the 75 included at 30 cents, 10 calls beyond a monthly limit at 5 cents
+    expect(invoices[0].lines.map((l) => l.totalCents)).toEqual([1500, 88080, 50]);
+    expect(invoices[0].subtotalCents).toBe(89630);
+    expect(invoices[0]).toMatchObject({ status: 'draft', planName: 'Pro' });
     // the person's own view shows it; another person's does not
     const other = await mkUser('other');
     const mine = await call('GET', '/v1/billing/invoices', { headers: { authorization: `Bearer ${await tokenFor(u.id)}` } });
+    expect(mine.json()).toMatchObject({ hasMore: false, accountName: expect.any(String) });
     expect(mine.json().invoices).toHaveLength(1);
+    expect((await call('GET', '/v1/billing/invoices?limit=0', { headers: { authorization: `Bearer ${await tokenFor(u.id)}` } })).statusCode).toBe(400);
     expect((await call('GET', '/v1/billing/invoices', other)).json().invoices).toHaveLength(0);
+  });
+
+  it('plan call limits: calls are counted per person, Free stops at a monthly limit, a paid plan bills past it, per-minute limits refuse', async () => {
+    const u = await mkUser('limits');
+    await enforceCallAllowance(u.id, 'registry_api'); // nothing used yet
+    recordCall(u.id, 'registry_api');
+    await new Promise((r) => setTimeout(r, 150));
+    const first = await callCounts(u.id);
+    expect(first.minute).toMatchObject({ registry_api: 1, total: 1 });
+    expect(first.month).toMatchObject({ registry_api: 1, total: 1 });
+    // Free: the Registry API's 300 a month are used up; the other APIs still answer
+    await pool.query(`UPDATE api_usage SET calls = 300 WHERE user_id = $1 AND window_key LIKE 'M%'`, [u.id]);
+    await expect(enforceCallAllowance(u.id, 'registry_api')).rejects.toMatchObject({ status: 429, code: 'plan_monthly_limit' });
+    await enforceCallAllowance(u.id, 'desk_api');
+    // Pro: past the monthly limit is allowed (billed); a full minute is not
+    await pool.query(`INSERT INTO subscriptions (id, subject_type, subject_id, plan_id, status, period_start, period_end) VALUES ($1,'user',$2,'developer','active',$3,$3)`, [rid(), u.id, ts()]);
+    await enforceCallAllowance(u.id, 'registry_api');
+    await pool.query(`UPDATE api_usage SET calls = 600 WHERE user_id = $1 AND window_key LIKE 'm%'`, [u.id]);
+    await expect(enforceCallAllowance(u.id, 'registry_api')).rejects.toMatchObject({ status: 429, code: 'plan_minute_limit' });
+    // what the plans page shows
+    const page = (await call('GET', '/v1/billing/subscription', u)).json();
+    expect(page.subscription.plan).toMatchObject({ name: 'Pro', servicePerMinute: 600 });
+    expect(page.usage).toMatchObject({ callsThisMinute: { registry_api: 600, total: 600 }, callsThisMonth: { registry_api: 300 }, apiKeys: 0, webhookEndpoints: 0, apps: 0 });
+    expect(await ownedCounts(u.id)).toEqual({ webhooks: 0, apps: 0 });
+    // minute counters older than a day are cleared by the daily job; the month's stay
+    await pool.query(`INSERT INTO api_usage (user_id, service, window_key, calls) VALUES ($1, 'desk_api', 'm2000-01-01T00:00', 5)`, [u.id]);
+    expect(await pruneMinuteUsage()).toBeGreaterThanOrEqual(1);
+    expect((await pool.query(`SELECT window_key FROM api_usage WHERE user_id = $1 ORDER BY window_key`, [u.id])).rows.map((r) => r.window_key[0])).toEqual(['M', 'm']);
+    await pool.query(`DELETE FROM api_usage WHERE user_id = $1`, [u.id]);
   });
 
   async function tokenFor(userId: string) {

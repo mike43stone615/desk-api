@@ -24,6 +24,8 @@ describe.skipIf(!hasDb)('E2E: OAuth and GraphQL', () => {
     const now = new Date().toISOString();
     await pool.query(`INSERT INTO users (id, email, password_hash, first_name, last_name, email_confirmed_at, created_at, updated_at) VALUES ($1,$2,'x',$3,'Tester',$4,$4,$4)`, [id, `oa-${name}-${id}@example.com`, name, now]);
     users.push(id);
+    // On the Business plan, so these tests can register several apps (Free allows one; see 'the plan caps apps' below).
+    await pool.query(`INSERT INTO subscriptions (id, subject_type, subject_id, plan_id, status, period_start, period_end) VALUES ($1,'user',$2,'business','active',$3,$3)`, [rid(), id, now]);
     const { authDb } = await import('../../infrastructure/auth');
     const token = randomBytes(24).toString('hex');
     await authDb.createSession(rid(), id, token, new Date(Date.now() + 3_600_000).toISOString());
@@ -234,6 +236,11 @@ describe.skipIf(!hasDb)('E2E: OAuth and GraphQL', () => {
     expect((await call('DELETE', `/v1/oauth/clients/${client.id}`, person.headers)).statusCode).toBe(404);
     expect((await call('POST', '/v1/oauth/clients', dev.headers, { name: 'x', redirectUris: ['http://evil.example.org/cb'], scopes: ['profile'] })).statusCode).toBe(400); // http only on localhost
     expect((await call('POST', '/v1/oauth/clients', dev.headers, { name: 'native', redirectUris: ['http://127.0.0.1:8123/cb'], scopes: ['profile'], confidential: false })).statusCode).toBe(201);
+    // the plan caps apps: on Free (no subscription) one is allowed, so this person, who now has several, can add no more
+    await pool.query(`UPDATE subscriptions SET status = 'canceled' WHERE subject_id = $1`, [dev.id]);
+    const capped = await call('POST', '/v1/oauth/clients', dev.headers, { name: 'one too many', redirectUris: [REDIRECT], scopes: ['profile'] });
+    expect(capped.statusCode).toBeGreaterThanOrEqual(400);
+    expect(capped.json().message ?? capped.json().detail).toMatch(/Your plan allows 1 app\b/);
   });
 
   it('denying sends the person back with access_denied and grants nothing', async () => {

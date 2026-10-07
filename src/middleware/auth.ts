@@ -15,6 +15,7 @@ import { ACCESS_TOKEN_PREFIX, verifyAccessToken, type VerifiedOAuthToken } from 
 import type { GranularScope } from '../domain/oauth/scopes';
 import { isUserSuspended } from '../domain/suspension';
 import { isListedAdmin } from '../domain/admins';
+import { enforceCallAllowance } from '../domain/billing/allowance';
 import type { User } from '../interfaces/database';
 
 declare module 'fastify' {
@@ -115,6 +116,8 @@ async function authenticateWithGatewayKey(request: FastifyRequest, apiKey: strin
   if (!owner) throw new HttpError(401, 'Invalid or revoked API key.', 'invalid_api_key');
   request.currentUser = owner;
   request.gatewayKey = verified;
+  // The owner's plan limits for the Desk API (per minute, and per month on Free).
+  await enforceCallAllowance(verified.ownerUserId, 'desk_api');
 }
 
 /**

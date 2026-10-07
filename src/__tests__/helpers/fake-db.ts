@@ -43,7 +43,9 @@ export function createFakeDb() {
   const mfaPendingLogins = new Map<string, FakeRow>(); // migration 0026, keyed by token hash
   const backendRevocations = new Map<string, FakeRow>(); // the queue filled by the grant-delete trigger (migration 0010)
   const webhookEndpoints = new Map<string, FakeRow>(); // keyed by id
-  const webhookDeliveries: FakeRow[] = [];
+  const webhookDeliveries: FakeRow[] = [];
+  /** api_usage: 'user|window|service' -> calls. */
+  const apiUsage = new Map<string, number>();
   const statusSubscribers = new Map<string, FakeRow>(); // keyed by id (migration 0028)
 
   function findUserByEmail(email: string): FakeRow | undefined {
@@ -1063,8 +1065,21 @@ export function createFakeDb() {
     if (s.startsWith('SELECT s.id AS sid, s.status') || s.includes("FROM plans WHERE id = 'free'")) return { rows: [], rowCount: 0 };
     if (s.startsWith('SELECT k.rate_limit_per_minute, p.per_minute_limit AS plan_limit')) {
       const k = [...gatewayKeys.values()].find((x) => x.key_hash === p[0]);
-      return { rows: k ? [{ rate_limit_per_minute: k.rate_limit_per_minute ?? null, plan_limit: null }] : [], rowCount: k ? 1 : 0 };
+      return { rows: k ? [{ rate_limit_per_minute: k.rate_limit_per_minute ?? null, plan_limit: null, revoked: Boolean(k.revoked_at) }] : [], rowCount: k ? 1 : 0 };
     }
+    // Market analyses this month: none recorded in the fake (the per-key daily cap is what these tests exercise).
+    if (s.startsWith('SELECT quantity FROM usage_meter WHERE subject_type = $1 AND subject_id = $2 AND month = $3')) return { rows: [], rowCount: 0 };
+    // ── plan call counts (migration 0030) ───────────────────────────────────
+    if (s.startsWith('SELECT window_key, service, calls FROM api_usage WHERE user_id = $1 AND window_key IN ($2, $3)')) {
+      const rows = [...apiUsage.entries()].map(([k, calls]) => { const [user_id, window_key, service] = k.split('|'); return { user_id, window_key, service, calls }; })
+        .filter((r) => r.user_id === p[0] && (r.window_key === p[1] || r.window_key === p[2]));
+      return { rows, rowCount: rows.length };
+    }
+    if (s.startsWith('INSERT INTO api_usage (user_id, service, window_key, calls)')) {
+      for (const w of [p[2], p[3]]) { const k = `${p[0]}|${w}|${p[1]}`; apiUsage.set(k, (apiUsage.get(k) ?? 0) + 1); }
+      return { rows: [], rowCount: 2 };
+    }
+    if (s.startsWith('SELECT (SELECT COUNT(*) FROM webhook_endpoints WHERE owner_user_id = $1) AS webhooks')) return { rows: [{ webhooks: '0', apps: '0' }], rowCount: 1 };
     if (s.startsWith('SELECT rate_limit_per_minute FROM gateway_api_keys WHERE key_hash = $1')) {
       const k = [...gatewayKeys.values()].find((x) => x.key_hash === p[0]);
       return { rows: k ? [{ rate_limit_per_minute: k.rate_limit_per_minute ?? null }] : [], rowCount: k ? 1 : 0 };
