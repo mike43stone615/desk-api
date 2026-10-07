@@ -42,43 +42,43 @@ export const EVENT_LABELS = {
   // labels it where a test delivery can still show up: the deliveries history table.
 };
 
-/** What an app may read, one narrow piece each (the server's own list: src/domain/oauth/scopes.ts), grouped for the
-    registration form: [scope, short name, what it covers]. */
+/** What an app may read (the server's own list: APP_SCOPES in src/domain/oauth/scopes.ts), grouped for the registration form.
+    A card with `children` is a parent: its sub-checkboxes are details OF that list and only make sense with it, so ticking a
+    child ticks its parent and unticking the parent unticks its children. `info` is the only extra text; most cards need none. */
 export const SCOPE_GROUPS = [
   { title: 'Profile', scopes: [
-    ['profile:name', 'Name', 'Your first and last name'],
-    ['profile:email', 'Email address', 'Your email address and whether it is confirmed'],
+    { id: 'profile:name', name: 'Name' },
+    { id: 'profile:email', name: 'Email address' },
   ] },
-  { title: 'Businesses', scopes: [
-    ['businesses:basic', 'Business list', "Your businesses' names and industries, and your role in each"],
-    ['businesses:formation', 'Formation details', 'Legal entity, tax election, special designation, state and city of formation, and partners'],
-    ['businesses:location', 'Address', "Each business's formation address"],
-    ['businesses:idea', 'Idea and scope', 'What each business does, its customers and their problem, where it sells, and other industries'],
-    ['businesses:plan', 'Business plan', 'Plan sections, pricing, competitors and validation plan'],
-    ['businesses:requirements', 'Compliance requirements', 'Compliance requirements and regulatory statuses, and which ones you have marked'],
-    ['businesses:name_check', 'Name check', 'Name-availability results'],
-    ['businesses:market_research', 'Market research', 'Market research results'],
-    ['businesses:registered_agent', 'Registered agent', "Each business's registered agent"],
-    ['businesses:members', 'Members', 'The people in each business: their names, email addresses and roles'],
-    ['businesses:invites', 'Invitations', "Invitations you have received to join someone else's business"],
+  { title: 'Desk Business', scopes: [
+    { id: 'businesses:basic', name: 'Business list', info: "Only businesses the person owns. An app never sees businesses they were only invited into, or anyone else's.", children: [
+      { id: 'businesses:industry', name: 'Industry' },
+      { id: 'businesses:location', name: 'Address' },
+      { id: 'businesses:legal_entity', name: 'Legal entity' },
+      { id: 'businesses:tax_election', name: 'Federal tax election' },
+      { id: 'businesses:special_designation', name: 'Special legal designation' },
+      { id: 'businesses:regulatory_status', name: 'Regulatory status' },
+    ] },
   ] },
-  { title: 'Unfinished setups', scopes: [
-    ['drafts:basic', 'Unfinished setups', 'Their names, how far along they are, and when they were last changed'],
-  ] },
-  { title: 'API Library', scopes: [
-    ['keys:read', 'API keys', 'Names, prefixes, dates and which APIs they can call (never the keys themselves)'],
-    ['plan:read', 'Plan', 'Your API Library plan and its limits'],
-    ['usage:read', 'Usage', 'Daily call and error counts for your API keys'],
+  { title: 'Desk API Library', scopes: [
+    { id: 'keys:name', name: 'API key names', children: [
+      { id: 'keys:dates', name: 'Key dates' },
+      { id: 'keys:apis', name: 'APIs each key can call' },
+      { id: 'usage:read', name: 'Usage' },
+    ] },
   ] },
 ];
 
-/** A short name for every scope an app can hold: the granular ones, plus the four original ones older apps still use. */
+const flattenScopes = (items, parent = null) => items.flatMap((i) => [{ ...i, parent }, ...flattenScopes(i.children ?? [], i.id)]);
+/** Every app scope as a flat list, each with its parent's id (or null). */
+export const APP_SCOPE_LIST = SCOPE_GROUPS.flatMap((g) => flattenScopes(g.scopes));
+
 export const SCOPE_LABELS = {
-  ...Object.fromEntries(SCOPE_GROUPS.flatMap((g) => g.scopes.map(([id, name]) => [id, name]))),
+  ...Object.fromEntries(APP_SCOPE_LIST.map((x) => [x.id, x.name])),
   profile: 'Your name and email address',
-  drafts: 'Unfinished business setups',
-  businesses: 'Businesses and their members',
-  teams: 'Your API keys, plan and usage (GraphQL)',
+  drafts: 'Unfinished setups (no longer available)',
+  businesses: 'Business names and industries',
+  teams: 'API key names, dates, APIs and usage',
 };
 
 /** One redirect address per line (or comma) -> a clean list; blank lines dropped, duplicates removed. */

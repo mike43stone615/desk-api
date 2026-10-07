@@ -934,7 +934,7 @@ export const GATEWAY_EXAMPLES: Record<string, { status: number; request: unknown
         {
           "service": "desk_api",
           "perMinute": 60,
-          "note": "Each key may make 60 calls a minute to the Desk API, and every account 300 across all its keys and devices."
+          "note": "Each key may make 60 calls a minute to the Desk API, and every account 300 calls a minute across all its keys and devices."
         }
       ]
     }

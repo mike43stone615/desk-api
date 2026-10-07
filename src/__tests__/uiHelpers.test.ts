@@ -2,7 +2,7 @@
 import { describe, it, expect } from 'vitest';
 // @ts-expect-error plain browser module without type declarations
 import { formatMoney, monthLabel, usageShare, parseLines, statusChip, EVENT_LABELS, SCOPE_LABELS, SCOPE_GROUPS } from '../../library-ui/format.js';
-import { ALL_OAUTH_SCOPES, GRANULAR_SCOPES } from '../domain/oauth/scopes';
+import { ALL_OAUTH_SCOPES, APP_SCOPES } from '../domain/oauth/scopes';
 // @ts-expect-error plain browser module without type declarations
 import { TABS, tabsHtml, setAdminTab } from '../../library-ui/tabs.js';
 
@@ -62,7 +62,10 @@ describe('labels', () => {
     expect(Object.keys(EVENT_LABELS)).toHaveLength(15);
     // Every scope the server accepts (granular + the four original ones) has a label, and nothing else does.
     expect(Object.keys(SCOPE_LABELS).sort()).toEqual([...ALL_OAUTH_SCOPES].sort());
-    expect((SCOPE_GROUPS as Array<{ scopes: string[][] }>).flatMap((g) => g.scopes.map(([id]) => id)).sort()).toEqual([...GRANULAR_SCOPES].sort());
+    type Item = { id: string; children?: Item[] };
+    const flat = (items: Item[]): string[] => items.flatMap((i) => [i.id, ...flat(i.children ?? [])]);
+    // The registration form offers exactly the scopes an app may register — nothing internal.
+    expect(flat((SCOPE_GROUPS as Array<{ scopes: Item[] }>).flatMap((g) => g.scopes)).sort()).toEqual([...APP_SCOPES].sort());
   });
   it('says what happened to a delivery', () => {
     expect(statusChip({ status: 'delivered' })).toBe('Delivered');

@@ -106,9 +106,9 @@ describe.skipIf(!hasDb)('E2E: plans, invoices and webhooks', () => {
     return token;
   }
 
-  it('a webhook endpoint refuses private addresses, http and unknown events, shows the secret once, and delivers a signed event', async () => {
+  it('a webhook endpoint refuses private addresses, other schemes and unknown events, shows the secret once, and delivers a signed event', async () => {
     const u = await mkUser('hook');
-    for (const url of ['https://10.0.0.5/x', 'http://93.184.216.34/x', 'https://localhost/x']) {
+    for (const url of ['https://10.0.0.5/x', 'http://10.0.0.5/x', 'ftp://93.184.216.34/x', 'https://localhost/x']) {
       expect((await call('POST', '/v1/gateway/webhooks', u, { url, events: ['key.created'] })).statusCode).toBe(400);
     }
     expect((await call('POST', '/v1/gateway/webhooks', u, { url: PUBLIC_URL, events: ['nonsense'] })).statusCode).toBe(400);

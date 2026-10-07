@@ -193,6 +193,25 @@ export async function updateClientRedirectsHandler(request: FastifyRequest, repl
   return reply.send({ client });
 }
 
+const ScopesSchema = z.object({ scopes: z.array(z.enum(OAUTH_SCOPES)).min(1) });
+
+/** Replace what an app may ask people for (its owner only). Removing one stops existing grants from using it at once. */
+export async function updateClientScopesHandler(request: FastifyRequest, reply: FastifyReply) {
+  await requireAuth(request, reply);
+  const { id } = request.params as { id: string };
+  const parsed = ScopesSchema.safeParse(request.body ?? {});
+  if (!parsed.success) throw validationError(parsed.error);
+  let client;
+  try {
+    client = await oauthClients.setScopes(request.currentUser!.id, id, parseScopes(parsed.data.scopes));
+  } catch (err) {
+    return oauthHttpError(err);
+  }
+  if (!client) throw new HttpError(404, 'No such app.', 'oauth_not_found');
+  audit(request, 'oauth_client_scopes_changed', { userId: request.currentUser!.id, clientId: id });
+  return reply.send({ client });
+}
+
 /** A new client secret for a confidential app (shown once); the old one stops working at once. */
 export async function rotateClientSecretHandler(request: FastifyRequest, reply: FastifyReply) {
   await requireAuth(request, reply);

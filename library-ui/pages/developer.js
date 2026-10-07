@@ -375,7 +375,8 @@ registerRoute('/developer', async (app) => {
 
   /** Hoverable (not clickable) "i" badge: a small themed tooltip instead of the native title attribute.
       `corner`: pin it to the top-right of a `position: relative` ancestor, instead of sitting inline with text. */
-  function infoIcon(text, corner = false) {
+  function infoIcon(lines, corner = false) {
+    const text = (Array.isArray(lines) ? lines : [lines]).filter(Boolean).join('\n');
     if (!text) return '';
     return `<span class="info-icon${corner ? ' corner' : ''}" tabindex="0">${icon('info_outline')}<span class="info-tooltip" role="tooltip">${esc(text)}</span></span>`;
   }
@@ -395,7 +396,7 @@ registerRoute('/developer', async (app) => {
           <span class="biz-sub" id="svc-desc-${esc(svc.service)}">${esc(svc.description)}</span>
           ${!svc.available ? `<span class="biz-sub">${esc(svc.unavailableReason || 'Not available right now.')}</span>` : disabled ? `<span class="biz-sub">Not available on a sandbox key.</span>` : ''}
         </span>
-        ${details.length ? infoIcon(details.join(' '), true) : ''}
+        ${details.length ? infoIcon(details, true) : ''}
       </label>
     `;
   }
@@ -566,7 +567,7 @@ registerRoute('/developer', async (app) => {
       <div class="state-card key-card">
         <div class="biz-icon neutral">${icon('key')}</div>
         <div class="biz-body">
-          <div class="biz-title-row"><div class="biz-title">${esc(k.label)}</div>${infoIcon(`Created ${formatDate(k.createdAt)} · ${expiryText(k)}`)}</div>
+          <div class="biz-title-row"><div class="biz-title">${esc(k.label)}</div>${infoIcon([`Created ${formatDate(k.createdAt)}`, expiryText(k)])}</div>
           <div class="biz-sub">${subParts.map((p) => esc(p)).join(' · ')}</div>
           <div class="biz-chips">
             ${k.sandbox ? '<span class="meta-chip" title="Fixed sample answers; nothing real is called, counted or billed">Sandbox</span>' : ''}
@@ -589,7 +590,7 @@ registerRoute('/developer', async (app) => {
     const busy = s.busyKeys.has(k.shareId);
     const subParts = [`${k.keyPrefix}…`];
     if (k.lastUsedAt) subParts.push(`Last used ${formatDate(k.lastUsedAt)}`);
-    const info = `Shared by ${personLabel(k.owner)} · Created ${formatDate(k.createdAt)} · ${expiryText(k)}`;
+    const info = [`Shared by ${personLabel(k.owner)}`, `Created ${formatDate(k.createdAt)}`, expiryText(k)];
     return `
       <div class="state-card key-card">
         <div class="biz-icon neutral">${icon('key')}</div>
@@ -660,7 +661,7 @@ registerRoute('/developer', async (app) => {
               ? s.keys.map(keyCardHtml).join('')
               : `<div class="state-card"><div class="biz-icon neutral">${icon('key')}</div><div class="biz-body"><div class="biz-title">No API keys yet</div><div class="biz-sub">Create one to get started.</div></div></div>`}
             ${s.sharedKeys.length ? `
-              <h2 class="biz-section-title" style="margin-top:var(--sp-xl);">Key shared with me</h2>
+              <h2 class="biz-section-title" style="margin-top:var(--sp-xl);">Keys shared with me</h2>
               ${s.sharedKeys.map(sharedKeyCardHtml).join('')}
             ` : ''}
           </div>

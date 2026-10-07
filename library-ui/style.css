@@ -700,6 +700,7 @@ table.admin-table td.admin-actions-cell { white-space: nowrap; }
   position: absolute; top: 100%; right: 0; margin-top: var(--sp-xs); z-index: 20; width: max-content; max-width: 260px;
   background: var(--surface-2); border: 1px solid var(--line); border-radius: var(--r-md); box-shadow: var(--shadow);
   padding: var(--sp-sm) var(--sp-md); font-size: .78rem; font-weight: 500; line-height: 1.4; color: var(--ink-soft);
+  white-space: pre-line; overflow-wrap: anywhere;
   opacity: 0; pointer-events: none; transform: translateY(-2px); transition: opacity 120ms ease, transform 120ms ease;
 }
 .info-icon:hover .info-tooltip, .info-icon:focus-visible .info-tooltip { opacity: 1; transform: translateY(0); }
@@ -764,10 +765,21 @@ table.admin-table td.admin-actions-cell { white-space: nowrap; }
   background: none; border: none; color: var(--ink-faint); cursor: pointer; padding: var(--sp-xs); border-radius: var(--r-sm); }
 .field-remove:hover { color: var(--ink); background: var(--surface-2); }
 .field-remove:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
-.add-field-btn { margin: 0 0 var(--sp-lg); }
+.add-row { margin: 0 0 var(--sp-lg); }
 .field-header-row { display: flex; align-items: center; gap: var(--sp-xs); }
 .field-header-row label { display: inline; }
 #confidential-row { margin-bottom: var(--sp-sm); }
-.scope-group-title { font-size: .78rem; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; color: var(--ink-faint); margin: var(--sp-md) 0 var(--sp-sm); }
+.scope-group-title { font-size: .9rem; font-weight: 700; color: var(--ink-soft); margin: var(--sp-md) 0 var(--sp-sm); }
+/* A detail of the list above it (e.g. Industry under Business list): indented, and only meaningful with its parent. */
+.library-row.scope-child { margin-left: var(--sp-2xl); width: calc(100% - var(--sp-2xl)); box-sizing: border-box; }
+.library-row > .info-icon { margin-left: auto; align-self: center; }
 .modal .reveal-label { display: block; font-size: .85rem; font-weight: 700; color: var(--ink-soft); margin: var(--sp-lg) 0 var(--sp-xs); }
 .modal .reveal-label + .reveal-key { margin-top: 0; }
+
+/* Webhook endpoint cards: the six buttons sit on the right like the API key cards' buttons, two rows of three. */
+.endpoint-actions { display: grid; grid-template-columns: repeat(3, auto); justify-content: end; gap: var(--sp-xs); flex-shrink: 0; }
+.endpoint-actions .btn { width: 100%; }
+@media (max-width: 520px) { .endpoint-actions { justify-content: start; } }
+/* Pop-ups never scroll sideways, however long their contents. */
+.modal { overflow-x: hidden; }
+.modal input { min-width: 0; }

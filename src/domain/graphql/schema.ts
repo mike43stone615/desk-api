@@ -17,6 +17,8 @@ export interface GraphQLContext {
   scopes: ReadonlySet<string> | null;
   /** A gateway key restricted to one business (see gateway/keys.ts): businesses() and its members are limited to it. */
   restrictedBusinessId?: string | null;
+  /** An app (OAuth) sees only businesses the person OWNS, never ones they were merely invited into. */
+  ownedOnly?: boolean;
 }
 
 const MAX_LIST = 50;
@@ -45,11 +47,16 @@ export const SDL = /* GraphQL */ `
   type Business {
     id: ID!
     name: String!
+    "businesses:industry"
     industry: String
-    role: String!
+    "businesses:role (never given to apps; an app only sees businesses the person owns)"
+    role: String
     isSetupComplete: Boolean!
     "businesses:formation"
+    "Each field needs its own scope: legalEntity/businessStructure/isRegisteredBusiness businesses:legal_entity; taxElection businesses:tax_election; specialLegalDesignation businesses:special_designation; formationState/formationCity businesses:location; hasPartners/numberOfPartners businesses:partners"
     formation: BusinessFormation
+    "businesses:regulatory_status"
+    regulatoryStatuses: [String!]
     "businesses:location"
     location: BusinessLocation
     "businesses:idea"
@@ -79,7 +86,8 @@ export const SDL = /* GraphQL */ `
   type Draft { id: ID! businessName: String currentStep: Int updatedAt: String! }
   type Team { id: ID! name: String! role: String! memberCount: Int! keyCount: Int! createdAt: String! rateLimitPerMinute: Int members: [TeamMember!]! keys: [ApiKey!]! }
   type TeamMember { id: ID! userId: ID! role: String! email: String! accepted: Boolean! }
-  type ApiKey { id: ID! label: String! keyPrefix: String! createdAt: String! lastUsedAt: String expiresAt: String services: [String!]! sandbox: Boolean! teamId: ID }
+  "label needs keys:name; createdAt/lastUsedAt/expiresAt keys:dates; services/sandbox keys:apis; keyPrefix is never given to apps."
+  type ApiKey { id: ID! label: String keyPrefix: String createdAt: String lastUsedAt: String expiresAt: String services: [String!] sandbox: Boolean teamId: ID }
   type Plan { id: ID! name: String! monthlyPriceCents: Int! includedAnalyses: Int! maxKeys: Int! maxWebhooks: Int! perMinuteLimit: Int }
   type UsageDay { day: String! calls: Int! errors: Int! }
 `;
@@ -114,16 +122,25 @@ function parseJson(raw: string | null): Json {
   }
 }
 
+/** A field resolver that answers only with the scope (an error on just that field otherwise). */
+const gated = <T>(ctx: GraphQLContext, scope: GranularScope, value: () => T) => () => { need(ctx, scope); return value(); };
+
 function businessDetails(d: Json, ctx: GraphQLContext) {
   return {
-    formation: () => {
-      need(ctx, 'businesses:formation');
-      return {
-        legalEntity: str(d.legalEntity), businessStructure: str(d.businessStructure), taxElection: str(d.taxElection),
-        specialLegalDesignation: str(d.specialLegalDesignation), formationState: str(d.formationState), formationCity: str(d.formationCity),
-        hasPartners: bool(d.hasPartners), numberOfPartners: int(d.numberOfPartners), isRegisteredBusiness: bool(d.isRegisteredBusiness),
-      };
-    },
+    // Each formation fact is its own scope, so an app can be given the legal entity without the tax election, and never
+    // the partners (someone else's information to share).
+    formation: () => ({
+      legalEntity: gated(ctx, 'businesses:legal_entity', () => str(d.legalEntity)),
+      businessStructure: gated(ctx, 'businesses:legal_entity', () => str(d.businessStructure)),
+      isRegisteredBusiness: gated(ctx, 'businesses:legal_entity', () => bool(d.isRegisteredBusiness)),
+      taxElection: gated(ctx, 'businesses:tax_election', () => str(d.taxElection)),
+      specialLegalDesignation: gated(ctx, 'businesses:special_designation', () => str(d.specialLegalDesignation)),
+      formationState: gated(ctx, 'businesses:location', () => str(d.formationState)),
+      formationCity: gated(ctx, 'businesses:location', () => str(d.formationCity)),
+      hasPartners: gated(ctx, 'businesses:partners', () => bool(d.hasPartners)),
+      numberOfPartners: gated(ctx, 'businesses:partners', () => int(d.numberOfPartners)),
+    }),
+    regulatoryStatuses: gated(ctx, 'businesses:regulatory_status', () => strList(d.regulatoryStatuses)),
     location: () => {
       need(ctx, 'businesses:location');
       return { address: str(d.formationAddress), city: str(d.formationCity), state: str(d.formationState), placeId: str(d.formationPlaceId) };
@@ -183,16 +200,19 @@ const root = {
   businesses: async ({ first }: { first?: number }, ctx: GraphQLContext) => {
     need(ctx, 'businesses:basic');
     const restricted = ctx.restrictedBusinessId;
+    const owned = ctx.ownedOnly ? "AND bm.role = 'owner'" : '';
     const { rows } = await pool.query<BizRow>(
       restricted
         ? `SELECT b.id, b.name, b.industry, bm.role, b.business_json FROM businesses b JOIN business_memberships bm ON bm.business_id = b.id
-            WHERE bm.user_id = $1 AND bm.accepted_at IS NOT NULL AND b.id = $3 ORDER BY b.updated_at DESC, b.id LIMIT $2`
+            WHERE bm.user_id = $1 AND bm.accepted_at IS NOT NULL AND b.id = $3 ${owned} ORDER BY b.updated_at DESC, b.id LIMIT $2`
         : `SELECT b.id, b.name, b.industry, bm.role, b.business_json FROM businesses b JOIN business_memberships bm ON bm.business_id = b.id
-            WHERE bm.user_id = $1 AND bm.accepted_at IS NOT NULL ORDER BY b.updated_at DESC, b.id LIMIT $2`,
+            WHERE bm.user_id = $1 AND bm.accepted_at IS NOT NULL ${owned} ORDER BY b.updated_at DESC, b.id LIMIT $2`,
       restricted ? [ctx.user.id, clamp(first, 20), restricted] : [ctx.user.id, clamp(first, 20)],
     );
     return rows.map((b) => ({
-      id: b.id, name: b.name, industry: b.industry, role: b.role, isSetupComplete: true,
+      id: b.id, name: b.name, isSetupComplete: true,
+      industry: gated(ctx, 'businesses:industry', () => b.industry),
+      role: gated(ctx, 'businesses:role', () => b.role),
       ...businessDetails(parseJson(b.business_json), ctx),
       members: ({ first: f }: { first?: number }) => {
         need(ctx, 'businesses:members');
@@ -214,12 +234,23 @@ const root = {
   // Teams no longer exist (replaced by sharing one key at a time — see domain/gateway/sharing.ts); this stays as an
   // always-empty list so an existing integration's query keeps working rather than erroring outright.
   teams: async (_: unknown, ctx: GraphQLContext) => {
-    need(ctx, 'keys:read');
+    need(ctx, 'keys:name');
     return [];
   },
   apiKeys: async (_: unknown, ctx: GraphQLContext) => {
-    need(ctx, 'keys:read');
-    return gatewayApiKeys.list(ctx.user.id);
+    if (ctx.scopes !== null && !['keys:name', 'keys:dates', 'keys:apis'].some((x) => ctx.scopes!.has(x))) need(ctx, 'keys:name');
+    const keys = await gatewayApiKeys.list(ctx.user.id);
+    return keys.map((k) => ({
+      id: k.id,
+      teamId: (k as { teamId?: string | null }).teamId ?? null,
+      label: gated(ctx, 'keys:name', () => k.label),
+      keyPrefix: gated(ctx, 'keys:prefix', () => k.keyPrefix),
+      createdAt: gated(ctx, 'keys:dates', () => k.createdAt),
+      lastUsedAt: gated(ctx, 'keys:dates', () => k.lastUsedAt ?? null),
+      expiresAt: gated(ctx, 'keys:dates', () => k.expiresAt ?? null),
+      services: gated(ctx, 'keys:apis', () => k.services),
+      sandbox: gated(ctx, 'keys:apis', () => k.sandbox),
+    }));
   },
   plan: async (_: unknown, ctx: GraphQLContext) => {
     need(ctx, 'plan:read');

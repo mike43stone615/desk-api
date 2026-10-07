@@ -303,18 +303,22 @@ export async function listBusinessesHandler(request: FastifyRequest, reply: Fast
   const page = parsePage(request.query);
   // A key restricted to one business (see domain/gateway/keys.ts) sees at most that one, whatever else its owner belongs to.
   const restricted = request.gatewayKey?.restrictedBusinessId ?? null;
+  // An app (OAuth) sees only businesses the person OWNS — never ones someone else invited them into — and only the pieces
+  // the person approved: industry needs businesses:industry, and an app is never told roles (it is always 'owner').
+  const app = request.oauth;
+  const owned = app ? "AND bm.role = 'owner'" : '';
   const { rows: fetched } = await pool.query<{ id: string; name: string; industry: string | null; role: BusinessMemberRole }>(
     restricted
       ? `SELECT b.id, b.name, b.industry, bm.role
          FROM businesses b
          INNER JOIN business_memberships bm ON bm.business_id = b.id
-         WHERE bm.user_id = $1 AND bm.accepted_at IS NOT NULL AND b.id = $4
+         WHERE bm.user_id = $1 AND bm.accepted_at IS NOT NULL AND b.id = $4 ${owned}
          ORDER BY b.updated_at DESC, b.id
          LIMIT $2 OFFSET $3`
       : `SELECT b.id, b.name, b.industry, bm.role
          FROM businesses b
          INNER JOIN business_memberships bm ON bm.business_id = b.id
-         WHERE bm.user_id = $1 AND bm.accepted_at IS NOT NULL
+         WHERE bm.user_id = $1 AND bm.accepted_at IS NOT NULL ${owned}
          ORDER BY b.updated_at DESC, b.id
          LIMIT $2 OFFSET $3`,
     restricted ? [user.id, page.limit + 1, page.offset, restricted] : [user.id, page.limit + 1, page.offset],
@@ -325,9 +329,8 @@ export async function listBusinessesHandler(request: FastifyRequest, reply: Fast
     businesses: rows.map((row) => ({
       id: row.id,
       name: row.name,
-      industry: row.industry,
-      role: formatRole(row.role),
-      roleKey: row.role,
+      ...(!app || app.scopes.has('businesses:industry') ? { industry: row.industry } : {}),
+      ...(!app ? { role: formatRole(row.role), roleKey: row.role } : {}),
       isSetupComplete: true,
     })),
   });

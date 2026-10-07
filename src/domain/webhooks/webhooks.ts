@@ -4,7 +4,8 @@
 //               can prove it came from Desk and reject a replay (an old `t`);
 //   * retried:  after 1 minute, 5 minutes, 30 minutes, 2 hours and 6 hours, then marked failed; an endpoint that fails ten
 //               deliveries in a row is switched off (its owner switches it back on, the same switch they can flip by hand);
-//   * safe:     https only, and never to a private, loopback or link-local address (checked when the endpoint is made and again
+//   * safe:     https (or plain http for developers whose receiver has no certificate yet — the body is then sent unencrypted,
+//               but still signed), and never to a private, loopback or link-local address (checked when the endpoint is made and again
 //               at every delivery); redirects are not followed; the reply body is never read.
 import { createHmac, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
 import { lookup } from 'node:dns/promises';
@@ -23,6 +24,8 @@ export const WEBHOOK_EVENTS = [
 export type WebhookEvent = (typeof WEBHOOK_EVENTS)[number];
 
 const BACKOFF_SECONDS = [60, 300, 1800, 7200, 21600];
+/** The usual web ports only, so a webhook can never be pointed at a database or mail port on some public host. */
+const ALLOWED_PORTS = ['80', '443', '8080', '8443'];
 /** Every try a delivery gets: the first one plus one per backoff step. */
 export const MAX_DELIVERY_ATTEMPTS = BACKOFF_SECONDS.length + 1;
 const DELIVERY_HISTORY_DAYS = 30;
@@ -72,9 +75,9 @@ export function isPrivateAddress(address: string): boolean {
 export async function assertSafeWebhookUrl(raw: string, resolve: (host: string) => Promise<string[]> = async (h) => (await lookup(h, { all: true })).map((r) => r.address)): Promise<URL> {
   let url: URL;
   try { url = new URL(raw); } catch { throw new WebhookError('invalid_url', 'That is not a valid URL.'); }
-  if (url.protocol !== 'https:') throw new WebhookError('invalid_url', 'A webhook address must start with https://.');
+  if (url.protocol !== 'https:' && url.protocol !== 'http:') throw new WebhookError('invalid_url', 'A webhook address must start with https:// (or http://).');
   if (url.username || url.password) throw new WebhookError('invalid_url', 'A webhook address cannot contain a user name or password.');
-  if (url.port && !['443', '8443'].includes(url.port)) throw new WebhookError('invalid_url', 'A webhook address can only use port 443 or 8443.');
+  if (url.port && !ALLOWED_PORTS.includes(url.port)) throw new WebhookError('invalid_url', `A webhook address can only use port ${ALLOWED_PORTS.join(', ')}.`);
   if (raw.length > 500) throw new WebhookError('invalid_url', 'That address is too long.');
   const host = url.hostname.replace(/^\[|\]$/g, '');
   const addresses = isIP(host) ? [host] : await resolve(host).catch(() => { throw new WebhookError('invalid_url', 'That host name does not resolve.'); });
@@ -230,6 +233,26 @@ export function emitWebhookEvent(target: { userId?: string }, type: WebhookEvent
   })().catch(() => {});
 }
 
+/**
+ * The reason a delivery attempt failed, in plain words. Every failure lands in one of these: the receiver answered with a
+ * non-2xx status (recorded separately as "receiver answered NNN"), the endpoint was switched off, the address no longer
+ * resolves or now points at a private network (re-checked at every delivery), the connection was refused or reset, it timed
+ * out (5 seconds), or the TLS certificate was not accepted. Anything else keeps its own message.
+ */
+export function describeDeliveryError(err: unknown): string {
+  if (err instanceof WebhookError) return err.message;
+  const e = err as { name?: string; message?: string; cause?: { code?: string; message?: string } } | null;
+  const code = e?.cause?.code ?? '';
+  if (e?.name === 'TimeoutError' || e?.name === 'AbortError' || code === 'UND_ERR_CONNECT_TIMEOUT' || code === 'ETIMEDOUT') return 'timed out: no answer within 5 seconds';
+  if (code === 'ECONNREFUSED') return 'connection refused: nothing is listening at that address';
+  if (code === 'ECONNRESET' || code === 'UND_ERR_SOCKET') return 'connection dropped by the receiver';
+  if (code === 'ENOTFOUND' || code === 'EAI_AGAIN') return 'host name does not resolve';
+  if (code === 'EHOSTUNREACH' || code === 'ENETUNREACH') return 'host unreachable';
+  if (/CERT|SSL|TLS/i.test(code) || /certificate/i.test(e?.cause?.message ?? '')) return `certificate not accepted (${code || 'TLS error'})`;
+  const msg = e?.cause?.message || e?.message || 'delivery failed';
+  return msg.slice(0, 200);
+}
+
 export type Sender = (url: URL, init: { method: string; headers: Record<string, string>; body: string }) => Promise<{ status: number }>;
 const realSender: Sender = async (url, init) => {
   const res = await fetch(url, { ...init, redirect: 'manual', signal: AbortSignal.timeout(5000) });
@@ -287,7 +310,7 @@ async function deliverOne(send: Sender, resolve?: (host: string) => Promise<stri
           status = res.status;
           if (status < 200 || status >= 300) error = `receiver answered ${status}`;
         } catch (err) {
-          error = err instanceof Error ? err.message.slice(0, 200) : 'delivery failed';
+          error = describeDeliveryError(err);
         }
       }
       const done = error === null;

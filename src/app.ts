@@ -117,7 +117,7 @@ import {
   declineKeyShareHandler,
 } from './routes/gateway';
 import { createWebhookHandler, deleteWebhookHandler, listWebhookEventsHandler, listWebhooksHandler, rotateWebhookSecretHandler, testWebhookHandler, webhookDeliveriesHandler, retryWebhookDeliveryHandler, suspendWebhookHandler, resumeWebhookHandler, setWebhookEventsHandler } from './routes/webhooksOut';
-import { authorizeDecisionHandler, authorizeHandler, authorizeInfoHandler, createClientHandler, deleteClientHandler, updateClientRedirectsHandler, rotateClientSecretHandler, discoveryHandler, listAuthorizationsHandler, listClientsHandler, registerOAuthTokenRoutes, revokeAuthorizationHandler } from './routes/oauth';
+import { authorizeDecisionHandler, authorizeHandler, authorizeInfoHandler, createClientHandler, deleteClientHandler, updateClientRedirectsHandler, updateClientScopesHandler, rotateClientSecretHandler, discoveryHandler, listAuthorizationsHandler, listClientsHandler, registerOAuthTokenRoutes, revokeAuthorizationHandler } from './routes/oauth';
 import { graphqlHandler } from './routes/graphql';
 import { changelogAtomHandler, changelogHandler, incidentsHandler, openIncidentHandler, updateIncidentHandler } from './routes/statusInfo';
 import { listIncidents } from './domain/status/incidents';
@@ -598,6 +598,7 @@ async function registerLegacyAndVersionedRoutes(instance: FastifyInstance) {
   instance.delete('/oauth/clients/:id', deleteClientHandler);
   instance.put('/oauth/clients/:id/redirect-uris', small, updateClientRedirectsHandler);
   instance.post('/oauth/clients/:id/rotate-secret', small, rotateClientSecretHandler);
+  instance.put('/oauth/clients/:id/scopes', small, updateClientScopesHandler);
   instance.get('/oauth/authorizations', listAuthorizationsHandler);
   instance.delete('/oauth/authorizations/:clientId', revokeAuthorizationHandler);
   instance.get('/.well-known/oauth-authorization-server', discoveryHandler);

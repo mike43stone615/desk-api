@@ -77,7 +77,7 @@ describe.skipIf(!hasDb)('E2E: OAuth and GraphQL', () => {
   it('granular scopes: an app gets only the pieces it was approved for, field by field', async () => {
     const dev = await mkUser('granular-dev');
     const person = await mkUser('granular');
-    const { client, clientSecret } = await registerApp(dev, ['profile:name', 'businesses:basic', 'businesses:formation']);
+    const { client, clientSecret } = await registerApp(dev, ['profile:name', 'businesses:basic', 'businesses:legal_entity']);
     // asking for a piece the app did not register for is refused before anyone sees a consent page
     const refused = await call('POST', '/v1/oauth/authorize/decision', person.headers, {
       clientId: client.id, redirectUri: REDIRECT, scope: 'profile:email', state: 'x', codeChallenge: challengeOf(verifierFor()), codeChallengeMethod: 'S256', responseType: 'code', approve: true,
@@ -95,7 +95,7 @@ describe.skipIf(!hasDb)('E2E: OAuth and GraphQL', () => {
     const body = (await gql(bearer, '{ viewer { id firstName email } }')).json();
     expect(body.data.viewer).toMatchObject({ id: person.id, firstName: 'granular', email: null });
     expect(body.errors[0].extensions.code).toBe('SCOPE_MISSING');
-    // approved businesses:basic but not businesses:formation (registered, not asked for): the list works, the details don't
+    // approved businesses:basic but not businesses:legal_entity (registered, not asked for): the list works, the details don't
     const biz = (await gql(bearer, '{ businesses { id formation { legalEntity } } }')).json();
     expect(Array.isArray(biz.data.businesses)).toBe(true);
     expect((await call('GET', '/v1/setup/businesses', bearer)).statusCode).toBe(200);
@@ -126,6 +126,15 @@ describe.skipIf(!hasDb)('E2E: OAuth and GraphQL', () => {
     expect((await tokenCall({ grant_type: 'authorization_code', client_id: client.id, client_secret: clientSecret!, code, redirect_uri: REDIRECT, code_verifier: v })).statusCode).toBe(401);
     const code2 = await authorize(person, client.id, 'profile:name', v);
     expect((await tokenCall({ grant_type: 'authorization_code', client_id: client.id, client_secret: newSecret, code: code2, redirect_uri: REDIRECT, code_verifier: v })).statusCode).toBe(200);
+    // the owner can change what the app may read; removing a scope stops existing tokens from using it at once
+    const tokens = (await tokenCall({ grant_type: 'authorization_code', client_id: client.id, client_secret: newSecret, code: await authorize(person, client.id, 'profile:name', v), redirect_uri: REDIRECT, code_verifier: v })).json();
+    const bearer = { authorization: `Bearer ${tokens.access_token}` };
+    expect((await call('GET', '/v1/auth/session', bearer)).json().user.firstName).toBe('redir-person');
+    expect((await call('PUT', `/v1/oauth/clients/${client.id}/scopes`, dev.headers, { scopes: ['profile:name', 'profile:email'] })).json().client.scopes).toEqual(['profile:name', 'profile:email']);
+    expect((await call('PUT', `/v1/oauth/clients/${client.id}/scopes`, dev.headers, { scopes: ['businesses:plan'] })).statusCode).toBe(400); // never open to apps
+    expect((await call('PUT', `/v1/oauth/clients/${client.id}/scopes`, other.headers, { scopes: ['profile:email'] })).statusCode).toBe(404);
+    expect((await call('PUT', `/v1/oauth/clients/${client.id}/scopes`, dev.headers, { scopes: ['profile:email'] })).statusCode).toBe(200);
+    expect((await call('GET', '/v1/auth/session', bearer)).statusCode).toBe(403); // the token was only approved for profile:name, now gone
     // a public app has no secret to rotate
     const pub = await registerApp(dev, ['profile:name'], false);
     expect((await call('POST', `/v1/oauth/clients/${pub.client.id}/rotate-secret`, dev.headers, {})).statusCode).toBe(400);
@@ -315,15 +324,24 @@ describe.skipIf(!hasDb)('E2E: OAuth and GraphQL', () => {
 
     // an app approved only for businesses:basic gets the list, and each detail is refused on its own
     const dev = await mkUser('bizdetail-dev');
-    const { client, clientSecret } = await registerApp(dev, ['businesses:basic', 'businesses:plan']);
+    const { client, clientSecret } = await registerApp(dev, ['businesses:basic', 'businesses:location']);
     const v = verifierFor();
     const code = await authorize(owner, client.id, 'businesses:basic', v);
     const tokens = (await tokenCall({ grant_type: 'authorization_code', client_id: client.id, client_secret: clientSecret!, code, redirect_uri: REDIRECT, code_verifier: v })).json();
+    const notMineId = rid();
+    await pool.query(`INSERT INTO businesses (id, user_id, name, industry, business_json, created_at, updated_at) VALUES ($1,$2,'Someone Elses Biz','Repair','{}',$3,$3)`, [notMineId, dev.id, now]);
+    await pool.query(`INSERT INTO business_memberships (id, business_id, user_id, role, accepted_at, created_at, updated_at) VALUES ($1,$2,$3,'member',$4,$4,$4)`, [rid(), notMineId, owner.id, now]);
     const viaApp = (await gql({ authorization: `Bearer ${tokens.access_token}` }, '{ businesses { name plan { pricingHypothesis } location { city } } }')).json();
     expect(viaApp.data.businesses.map((x: { name: string }) => x.name).sort()).toEqual(['Broken Biz', 'Full Biz']);
     expect(viaApp.data.businesses.every((x: { plan: unknown; location: unknown }) => x.plan === null && x.location === null)).toBe(true);
     expect(new Set(viaApp.errors.map((e: { extensions: { scope: string } }) => e.extensions.scope))).toEqual(new Set(['businesses:plan', 'businesses:location']));
-    await pool.query('DELETE FROM businesses WHERE id = ANY($1)', [[fullId, brokenId]]);
+    // the REST list is limited the same way: owned only, no role, no industry without businesses:industry
+    const rest = (await call('GET', '/v1/setup/businesses', { authorization: `Bearer ${tokens.access_token}` })).json().businesses;
+    expect(rest.map((x: { name: string }) => x.name).sort()).toEqual(['Broken Biz', 'Full Biz']);
+    expect(rest.every((x: Record<string, unknown>) => !('role' in x) && !('industry' in x))).toBe(true);
+    // the person still sees the business they belong to in their own session
+    expect((await gql(owner.headers, '{ businesses { name } }')).json().data.businesses.map((x: { name: string }) => x.name)).toContain('Someone Elses Biz');
+    await pool.query('DELETE FROM businesses WHERE id = ANY($1)', [[fullId, brokenId, notMineId]]);
   });
 
   it('GraphQL: an API key or an OAuth app sees only what its scopes allow', async () => {

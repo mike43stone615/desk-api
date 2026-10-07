@@ -21,8 +21,10 @@ const timeOnly = (iso) => {
   return Number.isNaN(d.getTime()) ? '' : d.toLocaleTimeString(undefined, { timeStyle: 'short' });
 };
 /** Hoverable (not clickable) "i" badge: a small themed tooltip instead of the native title attribute. Matches pages/developer.js.
-    `openRight`: the tooltip opens to the right of the badge, for a badge near the left edge where opening left would be cut off. */
-function infoIcon(text, openRight = false) {
+    `lines`: one fact per line (never one long run-on line). `openRight`: the tooltip opens to the right of the badge, for a
+    badge near the left edge where opening left would be cut off. */
+function infoIcon(lines, openRight = false) {
+  const text = (Array.isArray(lines) ? lines : [lines]).filter(Boolean).join('\n');
   if (!text) return '';
   return `<span class="info-icon${openRight ? ' open-right' : ''}" tabindex="0">${icon('info_outline')}<span class="info-tooltip" role="tooltip">${esc(text)}</span></span>`;
 }
@@ -175,10 +177,9 @@ registerRoute('/developer/webhooks', async (app) => {
   document.addEventListener('keydown', onKeydown);
 
   function endpointInfo(ep) {
-    const parts = [`Created ${formatDate(ep.createdAt)}`, ep.active ? 'Active' : 'Inactive'];
-    if (!ep.active && ep.disabledReason) parts.push(ep.disabledReason);
-    if (ep.consecutiveFailures) parts.push(`${ep.consecutiveFailures} failed in a row`);
-    return parts.join(' · ');
+    const lines = [`Created ${formatDate(ep.createdAt)}`, ep.active ? 'Active' : 'Inactive'];
+    if (!ep.active && ep.disabledReason) lines.push(ep.disabledReason);
+    return lines;
   }
 
   function endpointHtml(ep) {
@@ -190,7 +191,7 @@ registerRoute('/developer/webhooks', async (app) => {
         <div class="biz-body">
           <div class="biz-title-row"><div class="biz-title">${esc(ep.url)}</div>${infoIcon(endpointInfo(ep))}</div>
         </div>
-        <div class="key-actions">
+        <div class="key-actions endpoint-actions">
           <button type="button" class="btn btn-sm" data-deliveries="${esc(ep.id)}" aria-label="Show deliveries to ${esc(ep.url)}">Deliveries</button>
           <button type="button" class="btn btn-sm" data-events="${esc(ep.id)}" ${busy ? 'disabled' : ''} aria-label="Choose events for ${esc(ep.url)}">Events</button>
           <button type="button" class="btn btn-sm" data-test="${esc(ep.id)}" ${off || busy ? 'disabled' : ''} aria-label="Send a test event to ${esc(ep.url)}">Send test</button>
@@ -257,7 +258,8 @@ registerRoute('/developer/webhooks', async (app) => {
   function resultHtml(d) {
     if (d.status === 'delivered') return `<span class="delivery-result sent">${icon('check_circle_outline')} Sent</span>`;
     if (d.attempts === 0) return '<span class="delivery-result">Queued</span>';
-    return `<span class="delivery-result failed">${icon('error_outline')} Failed${d.lastStatus ? ` ${d.lastStatus}` : ''}</span>${!d.lastStatus && d.lastError ? `<div class="biz-sub">${esc(d.lastError)}</div>` : ''}`;
+    const reason = d.lastStatus ? `The receiver answered ${d.lastStatus}` : d.lastError;
+    return `<span class="delivery-result failed">${icon('error_outline')} Failed${d.lastStatus ? ` ${d.lastStatus}` : ''}</span>${reason && !d.lastStatus ? `<div class="biz-sub">${esc(reason)}</div>` : ''}`;
   }
 
   function deliveriesModalHtml() {
@@ -304,6 +306,7 @@ registerRoute('/developer/webhooks', async (app) => {
   }
 
   function render() {
+    const scrolls = Object.fromEntries([...document.querySelectorAll('.modal-backdrop')].map((b) => [b.id, b.querySelector('.modal')?.scrollTop || 0]));
     let body;
     if (s.isLoading) body = `<div class="empty-state">${spinnerBtn(true, '', { dark: true })}</div>`;
     else if (s.loadError) body = `<div class="empty-state">${icon('error_outline')}<div style="margin-top:var(--sp-md);">Webhooks could not load</div><div class="hint">${esc(s.loadError)}</div><button type="button" class="btn" id="retry-btn" style="margin-top:var(--sp-lg);">${icon('refresh')} Try again</button></div>`;
@@ -312,7 +315,7 @@ registerRoute('/developer/webhooks', async (app) => {
       body = `
         <div class="developer-split">
           <div class="card">
-            <div class="biz-title-row section-title-row"><h2 class="biz-section-title">Add an endpoint</h2>${infoIcon('Desk sends a signed message to this address when the events you choose happen. It must start with https:// and be reachable from the internet. Failed deliveries are retried for about nine hours; an endpoint that fails ten times in a row is switched off.', true)}</div>
+            <div class="biz-title-row section-title-row"><h2 class="biz-section-title">Add an endpoint</h2>${infoIcon(['Desk sends a signed message to this address when the events you choose happen. It must start with https:// and be reachable from the internet (developers using http:// addresses are also supported).', 'Each delivery is tried up to 6 times over about 9 hours. An endpoint is switched off after 10 deliveries in a row fail all their tries.'], true)}</div>
             <form id="wh-form" novalidate>
               <div class="field-float has-icon"><span class="field-icon">${icon('link')}</span><label>Address (https://…)</label><input name="url" type="url" placeholder=" " maxlength="500" value="${esc(s.url)}" autocomplete="off" /></div>
               <div class="field-header"><label>Events</label></div>
@@ -341,10 +344,15 @@ registerRoute('/developer/webhooks', async (app) => {
       ${eventsEp ? eventsModalHtml(eventsEp) : ''}
       ${s.revealed ? revealModalHtml() : ''}
       ${s.confirm ? confirmModalHtml(s.confirm) : ''}`;
-    wire();
+    for (const [id, top] of Object.entries(scrolls)) {
+      const m = document.getElementById(id)?.querySelector('.modal');
+      if (m) m.scrollTop = top;
+    }
+    wire(scrolls);
   }
 
-  function wire() {
+  function wire(previouslyOpen = {}) {
+    const justOpened = (id) => !(id in previouslyOpen);
     const $ = (id) => document.getElementById(id);
     const onBackdrop = (id, close) => { const el = $(id); if (el) el.addEventListener('click', (e) => { if (e.target === el) close(); }); };
     app.querySelectorAll('[data-nav]').forEach((a) => a.addEventListener('click', (e) => { e.preventDefault(); navigate(a.dataset.nav); }));
@@ -365,14 +373,14 @@ registerRoute('/developer/webhooks', async (app) => {
 
     // Deliveries pop-up
     const closeDel = () => { closeDeliveries(); render(); };
-    const delClose = $('wh-deliveries-close'); if (delClose) { delClose.addEventListener('click', closeDel); if (!s.confirm && !s.revealed && !s.eventsFor) delClose.focus(); }
+    const delClose = $('wh-deliveries-close'); if (delClose) { delClose.addEventListener('click', closeDel); if (!s.confirm && !s.revealed && !s.eventsFor && justOpened('wh-deliveries-backdrop')) delClose.focus(); }
     onBackdrop('wh-deliveries-backdrop', closeDel);
 
     // Events pop-up
     const eventsEp = s.eventsFor ? findEndpoint(s.eventsFor) : null;
     if (eventsEp) app.querySelectorAll('[data-event-choice]').forEach((box) => box.addEventListener('change', () => toggleEvent(eventsEp, box.dataset.eventChoice, box.checked)));
     const closeEvents = () => { s.eventsFor = null; render(); };
-    const evClose = $('wh-events-close'); if (evClose) { evClose.addEventListener('click', closeEvents); evClose.focus(); }
+    const evClose = $('wh-events-close'); if (evClose) { evClose.addEventListener('click', closeEvents); if (justOpened('wh-events-backdrop')) evClose.focus(); }
     onBackdrop('wh-events-backdrop', closeEvents);
 
     // Secret reveal pop-up
@@ -382,7 +390,7 @@ registerRoute('/developer/webhooks', async (app) => {
     onBackdrop('wh-reveal-backdrop', dismissReveal);
 
     // Revoke / rotate confirmation
-    const cancel = $('wh-cancel'); if (cancel) { cancel.addEventListener('click', () => { s.confirm = null; render(); }); cancel.focus(); }
+    const cancel = $('wh-cancel'); if (cancel) { cancel.addEventListener('click', () => { s.confirm = null; render(); }); if (justOpened('wh-backdrop')) cancel.focus(); }
     const ok = $('wh-confirm'); if (ok) ok.addEventListener('click', () => { const c = s.confirm; if (c.kind === 'revoke') revokeEndpoint(c.id); else rotate(c.id); });
     onBackdrop('wh-backdrop', () => { if (!s.isBusy) { s.confirm = null; render(); } });
   }

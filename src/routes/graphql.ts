@@ -68,7 +68,7 @@ export async function graphqlHandler(request: FastifyRequest, reply: FastifyRepl
   const user = request.currentUser!;
   // Granular scopes either way: a key's Desk scopes are expanded here; an app's token is already expanded (verifyAccessToken).
   const scopes: ReadonlySet<string> | null = request.gatewayKey ? expandKeyScopes(request.gatewayKey.deskScopes) : request.oauth ? request.oauth.scopes : null;
-  const contextValue: GraphQLContext = { user: { id: user.id, email: user.email, firstName: user.firstName, lastName: user.lastName, emailConfirmedAt: user.emailConfirmedAt ?? null }, scopes, restrictedBusinessId: request.gatewayKey?.restrictedBusinessId ?? null };
+  const contextValue: GraphQLContext = { user: { id: user.id, email: user.email, firstName: user.firstName, lastName: user.lastName, emailConfirmedAt: user.emailConfirmedAt ?? null }, scopes, restrictedBusinessId: request.gatewayKey?.restrictedBusinessId ?? null, ownedOnly: Boolean(request.oauth) };
   const result = await execute({
     schema,
     document: doc,

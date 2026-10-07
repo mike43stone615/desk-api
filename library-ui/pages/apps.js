@@ -1,23 +1,27 @@
 // Apps: register an app that signs people in with Desk (OAuth 2.0), and see/revoke the apps you yourself have let into your
 // account. Backed by /oauth/clients and /oauth/authorizations (src/routes/oauth.ts). A client secret is shown once.
 // Laid out like the API keys page (pages/developer.js): the form on the left, the cards on the right, details in "i" badges,
-// and the same pop-ups (Details, Rotate, Remove, the one-time secret).
+// and the same pop-ups (Details with "+ Add", Rotate, Remove, the one-time secret).
 import {
   registerRoute, api, esc, icon, spinnerBtn, statusMsg, friendlyError, toast, reportHandledException, currentEpoch, submitOnEnter, navigate,
 } from '../app.js';
 import { tabsHtml } from '../tabs.js';
-import { SCOPE_GROUPS, SCOPE_LABELS } from '../format.js';
+import { SCOPE_GROUPS, SCOPE_LABELS, APP_SCOPE_LIST } from '../format.js';
 
 const MAX_REDIRECTS = 50; // the server's limit (MAX_REDIRECT_URIS in src/domain/oauth/oauth.ts)
-const ALL_SCOPES = SCOPE_GROUPS.flatMap((g) => g.scopes.map(([id]) => id));
-const REDIRECT_HELP = 'One address per field. Addresses must start with https:// (http is allowed for localhost while you build). The app can only send people back to these exact addresses.';
+const SCOPE_ORDER = APP_SCOPE_LIST.map((x) => x.id);
+const PARENT_OF = Object.fromEntries(APP_SCOPE_LIST.map((x) => [x.id, x.parent]));
+const CHILDREN_OF = (id) => APP_SCOPE_LIST.filter((x) => x.parent === id).map((x) => x.id);
+const REDIRECT_HELP = 'The app can only send people back to these exact addresses. Addresses must start with https:// (developers using http://localhost addresses are also supported). Enter one address per field.';
+const SECRET_TEXT = 'This is the only time the client secret is shown. Store it somewhere safe — if you lose it, rotate it or remove it and create a new one.';
 const when = (iso) => {
   const d = new Date(iso);
   return Number.isNaN(d.getTime()) ? '' : d.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
 };
 /** Hoverable (not clickable) "i" badge: a small themed tooltip instead of the native title attribute. Matches pages/developer.js.
-    `openRight`: the tooltip opens to the right, for a badge near the left edge where opening left would be cut off. */
-function infoIcon(text, openRight = false) {
+    `lines`: one fact per line (never one long run-on line). `openRight`: opens to the right, for a badge near the left edge. */
+function infoIcon(lines, openRight = false) {
+  const text = (Array.isArray(lines) ? lines : [lines]).filter(Boolean).join('\n');
   if (!text) return '';
   return `<span class="info-icon${openRight ? ' open-right' : ''}" tabindex="0">${icon('info_outline')}<span class="info-tooltip" role="tooltip">${esc(text)}</span></span>`;
 }
@@ -28,7 +32,7 @@ function redirectProblem(uri) {
     if (u.hash || u.username || u.password) return 'Remove the #fragment or user name from this address.';
     if (u.protocol === 'https:') return null;
     if (u.protocol === 'http:' && ['localhost', '127.0.0.1', '[::1]'].includes(u.hostname)) return null;
-    return 'Addresses must start with https:// (http is only allowed for localhost).';
+    return 'Addresses must start with https:// (http:// only works for localhost).';
   } catch {
     return 'Enter a full address, like https://yourapp.example.com/callback.';
   }
@@ -39,17 +43,18 @@ function redirectFieldHtml(value, index, list, error) {
   return `
     <div class="field-float has-icon redirect-field">
       <span class="field-icon">${icon('link')}</span>
-      <label>Redirect address${index > 0 ? ` ${index + 1}` : ''}</label>
-      <input data-redirect="${list}" data-index="${index}" type="url" placeholder=" " maxlength="500" value="${esc(value)}" autocomplete="off" class="${error ? 'invalid' : ''}" />
+      <label>Address (https://…)</label>
+      <input data-redirect="${list}" data-index="${index}" type="url" placeholder=" " maxlength="500" value="${esc(value)}" autocomplete="off" aria-label="Redirect address ${index + 1}" class="${error ? 'invalid' : ''}" />
       ${index > 0 ? `<button type="button" class="field-remove" data-remove-redirect="${list}" data-index="${index}" aria-label="Remove redirect address ${index + 1}">${icon('close')}</button>` : ''}
     </div>
     ${error ? `<div class="error-text">${esc(error)}</div>` : ''}`;
 }
 
+/** The fields plus the same "+ Add" chip the API keys Details pop-up uses. */
 function redirectListHtml(values, list, errors = {}) {
   return `
     ${values.map((v, i) => redirectFieldHtml(v, i, list, errors[i])).join('')}
-    ${values.length < MAX_REDIRECTS ? `<button type="button" class="btn btn-sm add-field-btn" data-add-redirect="${list}">+ Add</button>` : ''}`;
+    ${values.length < MAX_REDIRECTS ? `<div class="biz-chips add-row"><button type="button" class="meta-chip chip-add" data-add-redirect="${list}">+ Add</button></div>` : ''}`;
 }
 
 function redirectErrors(values) {
@@ -62,14 +67,27 @@ function redirectErrors(values) {
   return errors;
 }
 
+/** Ticking a detail ticks the list it belongs to; unticking a list unticks its details. */
+function toggleScope(set, id, on) {
+  if (on) {
+    set.add(id);
+    if (PARENT_OF[id]) set.add(PARENT_OF[id]);
+  } else {
+    set.delete(id);
+    CHILDREN_OF(id).forEach((c) => set.delete(c));
+  }
+}
+const ordered = (scopes) => [...scopes].sort((a, b) => (SCOPE_ORDER.indexOf(a) + 1 || 999) - (SCOPE_ORDER.indexOf(b) + 1 || 999));
+
 registerRoute('/developer/apps', async (app) => {
   const myEpoch = currentEpoch();
   const s = {
     isLoading: true, loadError: null, clients: [], authorizations: [],
-    name: '', redirects: [''], chosen: new Set(['profile:name']), confidential: true,
+    name: '', redirects: [''], chosen: new Set(), confidential: false,
     isCreating: false, formError: null, fieldErrors: {}, redirectErrors: {},
     revealed: null, // { client, secret, rotated }
-    detailFor: null, detailRedirects: [], detailErrors: {}, savingRedirects: false,
+    detailFor: null, detailRedirects: [], detailErrors: {}, savingRedirects: false, scopeBusy: false,
+    addScopeOpen: false,
     confirm: null, // { kind: 'client' | 'access' | 'rotate', id, name }
     isBusy: false, _lastFormError: null,
   };
@@ -102,9 +120,9 @@ registerRoute('/developer/apps', async (app) => {
     const uris = [...new Set(s.redirects.map((v) => v.trim()).filter(Boolean))];
     s.isCreating = true; s.formError = null; render();
     try {
-      const res = await api('/oauth/clients', { method: 'POST', body: { name: s.name.trim(), redirectUris: uris, scopes: ALL_SCOPES.filter((x) => s.chosen.has(x)), confidential: s.confidential } });
+      const res = await api('/oauth/clients', { method: 'POST', body: { name: s.name.trim(), redirectUris: uris, scopes: ordered(s.chosen), confidential: s.confidential } });
       s.revealed = { client: res.client, secret: res.clientSecret, rotated: false };
-      s.name = ''; s.redirects = ['']; s.chosen = new Set(['profile:name']); s.confidential = true;
+      s.name = ''; s.redirects = ['']; s.chosen = new Set(); s.confidential = false;
       await loadAll();
     } catch (err) {
       reportHandledException(err, 'createOAuthClient');
@@ -139,7 +157,7 @@ registerRoute('/developer/apps', async (app) => {
   function openDetails(id) {
     const c = findClient(id);
     if (!c) return;
-    s.detailFor = id; s.detailRedirects = [...c.redirectUris]; s.detailErrors = {};
+    s.detailFor = id; s.detailRedirects = [...c.redirectUris]; s.detailErrors = {}; s.addScopeOpen = false;
     render();
   }
   async function saveRedirects() {
@@ -158,6 +176,23 @@ registerRoute('/developer/apps', async (app) => {
       toast(friendlyError(err, 'Could not save those addresses.'), true);
     } finally { s.savingRedirects = false; if (isCurrent()) render(); }
   }
+  /** Add or remove what an app may read (the server drops a removed scope from every existing grant at once). */
+  async function changeScopes(c, scope, on) {
+    if (s.scopeBusy) return;
+    const next = new Set(c.scopes);
+    toggleScope(next, scope, on);
+    if (next.size === 0) { toast('An app must be able to read at least one thing.', true); return; }
+    s.scopeBusy = true; render();
+    try {
+      const res = await api(`/oauth/clients/${encodeURIComponent(c.id)}/scopes`, { method: 'PUT', body: { scopes: ordered(next) } });
+      s.clients = s.clients.map((x) => (x.id === c.id ? res.client : x));
+      s.addScopeOpen = false;
+      toast(on ? `${SCOPE_LABELS[scope] || scope} added.` : `${SCOPE_LABELS[scope] || scope} removed.`);
+    } catch (err) {
+      reportHandledException(err, 'updateOAuthScopes');
+      toast(friendlyError(err, 'Could not change what the app may read.'), true);
+    } finally { s.scopeBusy = false; if (isCurrent()) render(); }
+  }
 
   async function copyValue(id, value, label) {
     const input = document.getElementById(id);
@@ -168,17 +203,18 @@ registerRoute('/developer/apps', async (app) => {
     if (e.key !== 'Escape') return;
     if (s.confirm && !s.isBusy) { s.confirm = null; render(); return; }
     if (s.revealed) { s.revealed = null; render(); return; }
+    if (s.addScopeOpen) { s.addScopeOpen = false; render(); return; }
     if (s.detailFor && !s.savingRedirects) { s.detailFor = null; render(); }
   };
   document.addEventListener('keydown', onKeydown);
 
-  const scopeChips = (scopes) => scopes.map((x) => `<span class="meta-chip">${esc(SCOPE_LABELS[x] || x)}</span>`).join('');
+  const scopeChips = (scopes) => ordered(scopes).map((x) => `<span class="meta-chip">${esc(SCOPE_LABELS[x] || x)}</span>`).join('');
 
   const clientHtml = (c) => `
     <div class="state-card key-card">
       <div class="biz-icon neutral">${icon('category_outlined')}</div>
       <div class="biz-body">
-        <div class="biz-title-row"><div class="biz-title">${esc(c.name)}</div>${infoIcon(`Client ID ${c.id} · Created ${when(c.createdAt)} · ${c.confidential ? 'Has a client secret' : 'Public app (PKCE only)'}`)}</div>
+        <div class="biz-title-row"><div class="biz-title">${esc(c.name)}</div>${infoIcon([`Created ${when(c.createdAt)}`, c.confidential ? 'Has a client secret' : 'Public app (PKCE only)'])}</div>
         <div class="biz-chips">${scopeChips(c.scopes)}</div>
       </div>
       <div class="key-actions">
@@ -191,7 +227,7 @@ registerRoute('/developer/apps', async (app) => {
     <div class="state-card key-card">
       <div class="biz-icon neutral">${icon('check_circle_outline')}</div>
       <div class="biz-body">
-        <div class="biz-title-row"><div class="biz-title">${esc(a.name)}</div>${infoIcon(`Allowed ${when(a.authorizedAt)} · ${a.lastUsedAt ? `Last used ${when(a.lastUsedAt)}` : 'Never used'}`)}</div>
+        <div class="biz-title-row"><div class="biz-title">${esc(a.name)}</div>${infoIcon([`Allowed ${when(a.authorizedAt)}`, a.lastUsedAt ? `Last used ${when(a.lastUsedAt)}` : 'Never used'])}</div>
         <div class="biz-chips">${scopeChips(a.scopes)}</div>
       </div>
       <div class="key-actions">
@@ -199,25 +235,21 @@ registerRoute('/developer/apps', async (app) => {
       </div>
     </div>`;
 
-  /** A labelled value with a Copy button — the same row the API keys page uses for a new key. */
+  /** A value with a Copy button — the same row the API keys page uses for a new key. */
   const copyRow = (id, label, value) => `
-    <span class="reveal-label">${esc(label)}</span>
     <div class="reveal-key"><input id="${id}" readonly value="${esc(value)}" aria-label="${esc(label)}" /><button type="button" class="btn btn-primary" data-copy="${id}" data-copy-label="${esc(label)}">${icon('content_copy')} Copy</button></div>`;
 
   function revealModalHtml() {
     const r = s.revealed;
     const title = r.rotated ? 'Copy your new client secret' : r.secret ? 'Copy your app credentials' : 'Your app is registered';
-    const text = r.rotated
-      ? 'This is the only time the new client secret is shown. The old secret has stopped working, so update your server now.'
-      : r.secret ? 'This is the only time the client secret is shown. Store it somewhere safe — if you lose it, rotate it to get a new one.'
-        : 'This is a public app: it has no client secret and must use PKCE. The client ID is not secret and stays visible under Details.';
+    const text = r.secret ? SECRET_TEXT : 'This is a public app: it has no client secret and must use PKCE. Its client ID is not secret and stays under Details.';
     return `
       <div class="modal-backdrop" id="app-reveal-backdrop">
         <div class="modal" role="dialog" aria-modal="true" aria-labelledby="app-reveal-title">
           <h2 id="app-reveal-title">${title}</h2>
           <p class="modal-text">${esc(text)}</p>
-          ${r.rotated ? '' : copyRow('app-id', 'Client ID', r.client.id)}
-          ${r.secret ? copyRow('app-secret', 'Client secret', r.secret) : ''}
+          ${r.rotated ? '' : `<span class="reveal-label">Client ID</span>${copyRow('app-id', 'Client ID', r.client.id)}`}
+          ${r.secret ? `<span class="reveal-label">Client secret</span>${copyRow('app-secret', 'Client secret', r.secret)}` : ''}
           <div class="modal-actions">
             <button type="button" class="btn" id="dismiss">I've saved it</button>
           </div>
@@ -226,19 +258,43 @@ registerRoute('/developer/apps', async (app) => {
   }
 
   function detailModalHtml(c) {
+    const canAdd = SCOPE_ORDER.filter((x) => !c.scopes.includes(x));
     return `
       <div class="modal-backdrop" id="app-detail-backdrop">
         <div class="modal" role="dialog" aria-modal="true" aria-labelledby="app-detail-title">
           <h2 id="app-detail-title">${esc(c.name)}</h2>
-          <p class="modal-text">Created ${esc(when(c.createdAt))} · ${c.confidential ? 'Has a client secret' : 'Public app (PKCE only)'}</p>
+          <div class="field-header"><label>Client ID</label></div>
           ${copyRow('detail-client-id', 'Client ID', c.id)}
           <div class="field-header field-header-row"><label>Redirect addresses</label>${infoIcon(REDIRECT_HELP, true)}</div>
           ${redirectListHtml(s.detailRedirects, 'detail', s.detailErrors)}
           <div class="field-header"><label>What the app may read</label></div>
-          <div class="biz-chips">${scopeChips(c.scopes)}</div>
+          <div class="biz-chips">
+            ${ordered(c.scopes).map((x) => `<span class="meta-chip">${esc(SCOPE_LABELS[x] || x)}${c.scopes.length > 1 ? ` <button type="button" class="chip-x" data-remove-scope="${esc(x)}" aria-label="Remove ${esc(SCOPE_LABELS[x] || x)}" ${s.scopeBusy ? 'disabled' : ''}>✕</button>` : ''}</span>`).join('')}
+            ${canAdd.length ? `<button type="button" class="meta-chip chip-add" id="open-add-scope" ${s.scopeBusy ? 'disabled' : ''}>+ Add</button>` : ''}
+          </div>
           <div class="modal-actions">
             <button type="button" class="btn" id="close-detail-btn" ${s.savingRedirects ? 'disabled' : ''}>Close</button>
-            <button type="button" class="btn btn-primary" id="save-redirects-btn" ${s.savingRedirects ? 'disabled' : ''}>${s.savingRedirects ? spinnerBtn(true, '') : 'Save addresses'}</button>
+            <button type="button" class="btn btn-primary" id="save-redirects-btn" ${s.savingRedirects ? 'disabled' : ''}>${s.savingRedirects ? spinnerBtn(true, '') : 'Save'}</button>
+          </div>
+        </div>
+      </div>
+      ${s.addScopeOpen ? addScopeModalHtml(c, canAdd) : ''}`;
+  }
+
+  /** Same pop-up as "Add an API" on the API keys page: click one to add it. A detail adds its list too. */
+  function addScopeModalHtml(c, canAdd) {
+    return `
+      <div class="modal-backdrop" id="add-scope-backdrop">
+        <div class="modal" role="dialog" aria-modal="true" aria-labelledby="add-scope-title">
+          <h2 id="add-scope-title">Add to what "${esc(c.name)}" may read</h2>
+          <div class="library-list">
+            ${canAdd.map((x) => `
+              <button type="button" class="library-row${PARENT_OF[x] ? ' scope-child' : ''}" data-add-scope="${esc(x)}" ${s.scopeBusy ? 'disabled' : ''}>
+                <span class="library-body"><span class="name">${esc(SCOPE_LABELS[x])}${PARENT_OF[x] && !c.scopes.includes(PARENT_OF[x]) ? ` <span class="biz-sub">(adds ${esc(SCOPE_LABELS[PARENT_OF[x]])})</span>` : ''}</span></span>
+              </button>`).join('')}
+          </div>
+          <div class="modal-actions">
+            <button type="button" class="btn" id="close-add-scope-btn">Cancel</button>
           </div>
         </div>
       </div>`;
@@ -263,15 +319,19 @@ registerRoute('/developer/apps', async (app) => {
       </div>`;
   }
 
+  const scopeRowHtml = (item, child = false) => `
+    <label class="library-row${child ? ' scope-child' : ''}"><input type="checkbox" name="scope" value="${esc(item.id)}" ${s.chosen.has(item.id) ? 'checked' : ''} /><span class="library-body"><span class="name">${esc(item.name)}</span></span>${item.info ? infoIcon(item.info, true) : ''}</label>
+    ${(item.children || []).map((c) => scopeRowHtml(c, true)).join('')}`;
+
   function scopeListHtml() {
     return SCOPE_GROUPS.map((g) => `
       <div class="scope-group-title">${esc(g.title)}</div>
-      <div class="library-list">${g.scopes.map(([id, name, desc]) => `
-        <label class="library-row"><input type="checkbox" name="scope" value="${esc(id)}" ${s.chosen.has(id) ? 'checked' : ''} /><span class="library-body"><span class="name">${esc(name)}</span><span class="biz-sub">${esc(desc)}</span></span></label>`).join('')}
-      </div>`).join('');
+      <div class="library-list">${g.scopes.map((item) => scopeRowHtml(item)).join('')}</div>`).join('');
   }
 
   function render() {
+    // Keep each open pop-up where the person had scrolled it (a re-render would otherwise jump to the top or to the focused button).
+    const scrolls = Object.fromEntries([...document.querySelectorAll('.modal-backdrop')].map((b) => [b.id, b.querySelector('.modal')?.scrollTop || 0]));
     let body;
     if (s.isLoading) body = `<div class="empty-state">${spinnerBtn(true, '', { dark: true })}</div>`;
     else if (s.loadError) body = `<div class="empty-state">${icon('error_outline')}<div style="margin-top:var(--sp-md);">Apps could not load</div><div class="hint">${esc(s.loadError)}</div><button type="button" class="btn" id="retry-btn" style="margin-top:var(--sp-lg);">${icon('refresh')} Try again</button></div>`;
@@ -287,7 +347,7 @@ registerRoute('/developer/apps', async (app) => {
               ${errText('name')}
               <div class="field-header field-header-row"><label>Redirect addresses</label>${infoIcon(REDIRECT_HELP, true)}</div>
               ${redirectListHtml(s.redirects, 'form', s.redirectErrors)}
-              <label class="library-row" id="confidential-row"><input type="checkbox" name="confidential" ${s.confidential ? 'checked' : ''} /><span class="library-body"><span class="name">The app has a server that can keep a secret</span><span class="biz-sub">Untick for a mobile or single-page app: it then gets no secret and relies on PKCE alone.</span></span></label>
+              <label class="library-row" id="confidential-row"><input type="checkbox" name="confidential" ${s.confidential ? 'checked' : ''} /><span class="library-body"><span class="name">The app has a server that can keep a secret</span><span class="biz-sub">Leave off for a mobile or single-page app: it then gets no secret and relies on PKCE alone.</span></span></label>
               <div class="field-header"><label>What the app may read</label></div>
               ${scopeListHtml()}
               ${errText('scopes')}
@@ -317,11 +377,16 @@ registerRoute('/developer/apps', async (app) => {
       ${detail ? detailModalHtml(detail) : ''}
       ${s.revealed ? revealModalHtml() : ''}
       ${s.confirm ? confirmModalHtml(s.confirm) : ''}`;
-    wire();
+    for (const [id, top] of Object.entries(scrolls)) {
+      const m = document.getElementById(id)?.querySelector('.modal');
+      if (m) m.scrollTop = top;
+    }
+    wire(scrolls);
   }
 
-  function wire() {
+  function wire(previouslyOpen) {
     const $ = (id) => document.getElementById(id);
+    const justOpened = (id) => !(id in previouslyOpen);
     const onBackdrop = (id, close) => { const el = $(id); if (el) el.addEventListener('click', (e) => { if (e.target === el) close(); }); };
     app.querySelectorAll('[data-nav]').forEach((a) => a.addEventListener('click', (e) => { e.preventDefault(); navigate(a.dataset.nav); }));
     const retry = $('retry-btn'); if (retry) retry.addEventListener('click', load);
@@ -347,7 +412,7 @@ registerRoute('/developer/apps', async (app) => {
     if (form) {
       form.addEventListener('submit', createClient); submitOnEnter(form);
       form.querySelector('input[name="name"]').addEventListener('input', (e) => { s.name = e.target.value; });
-      form.querySelectorAll('input[name="scope"]').forEach((box) => box.addEventListener('change', () => { if (box.checked) s.chosen.add(box.value); else s.chosen.delete(box.value); }));
+      form.querySelectorAll('input[name="scope"]').forEach((box) => box.addEventListener('change', () => { toggleScope(s.chosen, box.value, box.checked); render(); }));
       form.querySelector('input[name="confidential"]').addEventListener('change', (e) => { s.confidential = e.target.checked; });
     }
 
@@ -357,10 +422,18 @@ registerRoute('/developer/apps', async (app) => {
     onBackdrop('app-reveal-backdrop', dismissReveal);
 
     app.querySelectorAll('[data-details]').forEach((b) => b.addEventListener('click', () => openDetails(b.dataset.details)));
-    const closeDetail = () => { if (!s.savingRedirects) { s.detailFor = null; render(); } };
-    const closeBtn = $('close-detail-btn'); if (closeBtn) { closeBtn.addEventListener('click', closeDetail); if (!s.confirm && !s.revealed && !document.activeElement?.dataset?.redirect) closeBtn.focus(); }
+    const closeDetail = () => { if (!s.savingRedirects) { s.detailFor = null; s.addScopeOpen = false; render(); } };
+    const closeBtn = $('close-detail-btn'); if (closeBtn) { closeBtn.addEventListener('click', closeDetail); if (justOpened('app-detail-backdrop')) closeBtn.focus(); }
     const saveBtn = $('save-redirects-btn'); if (saveBtn) saveBtn.addEventListener('click', saveRedirects);
     onBackdrop('app-detail-backdrop', closeDetail);
+
+    const detail = s.detailFor ? findClient(s.detailFor) : null;
+    app.querySelectorAll('[data-remove-scope]').forEach((b) => b.addEventListener('click', () => { if (detail) changeScopes(detail, b.dataset.removeScope, false); }));
+    const openAdd = $('open-add-scope'); if (openAdd) openAdd.addEventListener('click', () => { s.addScopeOpen = true; render(); });
+    app.querySelectorAll('[data-add-scope]').forEach((b) => b.addEventListener('click', () => { if (detail) changeScopes(detail, b.dataset.addScope, true); }));
+    const closeAdd = () => { s.addScopeOpen = false; render(); };
+    const closeAddBtn = $('close-add-scope-btn'); if (closeAddBtn) { closeAddBtn.addEventListener('click', closeAdd); if (justOpened('add-scope-backdrop')) closeAddBtn.focus(); }
+    onBackdrop('add-scope-backdrop', closeAdd);
 
     const confirmFor = (kind, id) => {
       const c = kind === 'access' ? s.authorizations.find((a) => a.clientId === id) : findClient(id);
@@ -369,7 +442,7 @@ registerRoute('/developer/apps', async (app) => {
     app.querySelectorAll('[data-remove-client]').forEach((b) => b.addEventListener('click', () => confirmFor('client', b.dataset.removeClient)));
     app.querySelectorAll('[data-revoke-access]').forEach((b) => b.addEventListener('click', () => confirmFor('access', b.dataset.revokeAccess)));
     app.querySelectorAll('[data-rotate]').forEach((b) => b.addEventListener('click', () => confirmFor('rotate', b.dataset.rotate)));
-    const cancel = $('app-cancel'); if (cancel) { cancel.addEventListener('click', () => { s.confirm = null; render(); }); cancel.focus(); }
+    const cancel = $('app-cancel'); if (cancel) { cancel.addEventListener('click', () => { s.confirm = null; render(); }); if (justOpened('app-backdrop')) cancel.focus(); }
     const ok = $('app-confirm');
     if (ok) ok.addEventListener('click', () => {
       const c = s.confirm;

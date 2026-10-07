@@ -113,6 +113,18 @@ export const oauthClients = {
     return rows[0] ? toClient(rows[0]) : null;
   },
 
+  /** Replaces what an app may ask for. Removing a scope also stops every existing grant from using it (verifyAccessToken). */
+  async setScopes(ownerUserId: string, id: string, scopes: OAuthScope[]): Promise<OAuthClient | null> {
+    const unique = [...new Set(scopes)];
+    if (unique.length === 0) throw new OAuthError('invalid_scope', 'An app must be able to read at least one thing.');
+    const { rows } = await pool.query<ClientRow>(
+      `UPDATE oauth_clients SET scopes = $3 WHERE id = $1 AND owner_user_id = $2 AND revoked_at IS NULL
+       RETURNING id, name, redirect_uris, scopes, secret_hash, created_at`,
+      [id, ownerUserId, unique],
+    );
+    return rows[0] ? toClient(rows[0]) : null;
+  },
+
   /** A new client secret for a confidential app (shown once); the old one stops working at once. People's grants are kept. */
   async rotateSecret(ownerUserId: string, id: string): Promise<string | null> {
     const client = await this.get(id);
@@ -229,15 +241,17 @@ export interface VerifiedOAuthToken { tokenId: string; userId: string; clientId:
 export async function verifyAccessToken(raw: string): Promise<VerifiedOAuthToken | null> {
   if (!raw.startsWith(ACCESS_TOKEN_PREFIX)) return null;
   try {
-    const { rows } = await pool.query<{ id: string; user_id: string; client_id: string; scopes: OAuthScope[]; last_used_at: string | null }>(
-      `SELECT t.id, t.user_id, t.client_id, t.scopes, t.last_used_at FROM oauth_tokens t JOIN oauth_clients c ON c.id = t.client_id
+    const { rows } = await pool.query<{ id: string; user_id: string; client_id: string; scopes: OAuthScope[]; client_scopes: OAuthScope[]; last_used_at: string | null }>(
+      `SELECT t.id, t.user_id, t.client_id, t.scopes, c.scopes AS client_scopes, t.last_used_at FROM oauth_tokens t JOIN oauth_clients c ON c.id = t.client_id
         WHERE t.access_hash = $1 AND t.revoked_at IS NULL AND t.access_expires_at > $2 AND c.revoked_at IS NULL`,
       [sha(raw), now()],
     );
     const t = rows[0];
     if (!t) return null;
     if (!t.last_used_at || Date.now() - Date.parse(t.last_used_at) > 5 * 60_000) pool.query(`UPDATE oauth_tokens SET last_used_at = $2 WHERE id = $1`, [t.id, now()]).catch(() => {});
-    return { tokenId: t.id, userId: t.user_id, clientId: t.client_id, scopes: expandOAuthScopes(t.scopes) };
+    // What the person approved, cut down to what the app is still registered for (an owner can remove a scope later).
+    const stillRegistered = expandOAuthScopes(t.client_scopes ?? []);
+    return { tokenId: t.id, userId: t.user_id, clientId: t.client_id, scopes: new Set([...expandOAuthScopes(t.scopes)].filter((x) => stillRegistered.has(x))) };
   } catch {
     return null;
   }

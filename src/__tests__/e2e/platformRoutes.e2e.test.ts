@@ -176,7 +176,7 @@ describe.skipIf(!hasDb)('E2E: status, changelog, billing, GraphQL and webhook re
     expect((await call('POST', '/v1/gateway/webhooks', unconfirmed, { url: PUBLIC_URL, events: ['key.created'] })).statusCode).toBe(403);
     expect((await call('POST', '/v1/gateway/webhooks', u, { url: PUBLIC_URL, events: [] })).statusCode).toBe(400);
     expect((await call('POST', '/v1/gateway/webhooks', u, { url: PUBLIC_URL, events: ['nonsense'] })).statusCode).toBe(400);
-    expect((await call('POST', '/v1/gateway/webhooks', u, { url: 'http://93.184.216.34/x', events: ['key.created'] })).statusCode).toBe(400);
+    expect((await call('POST', '/v1/gateway/webhooks', u, { url: 'ftp://93.184.216.34/x', events: ['key.created'] })).statusCode).toBe(400);
     expect((await call('POST', '/v1/gateway/webhooks', u, { url: 'https://127.0.0.1/x', events: ['key.created'] })).statusCode).toBe(400);
 
     const made = await call('POST', '/v1/gateway/webhooks', u, { url: PUBLIC_URL, events: ['key.created'] });

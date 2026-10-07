@@ -1,6 +1,6 @@
 // The parts of outbound webhooks that need no database: signing, the replay window, and which addresses are refused.
 import { describe, it, expect } from 'vitest';
-import { assertSafeWebhookUrl, isPrivateAddress, signPayload, verifySignature } from '../domain/webhooks/webhooks';
+import { assertSafeWebhookUrl, describeDeliveryError, isPrivateAddress, signPayload, verifySignature, WebhookError } from '../domain/webhooks/webhooks';
 import { invoiceLines, FALLBACK_FREE_PLAN } from '../domain/billing/plans';
 
 describe('webhook signatures', () => {
@@ -39,7 +39,10 @@ describe('addresses a webhook may not reach', () => {
     await expect(assertSafeWebhookUrl('https://hooks.example.com:8443/desk', publicResolver)).resolves.toBeInstanceOf(URL);
   });
   it('is refused for http, credentials, odd ports, private names and literals, and hosts that do not resolve', async () => {
-    await expect(assertSafeWebhookUrl('http://hooks.example.com/', publicResolver)).rejects.toThrow(/https/);
+    await expect(assertSafeWebhookUrl('http://hooks.example.com/', publicResolver)).resolves.toBeInstanceOf(URL); // plain http allowed for developers
+    await expect(assertSafeWebhookUrl('http://hooks.example.com:8080/', publicResolver)).resolves.toBeInstanceOf(URL);
+    await expect(assertSafeWebhookUrl('http://10.0.0.5/', publicResolver)).rejects.toThrow(/private/); // but never to a private network
+    await expect(assertSafeWebhookUrl('ftp://hooks.example.com/', publicResolver)).rejects.toThrow(/https/);
     await expect(assertSafeWebhookUrl('https://user:pw@hooks.example.com/', publicResolver)).rejects.toThrow(/user name/);
     await expect(assertSafeWebhookUrl('https://hooks.example.com:6379/', publicResolver)).rejects.toThrow(/port/);
     await expect(assertSafeWebhookUrl('https://10.0.0.5/', publicResolver)).rejects.toThrow(/private/);
@@ -65,5 +68,20 @@ describe('invoice lines', () => {
   it('the free plan and a plan with no overage price produce no lines however much is used', () => {
     expect(invoiceLines(FALLBACK_FREE_PLAN, 100_000)).toEqual([]);
     expect(invoiceLines({ ...developer, overageCentsPerAnalysis: null }, 9000)).toHaveLength(1);
+  });
+});
+
+
+describe('delivery failure reasons', () => {
+  const withCause = (code: string, message = '') => Object.assign(new TypeError('fetch failed'), { cause: { code, message } });
+  it('turns every network failure into a plain reason', () => {
+    expect(describeDeliveryError(withCause('ECONNREFUSED'))).toMatch(/connection refused/);
+    expect(describeDeliveryError(withCause('ENOTFOUND'))).toMatch(/does not resolve/);
+    expect(describeDeliveryError(withCause('ECONNRESET'))).toMatch(/dropped/);
+    expect(describeDeliveryError(withCause('EHOSTUNREACH'))).toMatch(/unreachable/);
+    expect(describeDeliveryError(withCause('CERT_HAS_EXPIRED'))).toMatch(/certificate/);
+    expect(describeDeliveryError(Object.assign(new Error('x'), { name: 'TimeoutError' }))).toMatch(/timed out/);
+    expect(describeDeliveryError(new WebhookError('invalid_url', 'That address points at a private or internal network, which webhooks cannot reach.'))).toMatch(/private/);
+    expect(describeDeliveryError(withCause('SOMETHING_NEW', 'odd'))).toBe('odd');
   });
 });
