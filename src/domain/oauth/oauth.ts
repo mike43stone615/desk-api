@@ -158,7 +158,11 @@ export async function validateAuthorizeRequest(q: AuthorizeRequest): Promise<{ c
   // Compared piece by piece, so an app registered with an original scope (e.g. "profile") may ask for one of its parts
   // (e.g. "profile:name"), and an app may never get a piece it did not register for.
   const allowed = expandOAuthScopes(client.scopes);
-  const notAllowed = scopes.filter((s) => [...expandOAuthScopes([s])].some((g) => !allowed.has(g)));
+  // A scope that opens nothing any more (e.g. the original "drafts") is refused too, rather than silently granted as nothing.
+  const notAllowed = scopes.filter((s) => {
+    const pieces = expandOAuthScopes([s]);
+    return pieces.size === 0 || [...pieces].some((g) => !allowed.has(g));
+  });
   if (notAllowed.length) throw new OAuthError('invalid_scope', `This app is not registered for: ${notAllowed.join(', ')}.`);
   return { client, scopes };
 }
