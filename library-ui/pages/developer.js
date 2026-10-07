@@ -738,7 +738,7 @@ registerRoute('/developer', async (app) => {
     app.querySelectorAll('[data-open-add-api]').forEach((b) => b.addEventListener('click', () => { s.addServiceFor = b.dataset.openAddApi; render(); }));
     app.querySelectorAll('[data-add-api-choice]').forEach((b) => b.addEventListener('click', () => { const [id, svc] = b.dataset.addApiChoice.split('::'); const k = s.keys.find((x) => x.id === id); if (k) addService(k, svc); }));
     const closeAddApi = document.getElementById('close-add-api-btn');
-    if (closeAddApi) { closeAddApi.addEventListener('click', () => { s.addServiceFor = null; render(); }); closeAddApi.focus(); }
+    if (closeAddApi) { closeAddApi.addEventListener('click', () => { s.addServiceFor = null; render(); }); closeAddApi.focus({ preventScroll: true }); }
     const addApiBackdrop = document.getElementById('add-api-modal-backdrop');
     if (addApiBackdrop) addApiBackdrop.addEventListener('click', (e) => { if (e.target === addApiBackdrop) { s.addServiceFor = null; render(); } });
     // Hovering a bar highlights it and the same day's bar on the other chart (calls <-> errors), and shows a
@@ -790,7 +790,7 @@ registerRoute('/developer', async (app) => {
     if (revealBackdrop) revealBackdrop.addEventListener('click', (e) => { if (e.target === revealBackdrop) { s.revealed = null; render(); } });
 
     const closeDetail = document.getElementById('close-detail-btn');
-    if (closeDetail) { closeDetail.addEventListener('click', () => { s.detailFor = null; render(); }); closeDetail.focus(); }
+    if (closeDetail) { closeDetail.addEventListener('click', () => { s.detailFor = null; render(); }); closeDetail.focus({ preventScroll: true }); }
     const detailBackdrop = document.getElementById('detail-modal-backdrop');
     if (detailBackdrop) detailBackdrop.addEventListener('click', (e) => { if (e.target === detailBackdrop) { s.detailFor = null; render(); } });
 

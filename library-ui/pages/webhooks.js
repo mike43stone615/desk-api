@@ -373,14 +373,14 @@ registerRoute('/developer/webhooks', async (app) => {
 
     // Deliveries pop-up
     const closeDel = () => { closeDeliveries(); render(); };
-    const delClose = $('wh-deliveries-close'); if (delClose) { delClose.addEventListener('click', closeDel); if (!s.confirm && !s.revealed && !s.eventsFor && justOpened('wh-deliveries-backdrop')) delClose.focus(); }
+    const delClose = $('wh-deliveries-close'); if (delClose) { delClose.addEventListener('click', closeDel); if (!s.confirm && !s.revealed && !s.eventsFor && justOpened('wh-deliveries-backdrop')) delClose.focus({ preventScroll: true }); }
     onBackdrop('wh-deliveries-backdrop', closeDel);
 
     // Events pop-up
     const eventsEp = s.eventsFor ? findEndpoint(s.eventsFor) : null;
     if (eventsEp) app.querySelectorAll('[data-event-choice]').forEach((box) => box.addEventListener('change', () => toggleEvent(eventsEp, box.dataset.eventChoice, box.checked)));
     const closeEvents = () => { s.eventsFor = null; render(); };
-    const evClose = $('wh-events-close'); if (evClose) { evClose.addEventListener('click', closeEvents); if (justOpened('wh-events-backdrop')) evClose.focus(); }
+    const evClose = $('wh-events-close'); if (evClose) { evClose.addEventListener('click', closeEvents); if (justOpened('wh-events-backdrop')) evClose.focus({ preventScroll: true }); }
     onBackdrop('wh-events-backdrop', closeEvents);
 
     // Secret reveal pop-up

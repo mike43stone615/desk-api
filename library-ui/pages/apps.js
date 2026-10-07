@@ -423,7 +423,7 @@ registerRoute('/developer/apps', async (app) => {
 
     app.querySelectorAll('[data-details]').forEach((b) => b.addEventListener('click', () => openDetails(b.dataset.details)));
     const closeDetail = () => { if (!s.savingRedirects) { s.detailFor = null; s.addScopeOpen = false; render(); } };
-    const closeBtn = $('close-detail-btn'); if (closeBtn) { closeBtn.addEventListener('click', closeDetail); if (justOpened('app-detail-backdrop')) closeBtn.focus(); }
+    const closeBtn = $('close-detail-btn'); if (closeBtn) { closeBtn.addEventListener('click', closeDetail); if (justOpened('app-detail-backdrop')) closeBtn.focus({ preventScroll: true }); }
     const saveBtn = $('save-redirects-btn'); if (saveBtn) saveBtn.addEventListener('click', saveRedirects);
     onBackdrop('app-detail-backdrop', closeDetail);
 
@@ -432,7 +432,7 @@ registerRoute('/developer/apps', async (app) => {
     const openAdd = $('open-add-scope'); if (openAdd) openAdd.addEventListener('click', () => { s.addScopeOpen = true; render(); });
     app.querySelectorAll('[data-add-scope]').forEach((b) => b.addEventListener('click', () => { if (detail) changeScopes(detail, b.dataset.addScope, true); }));
     const closeAdd = () => { s.addScopeOpen = false; render(); };
-    const closeAddBtn = $('close-add-scope-btn'); if (closeAddBtn) { closeAddBtn.addEventListener('click', closeAdd); if (justOpened('add-scope-backdrop')) closeAddBtn.focus(); }
+    const closeAddBtn = $('close-add-scope-btn'); if (closeAddBtn) { closeAddBtn.addEventListener('click', closeAdd); if (justOpened('add-scope-backdrop')) closeAddBtn.focus({ preventScroll: true }); }
     onBackdrop('add-scope-backdrop', closeAdd);
 
     const confirmFor = (kind, id) => {
