@@ -52,7 +52,6 @@ export const SDL = /* GraphQL */ `
     "businesses:role (never given to apps; an app only sees businesses the person owns)"
     role: String
     isSetupComplete: Boolean!
-    "businesses:formation"
     "Each field needs its own scope: legalEntity/businessStructure/isRegisteredBusiness businesses:legal_entity; taxElection businesses:tax_election; specialLegalDesignation businesses:special_designation; formationState/formationCity businesses:location; hasPartners/numberOfPartners businesses:partners"
     formation: BusinessFormation
     "businesses:regulatory_status"

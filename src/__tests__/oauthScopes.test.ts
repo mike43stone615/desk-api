@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { ALL_OAUTH_SCOPES, APP_SCOPES, GRANULAR_SCOPES, SCOPE_DESCRIPTIONS, expandKeyScopes, expandOAuthScopes } from '../domain/oauth/scopes';
+import { getSchema } from '../domain/graphql/schema';
 
 describe('granular OAuth scopes', () => {
   it('describes every scope in plain English', () => {
@@ -31,5 +32,11 @@ describe('granular OAuth scopes', () => {
     for (const s of GRANULAR_SCOPES.filter((x) => x.startsWith('businesses:'))) expect(all.has(s)).toBe(true);
     expect(all.has('profile:name')).toBe(false);
     expect(expandKeyScopes(['profile', 'drafts']).has('keys:name')).toBe(false);
+  });
+});
+
+describe('GraphQL schema', () => {
+  it('builds (a bad SDL edit fails here instead of at the first GraphQL request)', () => {
+    expect(() => getSchema()).not.toThrow();
   });
 });
