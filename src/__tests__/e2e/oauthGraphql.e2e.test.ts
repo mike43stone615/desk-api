@@ -300,14 +300,15 @@ describe.skipIf(!hasDb)('E2E: OAuth and GraphQL', () => {
       await pool.query(`INSERT INTO businesses (id, user_id, name, industry, business_json, created_at, updated_at) VALUES ($1,$2,$3,'Repair',$4,$5,$5)`, [id, owner.id, name, json, now]);
       await pool.query(`INSERT INTO business_memberships (id, business_id, user_id, role, accepted_at, created_at, updated_at) VALUES ($1,$2,$3,'owner',$4,$4,$4)`, [rid(), id, owner.id, now]);
     }
-    const q = `{ businesses { id name formation { legalEntity taxElection formationState hasPartners numberOfPartners isRegisteredBusiness specialLegalDesignation }
+    const q = `{ businesses { id name industry role regulatoryStatuses formation { legalEntity businessStructure taxElection formationState formationCity hasPartners numberOfPartners isRegisteredBusiness specialLegalDesignation }
       location { address city state placeId } idea { description customerType additionalIndustries } plan { sections { title content } pricingHypothesis }
       requirements { items { id title selection } regulatoryStatuses } nameCheck marketResearch registeredAgent { status name } members { role } } }`;
     const res = (await gql(owner.headers, q)).json();
     expect(res.errors).toBeUndefined();
     const byName = Object.fromEntries(res.data.businesses.map((b: { name: string }) => [b.name, b]));
     const b = byName['Full Biz'];
-    expect(b.formation).toEqual({ legalEntity: 'LLC', taxElection: 'S Corp', formationState: 'OH', hasPartners: true, numberOfPartners: 2, isRegisteredBusiness: false, specialLegalDesignation: null });
+    expect(b.formation).toEqual({ legalEntity: 'LLC', businessStructure: 'llc', taxElection: 'S Corp', formationState: 'OH', formationCity: 'Anna', hasPartners: true, numberOfPartners: 2, isRegisteredBusiness: false, specialLegalDesignation: null });
+    expect(b).toMatchObject({ industry: 'Repair', role: 'owner', regulatoryStatuses: ['none'] });
     expect(b.location).toEqual({ address: '1 Main St, Anna, OH', city: 'Anna', state: 'OH', placeId: 'place-1' });
     expect(b.idea.additionalIndustries).toEqual(['Retail']);
     expect(b.plan.sections).toEqual([{ title: 'Summary', content: 'Hi' }, { title: 'Second', content: '' }]);
@@ -342,6 +343,20 @@ describe.skipIf(!hasDb)('E2E: OAuth and GraphQL', () => {
     // the person still sees the business they belong to in their own session
     expect((await gql(owner.headers, '{ businesses { name } }')).json().data.businesses.map((x: { name: string }) => x.name)).toContain('Someone Elses Biz');
     await pool.query('DELETE FROM businesses WHERE id = ANY($1)', [[fullId, brokenId, notMineId]]);
+
+    const made = await call('POST', '/v1/gateway/api-keys', owner.headers, { label: 'Detail key', services: ['desk_api'] });
+    expect(made.statusCode).toBe(201);
+    const allKeyFields = '{ apiKeys { id label keyPrefix createdAt lastUsedAt expiresAt services sandbox teamId } }';
+    const mine = (await gql(owner.headers, allKeyFields)).json();
+    expect(mine.errors).toBeUndefined();
+    expect(mine.data.apiKeys[0]).toMatchObject({ label: 'Detail key', services: ['desk_api'], sandbox: false });
+    expect(mine.data.apiKeys[0].keyPrefix).toMatch(/^deskgw_/);
+    const keysApp = await registerApp(dev, ['keys:name', 'keys:dates']);
+    const kv = verifierFor();
+    const keyTokens = (await tokenCall({ grant_type: 'authorization_code', client_id: keysApp.client.id, client_secret: keysApp.clientSecret!, code: await authorize(owner, keysApp.client.id, 'keys:name', kv), redirect_uri: REDIRECT, code_verifier: kv })).json();
+    const viaKeysApp = (await gql({ authorization: `Bearer ${keyTokens.access_token}` }, allKeyFields)).json();
+    expect(viaKeysApp.data.apiKeys[0]).toMatchObject({ label: 'Detail key', keyPrefix: null, createdAt: null, services: null });
+    expect(new Set(viaKeysApp.errors.map((e: { extensions: { scope: string } }) => e.extensions.scope))).toEqual(new Set(['keys:prefix', 'keys:dates', 'keys:apis']));
   });
 
   it('GraphQL: an API key or an OAuth app sees only what its scopes allow', async () => {
