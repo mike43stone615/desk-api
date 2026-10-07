@@ -133,7 +133,7 @@ describe.skipIf(!hasDb)('E2E: status, changelog, billing, GraphQL and webhook re
     expect(mine.statusCode).toBe(200);
     expect(mine.json().subscription).toMatchObject({ subjectType: 'user', subjectId: owner.id, status: 'active' });
     expect(mine.json().usage).toMatchObject({ marketAnalyses: 0 });
-    expect((await call('GET', '/v1/billing/invoices', owner)).json()).toEqual({ hasMore: false, invoices: [] });
+    expect((await call('GET', '/v1/billing/invoices', owner)).json()).toMatchObject({ hasMore: false, invoices: [], accountName: expect.any(String) });
   });
 
   it('GraphQL: keys and plan for their owner, refusals for outsiders, key usage, drafts and business members', async () => {

@@ -261,7 +261,7 @@ describe.skipIf(!hasDb)('E2E: OAuth and GraphQL', () => {
     const data = res.json().data;
     expect(data.viewer.id).toBe(u.id);
     expect(data.teams).toEqual([]); // teams no longer exist; the field stays for old integrations and always answers empty
-    expect(data.plan).toMatchObject({ id: 'free', maxKeys: 10 });
+    expect(data.plan).toMatchObject({ id: 'business', maxKeys: 100 }); // this file's people are on Business (see mkUser)
     // no way to change anything, and no GET
     const mut = await gql(u.headers, 'mutation { deleteEverything }');
     expect(mut.statusCode).toBe(400);

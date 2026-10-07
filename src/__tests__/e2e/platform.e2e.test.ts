@@ -49,7 +49,7 @@ describe.skipIf(!hasDb)('E2E: plans, invoices and webhooks', () => {
   it('everyone starts on the Free plan with the limits there always were', async () => {
     const u = await mkUser('free');
     const sub = await subscriptionFor('user', u.id);
-    expect(sub.plan).toMatchObject({ id: 'free', monthlyPriceCents: 0, maxKeys: 10, perMinuteLimit: null });
+    expect(sub.plan).toMatchObject({ id: 'free', monthlyPriceCents: 0, maxKeys: 10, perMinuteLimit: 100, maxApps: 1, servicePerMonth: 300, overageCentsPerCall: null });
     const plans = (await app.inject({ method: 'GET', url: '/v1/billing/plans' })).json().plans;
     expect(plans.map((p: { id: string }) => p.id)).toEqual(['free', 'developer', 'business']);
   });
