@@ -574,7 +574,7 @@ const BASE_SPEC = {
       post: { tags: ['Admin'], summary: 'Post an update to an incident; "resolved" closes it', security: [{ SessionToken: [] }], parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }], requestBody: { required: true, content: { 'application/json': { schema: { type: 'object', required: ['status', 'message'], properties: { status: { type: 'string', enum: ['investigating', 'identified', 'monitoring', 'resolved'] }, message: { type: 'string' } } } } } }, responses: { '200': { description: 'The incident' }, '404': { description: 'No such incident' } } },
     },
     '/admin/gateway-keys': {
-      get: { tags: ['Admin'], summary: 'Every live API key: owner, services, last use, and whether it is suspended', security: [{ SessionToken: [] }], responses: { '200': { description: 'OK' }, '403': { description: 'Not an administrator, or the sign-in is older than 24 hours' } } },
+      get: { tags: ['Admin'], summary: 'Every live API key: owner, services, last use, and whether it is suspended', security: [{ SessionToken: [] }], responses: { '200': { description: 'OK' }, '403': { description: 'Not an administrator' } } },
     },
     '/admin/gateway-keys/reconcile': {
       get: { tags: ['Admin'], summary: 'What the last comparison of our keys with the backends found', security: [{ SessionToken: [] }], responses: { '200': { description: 'The last report, or null before the first run' } } },

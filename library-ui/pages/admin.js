@@ -290,7 +290,7 @@ registerRoute('/developer/admin', async (app) => {
     return `
       <div class="card" style="margin-bottom:var(--sp-lg);">
         <h2 class="biz-section-title">Who can see this page</h2>
-        <p class="biz-sub">Administrators can view and edit the data of every API here and use the other administrator tools. Only an owner can change this list. A person needs a Desk account with a confirmed email address, and must have signed in within the last 24 hours to use the tools.</p>
+        <p class="biz-sub">Administrators can view and edit the data of every API here and use the other administrator tools. Only an owner can change this list. A person needs a Desk account with a confirmed email address.</p>
         <div class="field-header"><label>Owners (set in the server settings, cannot be removed here)</label></div>
         ${a.owners.map((o) => `<div class="state-card key-card"><div class="biz-icon neutral">${icon('lock')}</div><div class="biz-body"><div class="biz-title">${esc(o)}</div><div class="biz-sub">Owner</div></div></div>`).join('') || '<p class="biz-sub">None set.</p>'}
       </div>

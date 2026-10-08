@@ -87,7 +87,6 @@ export const ERROR_CODES: Record<string, string> = {
   team_limit_reached: 'A team limit was reached (teams per person, members, or keys).',
   team_last_owner: 'A team must keep at least one owner.',
   admin_required: 'Administrator access is required.',
-  admin_recent_signin_required: 'Administrator routes need a sign-in from the last 24 hours; sign in again.',
   mfa_token_invalid: 'That pending sign-in has expired or does not exist; sign in again.',
   invalid_2fa_code: 'That two-factor code is wrong.',
   mfa_not_configured: 'Two-factor authentication is not available right now.',

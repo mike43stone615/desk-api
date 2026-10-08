@@ -129,11 +129,9 @@ describe('the administrator view of keys, and switching a key off', () => {
 });
 
 describe('administrator credentials', () => {
-  it('a session that signed in more than 24 hours ago cannot use the administrator tools (403 admin_recent_signin_required)', async () => {
+  it('a signed-in administrator can use the administrator tools however long ago they signed in', async () => {
     const old = await adminSession(3);
-    const res = await app.inject({ method: 'GET', url: '/admin/gateway-keys', headers: old.headers });
-    expect(res.statusCode).toBe(403);
-    expect(JSON.parse(res.body).code).toBe('admin_recent_signin_required');
+    expect((await app.inject({ method: 'GET', url: '/admin/gateway-keys', headers: old.headers })).statusCode).toBe(200);
     const fresh = await adminSession(0);
     expect((await app.inject({ method: 'GET', url: '/admin/gateway-keys', headers: fresh.headers })).statusCode).toBe(200);
   });

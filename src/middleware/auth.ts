@@ -210,17 +210,7 @@ export async function requireAdmin(request: FastifyRequest, _reply: FastifyReply
   const email = user.email.trim().toLowerCase();
   // The owner(s) named in the server setting, or an account on the administrator list (with a confirmed address).
   if (!config.adminEmails.includes(email) && !(await isListedAdmin(user.id))) throw new HttpError(403, 'Admin access required.', 'admin_required');
-  // A stolen or forgotten session must not stay an administrator for its whole 30 days: the admin tools need a
-  // sign-in from the last 24 hours (a normal session still works for everything else).
-  const token = extractSessionToken(request);
-  const session = token ? await authService.currentSession(token) : null;
-  if (!session || Date.now() - Date.parse(session.createdAt) > ADMIN_SIGNIN_MAX_AGE_MS) {
-    throw new HttpError(403, 'Please sign in again to use the administrator tools.', 'admin_recent_signin_required');
-  }
 }
-
-/** How recent the sign-in must be for the administrator tools. */
-export const ADMIN_SIGNIN_MAX_AGE_MS = 24 * 60 * 60 * 1000;
 
 /**
  * Optional Fastify preHandler gating GET /metrics and GET /docs (+
