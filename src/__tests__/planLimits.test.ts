@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { FALLBACK_FREE_PLAN, invoiceLines, type Plan } from '../domain/billing/plans';
-import { analysisRefusal, callRefusal, extraCalls, limitError, secondsToNextMonth, type CallCounts, type CallTally } from '../domain/billing/allowance';
+import { analysisRefusal, callRefusal, eightyPercentOf, extraCalls, limitError, percentJustReached, secondsToNextMonth, type CallCounts, type CallTally } from '../domain/billing/allowance';
+import { limitsFor } from '../domain/gateway/usage';
+import { USAGE_METERS, WEBHOOK_EVENTS, usageEvent } from '../domain/webhooks/webhooks';
 
 const FREE = FALLBACK_FREE_PLAN;
 const PRO: Plan = {
@@ -76,5 +78,44 @@ describe('the plans make money even at the worst case', () => {
       expect(plan.overageCentsPerCall!).toBeGreaterThan(0);
     }
     expect(FREE.includedAnalyses * WORST_ANALYSIS_CENTS).toBeLessThanOrEqual(60); // Free costs at most $0.60 a month
+  });
+});
+
+describe('the limit notes shown when picking an API for a key', () => {
+  const note = (plan: Plan, service: string) => limitsFor(plan).find((l) => l.service === service)!.note;
+  it("state the person's own plan's numbers, not one fixed number", () => {
+    expect(note(FREE, 'desk_api')).toContain('Your Free plan allows 60 calls a minute and 300 a month to the Desk API');
+    expect(note(PRO, 'desk_api')).toContain('Your Pro plan allows 600 calls a minute and 3,000 a month to the Desk API');
+    expect(note(PRO, 'registry_api')).toContain('to the Business Name Registry API');
+    expect(note(PRO, 'desk_api')).toContain('All three APIs together: 1,000 a minute and 5,000 a month.');
+  });
+  it('say what happens past a monthly limit on that plan', () => {
+    expect(note(FREE, 'desk_api')).toContain('calls are refused until next month');
+    expect(note(PRO, 'desk_api')).toContain('cost $0.05 each');
+    expect(note(PRO, 'market_validation_api')).toContain('75 market analyses a month; each extra one costs $0.30');
+    expect(note(FREE, 'market_validation_api')).toContain('5 market analyses a month; after that they are refused');
+  });
+});
+
+describe('monthly usage marks (80% and 100%)', () => {
+  it('is 80% rounded up, only when that is below the limit', () => {
+    expect(eightyPercentOf(300)).toBe(240);
+    expect(eightyPercentOf(5)).toBe(4);
+    expect(eightyPercentOf(1)).toBeNull();
+    expect(eightyPercentOf(0)).toBeNull();
+  });
+  it('fires on exactly the mark a call reaches, once', () => {
+    expect(percentJustReached(239, 300)).toBeNull();
+    expect(percentJustReached(240, 300)).toBe(80);
+    expect(percentJustReached(241, 300)).toBeNull();
+    expect(percentJustReached(300, 300)).toBe(100);
+    expect(percentJustReached(301, 300)).toBeNull();
+    expect(percentJustReached(5, 0)).toBeNull();
+  });
+  it('has a webhook event for each meter at each mark, in the list people choose from', () => {
+    for (const meter of USAGE_METERS) for (const p of [80, 100] as const) expect(WEBHOOK_EVENTS).toContain(usageEvent(meter, p));
+    expect(WEBHOOK_EVENTS).toContain('invoice.available');
+    expect(WEBHOOK_EVENTS).not.toContain('usage.cap_reached');
+    expect(WEBHOOK_EVENTS).not.toContain('usage.threshold_reached');
   });
 });

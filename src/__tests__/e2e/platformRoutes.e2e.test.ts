@@ -143,7 +143,7 @@ describe.skipIf(!hasDb)('E2E: status, changelog, billing, GraphQL and webhook re
     expect(keyRes.statusCode, keyRes.body).toBe(201);
     const keyId = keyRes.json().apiKey.id as string;
 
-    const ok = await gql(owner, `{ apiKeys { id label } plan { id } usage(keyId: "${keyId}", days: 7) { day calls } }`);
+    const ok = await gql(owner, `{ apiKeys { id label } plan { id } usage(keyId: "${keyId}", months: 1) { month calls } }`);
     const body = ok.json();
     expect(body.errors).toBeUndefined();
     expect(body.data.apiKeys.map((k: { id: string }) => k.id)).toContain(keyId);
@@ -153,7 +153,7 @@ describe.skipIf(!hasDb)('E2E: status, changelog, billing, GraphQL and webhook re
     const outsiderView = (await gql(outsider, '{ apiKeys { id } }')).json();
     expect(outsiderView.data.apiKeys.map((k: { id: string }) => k.id)).not.toContain(keyId);
 
-    const denied = (await gql(outsider, `{ usage(keyId: "${keyId}") { day } }`)).json();
+    const denied = (await gql(outsider, `{ usage(keyId: "${keyId}") { month } }`)).json();
     expect(denied.errors[0].extensions.code).toBe('NOT_FOUND');
 
     await pool.query(`INSERT INTO business_setup_drafts (id, user_id, draft_json) VALUES ($1,$2,$3)`, [rid(), owner.id, JSON.stringify({ businessName: 'Draft Co', currentStep: 3 })]);

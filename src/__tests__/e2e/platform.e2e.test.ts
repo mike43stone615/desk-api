@@ -157,7 +157,7 @@ describe.skipIf(!hasDb)('E2E: plans, invoices and webhooks', () => {
     const sent: Array<{ url: string; headers: Record<string, string>; body: string }> = [];
     const ok: Sender = async (url, init) => { sent.push({ url: String(url), headers: init.headers, body: init.body }); return { status: 200 }; };
     emitWebhookEvent({ userId: u.id }, 'key.created', { keyId: 'k1' });
-    emitWebhookEvent({ userId: u.id }, 'usage.cap_reached', { keyId: 'k1' }); // not subscribed: nothing queued
+    emitWebhookEvent({ userId: u.id }, 'usage.desk_api_80', { keyId: 'k1' }); // not subscribed: nothing queued
     await new Promise((r) => setTimeout(r, 200));
     expect(await processDueDeliveries(ok)).toBe(1);
     expect(sent).toHaveLength(1);

@@ -1063,11 +1063,12 @@ export const GATEWAY_EXAMPLES: Record<string, { status: number; request: unknown
       "events": [
         "key.created",
         "key.revoked",
-        "team.member_joined",
-        "team.member_removed",
         "plan.changed",
+        "invoice.available",
+        "usage.desk_api_80",
+        "usage.desk_api_100",
         "oauth.app_authorized",
-        "usage.cap_reached"
+        "oauth.app_removed"
       ]
     }
   },

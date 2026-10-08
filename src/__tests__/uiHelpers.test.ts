@@ -1,8 +1,9 @@
 // The small pure helpers behind the Webhooks, Apps and Plans & billing pages, and the shared tab row.
 import { describe, it, expect } from 'vitest';
 // @ts-expect-error plain browser module without type declarations
-import { formatMoney, periodText, usageShare, parseLines, statusChip, EVENT_LABELS, SCOPE_LABELS, SCOPE_GROUPS } from '../../library-ui/format.js';
+import { formatMoney, periodText, periodShort, usageShare, parseLines, statusChip, EVENT_LABELS, SCOPE_LABELS, SCOPE_GROUPS } from '../../library-ui/format.js';
 import { ALL_OAUTH_SCOPES, APP_SCOPES } from '../domain/oauth/scopes';
+import { WEBHOOK_EVENTS } from '../domain/webhooks/webhooks';
 // @ts-expect-error plain browser module without type declarations
 import { TABS, tabsHtml, setAdminTab } from '../../library-ui/tabs.js';
 
@@ -26,6 +27,14 @@ describe('periodText', () => {
     expect(periodText('2026-10-01T00:00:00.000Z', '2026-11-01T00:00:00.000Z')).toBe('October 1, 2026 - October 31, 2026');
   });
   it('is blank for a bad date', () => expect(periodText('nope', 'nope')).toBe(''));
+});
+
+describe('periodShort', () => {
+  it('is a short range that fits on one line', () => {
+    expect(periodShort('2026-10-01T00:00:00.000Z', '2026-11-01T00:00:00.000Z')).toBe('Oct 1 - Oct 31, 2026');
+    expect(periodShort('2026-12-15T00:00:00.000Z', '2027-01-15T00:00:00.000Z')).toBe('Dec 15, 2026 - Jan 14, 2027');
+  });
+  it('is blank for a bad date', () => expect(periodShort('nope', 'nope')).toBe(''));
 });
 
 describe('usageShare', () => {
@@ -59,7 +68,9 @@ describe('parseLines', () => {
 
 describe('labels', () => {
   it('names every webhook event and scope in plain English', () => {
-    expect(Object.keys(EVENT_LABELS)).toHaveLength(15);
+    // Every event the server can send has a label (the two retired usage events keep theirs for old delivery history).
+    for (const event of WEBHOOK_EVENTS) expect(EVENT_LABELS[event as keyof typeof EVENT_LABELS], event).toBeTruthy();
+    expect(Object.keys(EVENT_LABELS).sort()).toEqual([...WEBHOOK_EVENTS, 'usage.cap_reached', 'usage.threshold_reached'].sort());
     // Every scope the server accepts (granular + the four original ones) has a label, and nothing else does.
     expect(Object.keys(SCOPE_LABELS).sort()).toEqual([...ALL_OAUTH_SCOPES].sort());
     type Item = { id: string; children?: Item[] };

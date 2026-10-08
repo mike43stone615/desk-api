@@ -25,6 +25,11 @@ export const APP_SCOPES = [
   'keys:dates',
   'keys:apis',
   'usage:read',
+  'webhooks:list',
+  'webhooks:events',
+  'webhooks:dates',
+  'webhooks:active',
+  'webhooks:deliveries',
 ] as const;
 export type AppScope = (typeof APP_SCOPES)[number];
 
@@ -80,7 +85,12 @@ export const SCOPE_DESCRIPTIONS: Record<GranularScope | LegacyScope, string> = {
   'keys:name': 'The names of your API keys (never the keys themselves)',
   'keys:dates': 'When each of your API keys was created, last used and expires',
   'keys:apis': 'Which APIs each of your API keys can call',
-  'usage:read': 'Daily call and error counts for your API keys',
+  'usage:read': 'Monthly call and error totals for your API keys',
+  'webhooks:list': 'Your webhook endpoints (their addresses, never their signing secrets)',
+  'webhooks:events': 'Which events each of your webhooks listens for',
+  'webhooks:dates': 'When each of your webhooks was created',
+  'webhooks:active': 'Whether each of your webhooks is switched on',
+  'webhooks:deliveries': "Each webhook's deliveries over the last 30 days: when, which event, progress, result and tries",
   'businesses:role': 'Your role in each business',
   'businesses:partners': "Whether each business has partners, and how many",
   'businesses:idea': "Each business's idea and scope",

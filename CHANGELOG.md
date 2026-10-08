@@ -3,6 +3,24 @@
 What changed in the Desk API, newest first. Breaking changes are never made inside `v1` (see docs/API-VERSIONING.md);
 everything below is additive unless it says "safer".
 
+## 2026-10-08: webhook events, plan-aware limits, invoices you can print, app permissions for webhooks
+
+- **Webhooks:** removed "A daily usage cap is reached" and "Monthly usage reaches 80% or 100% of the plan". New events, in a clearer
+  order: an invoice is available; monthly usage reached 80% and 100% of the plan for the Desk API, the Business Name Registry API, the
+  Market Validation API, uncached Market Validation analyses and total API calls; and, for apps, removed, secret rotated, redirect
+  address added or removed, and a readable added or removed. An existing endpoint that listened for a removed event simply stops showing it.
+- **API keys:** the hover note next to each API when making a key now states the limits of your own plan (calls a minute and a month for
+  that API, all three together, and what happens past a monthly limit), not one fixed number.
+- **Plans & billing:** market analyses are now part of the Market Validation API section; the Active, Downgrade and Upgrade markers are
+  one matching pill; the current period fits on one line; the usage bars look like the ones in a webhook's Deliveries.
+- **Invoices:** each invoice shows its total and status, opens as a full invoice (lines, quantities, prices), and has a Print to PDF button.
+- **Apps:** saving an app says "App saved." The "Usage" permission is now monthly totals only (call and error counts per key and month,
+  never a single day). New permission: "Webhook list", with Events, Webhook date, Active/inactive and Deliveries (the last 30 days) under
+  it. GraphQL gains `webhooks`, and `usage` now takes `months` and returns `UsageMonth`.
+- **Administration:** the data tables run the full width of the page, the pills are spaced like the pills on other pages, and table and
+  column names are capitalized properly (API, ID, OAuth).
+- **Administrator tools:** an administrator who is signed in no longer needs to have signed in within the last 24 hours.
+
 ## 2026-09-23: API Library pages now load from the edge; a sign-in bug from that change, fixed the same day
 
 - **Resilience:** the API Library's pages (sign-in, keys, webhooks, teams, apps, billing) are now served from Cloudflare's edge network

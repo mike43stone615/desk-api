@@ -6,7 +6,8 @@
 import { buildSchema, GraphQLError, type GraphQLSchema } from 'graphql';
 import { pool } from '../../db';
 import { gatewayApiKeys } from '../gateway/keys';
-import { keyUsage } from '../gateway/usage';
+import { keyUsageMonthly } from '../gateway/usage';
+import { webhooks } from '../webhooks/webhooks';
 import { subscriptionFor } from '../billing/plans';
 import { keyShares } from '../gateway/sharing';
 import type { GranularScope } from '../oauth/scopes';
@@ -40,7 +41,10 @@ export const SDL = /* GraphQL */ `
     teams: [Team!]!
     apiKeys: [ApiKey!]!
     plan: Plan!
-    usage(keyId: ID!, days: Int = 30): [UsageDay!]!
+    "usage:read — monthly totals only, newest month first."
+    usage(keyId: ID!, months: Int = 1): [UsageMonth!]!
+    "webhooks:list for the list itself; each detail needs its own scope."
+    webhooks(first: Int = 20): [Webhook!]!
   }
   "id needs no scope; email and emailConfirmedAt need profile:email; firstName and lastName need profile:name."
   type User { id: ID! email: String firstName: String lastName: String emailConfirmedAt: String }
@@ -88,7 +92,11 @@ export const SDL = /* GraphQL */ `
   "label needs keys:name; createdAt/lastUsedAt/expiresAt keys:dates; services/sandbox keys:apis; keyPrefix is never given to apps."
   type ApiKey { id: ID! label: String keyPrefix: String createdAt: String lastUsedAt: String expiresAt: String services: [String!] sandbox: Boolean teamId: ID }
   type Plan { id: ID! name: String! monthlyPriceCents: Int! includedAnalyses: Int! maxKeys: Int! maxWebhooks: Int! perMinuteLimit: Int }
-  type UsageDay { day: String! calls: Int! errors: Int! }
+  type UsageMonth { month: String! calls: Int! errors: Int! }
+  "id and url need webhooks:list; events webhooks:events; createdAt webhooks:dates; active webhooks:active; deliveries webhooks:deliveries. The signing secret is never given to apps."
+  type Webhook { id: ID! url: String events: [String!] createdAt: String active: Boolean deliveries: [WebhookDelivery!] }
+  "A delivery from the last 30 days. progress is delivered, pending (still being tried) or failed."
+  type WebhookDelivery { id: ID! createdAt: String! event: String! progress: String! result: String! tries: Int! maxTries: Int! }
 `;
 
 interface BizRow { id: string; name: string; industry: string | null; role: string; business_json: string | null }
@@ -255,10 +263,25 @@ const root = {
     need(ctx, 'plan:read');
     return (await subscriptionFor('user', ctx.user.id)).plan;
   },
-  usage: async ({ keyId, days }: { keyId: string; days?: number }, ctx: GraphQLContext) => {
+  usage: async ({ keyId, months }: { keyId: string; months?: number }, ctx: GraphQLContext) => {
     need(ctx, 'usage:read');
     if (!(await keyShares.viewerOwnerOf(ctx.user.id, keyId))) throw new GraphQLError('No such key.', { extensions: { code: 'NOT_FOUND' } });
-    return keyUsage(keyId, Math.max(1, Math.min(90, Number(days) || 30)));
+    return keyUsageMonthly(keyId, Math.max(1, Math.min(12, Number(months) || 1)));
+  },
+  webhooks: async ({ first }: { first?: number }, ctx: GraphQLContext) => {
+    need(ctx, 'webhooks:list');
+    const endpoints = (await webhooks.list(ctx.user.id)).slice(0, clamp(first, 20));
+    return endpoints.map((e) => ({
+      id: e.id,
+      url: e.url,
+      events: gated(ctx, 'webhooks:events', () => e.events),
+      createdAt: gated(ctx, 'webhooks:dates', () => e.createdAt),
+      active: gated(ctx, 'webhooks:active', () => e.active),
+      deliveries: gated(ctx, 'webhooks:deliveries', async () => ((await webhooks.deliveries(ctx.user.id, e.id)) ?? []).map((d) => ({
+        id: d.id, createdAt: d.createdAt, event: d.eventType, progress: d.status, tries: d.attempts, maxTries: d.maxAttempts,
+        result: d.status === 'delivered' ? 'Sent' : d.attempts === 0 ? 'Queued' : `Failed${d.lastStatus ? ` ${d.lastStatus}` : ''}`,
+      }))),
+    }));
   },
 };
 

@@ -7,9 +7,9 @@
 import { randomUUID } from 'node:crypto';
 import { pool } from '../../db';
 import { config } from '../../config';
-import { emitWebhookEvent } from '../webhooks/webhooks';
+import { emitWebhookEvent, usageEvent } from '../webhooks/webhooks';
 import { sendUsageThresholdEmail } from '../../infrastructure/email/resend';
-import { extraCalls, monthTally, type CallTally } from './allowance';
+import { extraCalls, monthTally, percentJustReached, type CallTally } from './allowance';
 
 export type SubjectType = 'user' | 'team';
 
@@ -152,10 +152,9 @@ export function meterAnalysis(subjectType: SubjectType, subjectId: string): void
 async function checkUsageThreshold(subjectType: SubjectType, subjectId: string, used: number): Promise<void> {
   const { plan } = await subscriptionFor(subjectType, subjectId);
   if (plan.includedAnalyses <= 0) return;
-  const eightyPercent = Math.ceil(plan.includedAnalyses * 0.8);
-  const percent = used === plan.includedAnalyses ? 100 : used === eightyPercent && eightyPercent < plan.includedAnalyses ? 80 : null;
+  const percent = percentJustReached(used, plan.includedAnalyses);
   if (percent === null) return;
-  emitWebhookEvent({ userId: subjectId }, 'usage.threshold_reached', { percent, used, included: plan.includedAnalyses, month: monthKey() });
+  emitWebhookEvent({ userId: subjectId }, usageEvent('market_analyses', percent), { percent, used, included: plan.includedAnalyses, month: monthKey() });
   const recipients = (await pool.query<{ email: string }>(`SELECT email FROM users WHERE id = $1`, [subjectId])).rows.map((r) => r.email);
   for (const email of recipients) sendUsageThresholdEmail(config, email, percent, used, plan.includedAnalyses).catch(() => {});
 }
@@ -218,6 +217,9 @@ export async function generateInvoices(month?: string): Promise<number> {
       [randomUUID(), r.subject_type, r.subject_id, plan.id, start.toISOString(), end.toISOString(), JSON.stringify(lines), lines.reduce((n, l) => n + l.totalCents, 0)],
     );
     made += res.rowCount ?? 0;
+    if (res.rowCount && r.subject_type === 'user') {
+      emitWebhookEvent({ userId: r.subject_id }, 'invoice.available', { period: target, plan: plan.id, subtotalCents: lines.reduce((n, l) => n + l.totalCents, 0) });
+    }
   }
   return made;
 }

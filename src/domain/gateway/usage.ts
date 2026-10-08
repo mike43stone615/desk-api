@@ -3,6 +3,7 @@
 import { pool } from '../../db';
 import { gatewayCallsTotal } from '../../modules/metrics';
 import { KEY_IDLE_DAYS } from './keys';
+import type { Plan } from '../billing/plans';
 
 const today = () => new Date().toISOString().slice(0, 10);
 
@@ -31,12 +32,48 @@ export async function keyUsage(keyId: string, days: number): Promise<DailyUsage[
   return rows.map((r) => ({ day: r.day, calls: Number(r.calls), errors: Number(r.errors) }));
 }
 
-/** What a developer needs to know about limits, stated in one place (docs/API-LIMITS.md says the same). */
-export function limitsFor(perMinuteDeskApi: number): Array<{ service: string; perMinute: number; note: string }> {
+export interface MonthlyUsage { month: string; calls: number; errors: number }
+
+/** The last `months` calendar months (newest first, this one included) that had any calls: monthly totals only, no per-day detail. */
+export async function keyUsageMonthly(keyId: string, months: number, now = new Date()): Promise<MonthlyUsage[]> {
+  const first = Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - (months - 1), 1);
+  const days = Math.ceil((now.getTime() - first) / 86_400_000) + 1;
+  const byMonth = new Map<string, MonthlyUsage>();
+  for (const d of await keyUsage(keyId, days)) {
+    const month = d.day.slice(0, 7);
+    const row = byMonth.get(month) ?? { month, calls: 0, errors: 0 };
+    row.calls += d.calls; row.errors += d.errors;
+    byMonth.set(month, row);
+  }
+  return [...byMonth.values()].sort((a, b) => b.month.localeCompare(a.month));
+}
+
+const num = (n: number) => n.toLocaleString('en-US');
+const dollars = (cents: number) => `$${(cents / 100).toFixed(2)}`;
+
+/**
+ * What a developer needs to know about limits, for THEIR plan (docs/API-LIMITS.md says the same). The limits belong to the
+ * plan and are counted per person across all their keys, so every line is the plan's number, not a per-key one. One line
+ * per fact (the page shows a line each in the hover note).
+ */
+export function limitsFor(plan: Plan): Array<{ service: string; perMinute: number; note: string }> {
+  const together = `All three APIs together: ${num(plan.totalPerMinute)} a minute and ${num(plan.totalPerMonth)} a month.`;
+  const pastMonthly = plan.overageCentsPerCall === null
+    ? 'Past a monthly limit, calls are refused until next month.'
+    : `Past a monthly limit, calls keep working and cost ${dollars(plan.overageCentsPerCall)} each.`;
+  const lines = (api: string, extra: string[] = []) => [
+    `Your ${plan.name} plan allows ${num(plan.servicePerMinute)} calls a minute and ${num(plan.servicePerMonth)} a month to the ${api}, shared by all your keys.`,
+    together,
+    pastMonthly,
+    ...extra,
+  ].join('\n');
+  const analyses = plan.overageCentsPerAnalysis === null
+    ? `Your plan includes ${num(plan.includedAnalyses)} market analyses a month; after that they are refused until next month.`
+    : `Your plan includes ${num(plan.includedAnalyses)} market analyses a month; each extra one costs ${dollars(plan.overageCentsPerAnalysis)}.`;
   return [
-    { service: 'desk_api', perMinute: perMinuteDeskApi, note: `Each key may make ${perMinuteDeskApi} calls a minute to the Desk API, and every account ${Math.ceil(perMinuteDeskApi * 5)} calls a minute across all its keys and devices.` },
-    { service: 'registry_api', perMinute: 60, note: 'Each key may make 60 calls a minute to the Business Name Registry API; the answers carry X-RateLimit-* headers.' },
-    { service: 'market_validation_api', perMinute: 60, note: 'Each key may make 60 calls a minute to the Market Validation API; a market analysis is limited to 2 instances at once.' },
+    { service: 'desk_api', perMinute: plan.servicePerMinute, note: lines('Desk API') },
+    { service: 'registry_api', perMinute: plan.servicePerMinute, note: lines('Business Name Registry API', ['The answers carry X-RateLimit-* headers.']) },
+    { service: 'market_validation_api', perMinute: plan.servicePerMinute, note: lines('Market Validation API', [analyses, 'A key can run 2 market analyses at once.']) },
   ];
 }
 

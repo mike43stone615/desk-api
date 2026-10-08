@@ -27,8 +27,14 @@ idea containing "risky" scores low. An endpoint with no sample answers `404 sand
 
 ## Outbound webhooks
 
-`POST /gateway/webhooks` (`url`, `events`) registers an endpoint; the signing secret is shown once. Events: `key.created`,
-`key.revoked`, `team.member_joined`, `team.member_removed`, `plan.changed`, `oauth.app_authorized`, `usage.cap_reached`.
+`POST /gateway/webhooks` (`url`, `events`) registers an endpoint; the signing secret is shown once. Events (the list the Webhooks page offers,
+in its order): the `key.*` events (created, rotated, suspended, resumed, revoked, service added or removed, share invited, accepted
+or removed), `plan.changed`, `invoice.available`, a monthly-usage event at 80% and at 100% of the plan for each of the Desk API
+(`usage.desk_api_80`, `usage.desk_api_100`), the Business Name Registry API (`usage.registry_api_*`), the Market Validation API
+(`usage.market_validation_api_*`), uncached Market Validation analyses (`usage.market_analyses_*`) and all API calls together
+(`usage.total_*`), and the app events `oauth.app_authorized`, `oauth.app_removed`, `oauth.app_secret_rotated`,
+`oauth.redirect_added`, `oauth.redirect_removed`, `oauth.scope_added` and `oauth.scope_removed`. (`usage.cap_reached` and
+`usage.threshold_reached` were retired; an old endpoint no longer shows them.)
 - **Signed:** `Desk-Signature: t=<seconds>,v1=<hex HMAC-SHA256 of "<t>.<body>">`. Verify with `verifyWebhook()` in the client, and
   reject anything whose `t` is more than five minutes old (that is the replay protection).
 - **Retried:** after 1 min, 5 min, 30 min, 2 h, 6 h, then the delivery is marked failed. Ten failed deliveries in a row switch the

@@ -6,9 +6,20 @@ import { tabsHtml } from '../tabs.js';
 
 const ROWS_PAGE_SIZE = 100;
 
+// Table and column names ("oauth_clients", "api_key_id") as people read them: Title Case, but acronyms stay upper case
+// ("API Key ID"), a few names have their own spelling ("OAuth"), and small words in the middle stay lower case.
+const ACRONYMS = new Set(['api', 'id', 'ids', 'url', 'urls', 'uri', 'uris', 'ip', 'ips', 'otp', 'mfa', 'sso', 'sms', 'sql', 'json', 'csv', 'pdf', 'html', 'ein', 'ssn', 'llc', 'sba', 'oews', 'naics', 'soc', 'fips', 'bls', 'bea', 'jolts', 'ppi', 'bfs', 'laus', 'ui', 'tls', 'ttl', 'uuid']);
+const SPELLINGS = { oauth: 'OAuth', graphql: 'GraphQL', webhooks: 'Webhooks' };
+const SMALL_WORDS = new Set(['a', 'an', 'and', 'as', 'at', 'by', 'for', 'in', 'of', 'on', 'or', 'per', 'the', 'to']);
 function titleize(value) {
   const spaced = value.replace(/\./g, '_').replace(/([a-z0-9])([A-Z])/g, '$1_$2');
-  return spaced.split('_').filter(Boolean).map((p) => p[0].toUpperCase() + p.slice(1)).join(' ');
+  return spaced.split('_').filter(Boolean).map((p, i) => {
+    const w = p.toLowerCase();
+    if (SPELLINGS[w]) return SPELLINGS[w];
+    if (ACRONYMS.has(w)) return w.toUpperCase();
+    if (i > 0 && SMALL_WORDS.has(w)) return w;
+    return w[0].toUpperCase() + w.slice(1);
+  }).join(' ');
 }
 function cellKey(table, id, column) { return `${table}:${id}:${column}`; }
 function displayValue(value) {
@@ -327,7 +338,7 @@ registerRoute('/developer/admin', async (app) => {
 
     const dataView = s.view === 'data';
     app.innerHTML = `
-      <div class="page">
+      <div class="page${dataView ? ' page-wide' : ''}">
         <div class="page-head-row">
           <div class="head-text"><h1>API Library</h1><p>Administration: view and edit the data behind each API.</p></div>
           ${dataView ? `<div style="display:flex;gap:var(--sp-xs);">

@@ -16,8 +16,9 @@ import { keyShares, ShareError } from '../domain/gateway/sharing';
 import { emitWebhookEvent } from '../domain/webhooks/webhooks';
 import { resumeKey, suspendKey } from '../domain/suspension';
 import { IDLE_DAYS, keyUsage, limitsFor } from '../domain/gateway/usage';
+import { subscriptionFor } from '../domain/billing/plans';
 import { config } from '../config';
-import { KEY_BUCKET_FACTOR } from '../middleware/api-protection';
+
 import { BrokerError } from '../domain/gateway/broker';
 import { getServiceCatalog } from '../domain/gateway/services';
 import { AddKeyServiceSchema, CreateGatewayKeySchema, SetKeyRestrictionsSchema, ShareKeySchema } from '../validators/gateway';
@@ -36,11 +37,10 @@ export async function libraryOpenApiHandler(_request: FastifyRequest, reply: Fas
 
 export async function listGatewayServicesHandler(request: FastifyRequest, reply: FastifyReply) {
   await requireAuth(request, reply);
-  // The standard personal-key rate (an administrator override on a specific key can only be seen after it exists, so
-  // this is the number a new key would actually get) plus the fixed idle-expiry, so the create-key form can show what
-  // a service is limited to before the key is made, not only afterward on an existing key's usage panel.
-  const perMinute = Math.ceil(config.rateLimitPerMinute * KEY_BUCKET_FACTOR);
-  const notes = new Map(limitsFor(perMinute).map((l) => [l.service, l.note]));
+  // The limits of the person's own plan (they belong to the plan, not the key) plus the fixed idle-expiry, so the
+  // create-key form can show what a service is limited to before the key is made.
+  const { plan } = await subscriptionFor('user', request.currentUser!.id);
+  const notes = new Map(limitsFor(plan).map((l) => [l.service, l.note]));
   const services = getServiceCatalog().map((entry) => ({ ...entry, limitNote: notes.get(entry.service), idleExpiryDays: IDLE_DAYS }));
   return sendWithEtag(request, reply, { services });
 }
@@ -173,7 +173,7 @@ export async function keyUsageHandler(request: FastifyRequest, reply: FastifyRep
     idleExpiryDays: IDLE_DAYS,
     totals: { calls: daily.reduce((n, d) => n + d.calls, 0), errors: daily.reduce((n, d) => n + d.errors, 0) },
     daily,
-    limits: limitsFor(Math.ceil(config.rateLimitPerMinute * KEY_BUCKET_FACTOR)),
+    limits: limitsFor((await subscriptionFor('user', viewerOwner as string)).plan),
   });
 }
 

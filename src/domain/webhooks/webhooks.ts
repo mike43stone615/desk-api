@@ -15,11 +15,27 @@ import { config } from '../../config';
 import { decryptSecret, encryptSecret } from '../gateway/crypto';
 import { subscriptionFor } from '../billing/plans';
 
+/** Monthly-usage events: each of these fires once when that meter reaches 80% (and again at 100%) of the person's plan. */
+export const USAGE_METERS = ['desk_api', 'registry_api', 'market_validation_api', 'market_analyses', 'total'] as const;
+export type UsageMeter = (typeof USAGE_METERS)[number];
+export const USAGE_PERCENTS = [80, 100] as const;
+export const usageEvent = (meter: UsageMeter, percent: (typeof USAGE_PERCENTS)[number]) => `usage.${meter}_${percent}` as const;
+
+// The order here is the order people see in the Webhooks page.
 export const WEBHOOK_EVENTS = [
   'key.created', 'key.rotated', 'key.suspended', 'key.resumed', 'key.revoked',
   'key.service_added', 'key.service_removed',
   'key.share_invited', 'key.share_accepted', 'key.share_removed',
-  'plan.changed', 'oauth.app_authorized', 'usage.cap_reached', 'usage.threshold_reached', 'webhook.test',
+  'plan.changed', 'invoice.available',
+  'usage.desk_api_80', 'usage.desk_api_100',
+  'usage.registry_api_80', 'usage.registry_api_100',
+  'usage.market_validation_api_80', 'usage.market_validation_api_100',
+  'usage.market_analyses_80', 'usage.market_analyses_100',
+  'usage.total_80', 'usage.total_100',
+  'oauth.app_authorized', 'oauth.app_removed', 'oauth.app_secret_rotated',
+  'oauth.redirect_added', 'oauth.redirect_removed',
+  'oauth.scope_added', 'oauth.scope_removed',
+  'webhook.test',
 ] as const;
 export type WebhookEvent = (typeof WEBHOOK_EVENTS)[number];
 
@@ -90,7 +106,7 @@ export interface WebhookEndpoint {
   id: string; url: string; events: string[]; active: boolean; disabledReason: string | null; createdAt: string; consecutiveFailures: number;
 }
 interface EndpointRow { id: string; url: string; events: string[]; active: boolean; disabled_reason: string | null; created_at: string; consecutive_failures: number }
-const toEndpoint = (r: EndpointRow): WebhookEndpoint => ({ id: r.id, url: r.url, events: r.events, active: r.active, disabledReason: r.disabled_reason, createdAt: r.created_at, consecutiveFailures: r.consecutive_failures });
+const toEndpoint = (r: EndpointRow): WebhookEndpoint => ({ id: r.id, url: r.url, events: r.events.filter((e) => (WEBHOOK_EVENTS as readonly string[]).includes(e)), /* an event that no longer exists (e.g. the old usage ones) is not shown */ active: r.active, disabledReason: r.disabled_reason, createdAt: r.created_at, consecutiveFailures: r.consecutive_failures });
 const COLS = 'id, url, events, active, disabled_reason, created_at, consecutive_failures';
 
 const secretKey = () => {

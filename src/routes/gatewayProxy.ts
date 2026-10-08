@@ -10,7 +10,7 @@
 // concatenated into an upstream path: it's matched against the allowlist and,
 // for the one parameterised endpoint, a strict slug pattern, so traversal
 // (`..`, encoded slashes) can't reach /admin or anything else.
-import { emitWebhookEvent } from '../domain/webhooks/webhooks';
+
 import { analysesInMonth, meterAnalysis, subscriptionFor } from '../domain/billing/plans';
 import { analysisRefusal, enforceCallAllowance, limitError } from '../domain/billing/allowance';
 import type { FastifyReply, FastifyRequest } from 'fastify';
@@ -160,7 +160,6 @@ async function forward(service: BrokeredService, request: FastifyRequest, reply:
     const wait = await hit(MARKET_ANALYSIS_DAILY, verified.id);
     if (wait > 0) {
       reply.header('Retry-After', String(wait));
-      emitWebhookEvent({ userId: verified.ownerUserId }, 'usage.cap_reached', { keyId: verified.id, cap: MARKET_ANALYSIS_DAILY.max, what: 'market analyses per day' });
       throw new HttpError(429, `This key has used its ${MARKET_ANALYSIS_DAILY.max} market analyses for today. Try again in ${Math.ceil(wait / 3600)} hours, or ask for a higher limit.`, 'market_analysis_daily_cap');
     }
   }

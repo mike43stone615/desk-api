@@ -581,7 +581,7 @@ input[type="password"]::-ms-reveal { display: none; }
 /* ---- Admin tables ---- */
 .admin-toolbar { display: flex; align-items: center; gap: var(--sp-md); flex-wrap: wrap; margin-bottom: var(--sp-lg); }
 .admin-toolbar .spacer { flex: 1; }
-.source-tabs, .table-tabs { display: flex; gap: var(--sp-2xs); flex-wrap: wrap; margin-bottom: var(--sp-md); }
+.source-tabs, .table-tabs { display: flex; gap: var(--sp-sm); flex-wrap: wrap; margin-bottom: var(--sp-md); }
 .source-tabs button, .table-tabs button {
   padding: var(--sp-xs) var(--sp-md); border-radius: var(--r-pill); border: 1px solid var(--line);
   background: var(--surface); color: var(--ink-soft); font-size: .82rem; font-weight: 700; cursor: pointer; font-family: inherit;
@@ -623,7 +623,7 @@ table.admin-table td.admin-actions-cell { white-space: nowrap; }
 }
 .column-menu-list label { display: flex; align-items: center; gap: var(--sp-sm); padding: var(--sp-xs) var(--sp-sm); font-size: .82rem; cursor: pointer; }
 .column-menu-list label:hover { background: var(--surface); border-radius: var(--r-sm); }
-.filter-chips { display: flex; gap: var(--sp-xs); flex-wrap: wrap; align-items: center; }
+.filter-chips { display: flex; gap: var(--sp-sm); flex-wrap: wrap; align-items: center; }
 
 /* Sections of the API Library (API keys | Teams) and the role/invite selects of the Teams page. */
 .page-tabs { display: flex; gap: var(--sp-sm); margin: 0 0 var(--sp-lg); border-bottom: 1px solid var(--line); }
@@ -787,14 +787,58 @@ table.admin-table td.admin-actions-cell { white-space: nowrap; }
 /* Plans & billing: the three plan cards share one grid, and each card takes its rows from it (subgrid), so the same
    section (Desk API, API keys, ...) sits at the same height in every card whatever its contents. */
 .plan-grid-aligned { grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); row-gap: 0; align-items: stretch; }
-.plan-grid-aligned .plan-card { display: grid; grid-row: span 10; grid-template-rows: subgrid; row-gap: var(--sp-md); margin-bottom: var(--sp-md); }
+.plan-grid-aligned .plan-card { display: grid; grid-row: span 9; grid-template-rows: subgrid; row-gap: var(--sp-md); margin-bottom: var(--sp-md); }
 .plan-row { min-width: 0; }
 .plan-row .usage-row { margin-top: var(--sp-xs); }
 .plan-row-title { font-weight: 600; font-size: 0.95rem; }
-.plan-head-row .plan-period { font-size: 0.85rem; color: var(--ink-soft); text-align: right; margin-top: var(--sp-xs); }
+.plan-head-row .plan-period { font-size: 0.8rem; color: var(--ink-soft); text-align: left; white-space: nowrap; margin-top: var(--sp-xs); }
 .plan-price { margin: 0; }
 .meta-chip.plan-active { border-color: var(--accent); color: var(--accent); }
 .btn.btn-sm { padding: 4px 12px; min-height: 0; font-size: 0.85rem; }
 .invoice-list { display: flex; flex-direction: column; gap: var(--sp-sm); }
 .invoice-card { padding: var(--sp-md) var(--sp-lg); }
 .load-more-row { display: flex; justify-content: center; margin-top: var(--sp-md); }
+
+/* Plans & billing: the Active / Downgrade / Upgrade markers are one pill, the same size and shape; only the color differs. */
+.plan-pill {
+  display: inline-flex; align-items: center; justify-content: center; box-sizing: border-box; min-width: 96px; height: 30px;
+  padding: 0 var(--sp-lg); border-radius: var(--r-pill); border: 1px solid var(--line); background: transparent; color: var(--ink);
+  font-family: inherit; font-size: .8rem; font-weight: 700; line-height: 1; white-space: nowrap; flex-shrink: 0;
+}
+button.plan-pill { cursor: pointer; transition: background .12s ease, border-color .12s ease; }
+button.plan-pill:hover { background: var(--surface-2); border-color: var(--line-strong); }
+button.plan-pill:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.plan-pill.active { border-color: var(--accent); color: var(--accent); background: var(--accent-soft); }
+button.plan-pill.upgrade { background: var(--accent); border-color: var(--accent); color: #ffffff; }
+button.plan-pill.upgrade:hover { background: var(--accent-hover); border-color: var(--accent-hover); }
+/* Usage bars on the plan cards use the Deliveries bar and caption look (.delivery-progress / .delivery-next). */
+.plan-usage { margin-top: var(--sp-sm); }
+.plan-usage .delivery-next { margin-top: var(--sp-xs); }
+
+/* Invoices: each card has the invoice's line, its total and status, and View / Print to PDF buttons. */
+.invoice-card { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-lg); flex-wrap: wrap; }
+.invoice-main { min-width: 0; }
+.invoice-actions { display: flex; gap: var(--sp-sm); flex-wrap: wrap; }
+.invoice-doc-head { display: flex; justify-content: space-between; align-items: flex-start; gap: var(--sp-lg); margin-bottom: var(--sp-lg); }
+.invoice-doc-kicker { font-size: .8rem; font-weight: 700; color: var(--ink-faint); text-transform: uppercase; letter-spacing: .04em; }
+.invoice-doc-title { margin: var(--sp-xs) 0 0; font-size: 1.5rem; }
+.invoice-doc-status { font-weight: 700; font-size: .85rem; border: 1px solid var(--line); border-radius: var(--r-pill); padding: var(--sp-xs) var(--sp-md); }
+.invoice-doc-meta { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: var(--sp-md) var(--sp-lg); margin: 0 0 var(--sp-lg); }
+.invoice-doc-meta dt { font-size: .75rem; font-weight: 700; color: var(--ink-faint); text-transform: uppercase; letter-spacing: .04em; }
+.invoice-doc-meta dd { margin: var(--sp-2xs) 0 0; font-weight: 600; }
+.invoice-doc-table tfoot td { font-weight: 700; border-bottom: none; border-top: 2px solid var(--line-strong); }
+#print-invoice { display: none; }
+/* Printing an invoice ("Print to PDF"): only the invoice, black on white. */
+@media print {
+  body > *:not(#print-invoice) { display: none !important; }
+  body { background: #ffffff !important; }
+  #print-invoice { display: block; color: #111111; background: #ffffff; padding: 24px; font-family: inherit; }
+  #print-invoice * { color: #111111 !important; border-color: #999999 !important; background: transparent !important; }
+  #print-invoice .invoice-doc-kicker, #print-invoice dt { color: #555555 !important; }
+  #print-invoice .plain-table th, #print-invoice .plain-table td { border-bottom: 1px solid #cccccc !important; }
+}
+
+/* Administration data view: the tables run the full width of the page (edge to edge), not in a rounded box inside it. */
+.page.page-wide { max-width: none; }
+.page-wide .admin-grid-wrap { margin-inline: calc(-1 * var(--sp-2xl)); border-radius: 0; border-left: 0; border-right: 0; }
+@media (max-width: 520px) { .page-wide .admin-grid-wrap { margin-inline: calc(-1 * var(--sp-lg)); } }

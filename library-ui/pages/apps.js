@@ -170,7 +170,7 @@ registerRoute('/developer/apps', async (app) => {
       const res = await api(`/oauth/clients/${encodeURIComponent(id)}/redirect-uris`, { method: 'PUT', body: { redirectUris: uris } });
       s.clients = s.clients.map((c) => (c.id === id ? res.client : c));
       s.detailRedirects = [...res.client.redirectUris];
-      toast('Redirect addresses saved.');
+      toast('App saved.');
     } catch (err) {
       reportHandledException(err, 'updateOAuthRedirects');
       toast(friendlyError(err, 'Could not save those addresses.'), true);

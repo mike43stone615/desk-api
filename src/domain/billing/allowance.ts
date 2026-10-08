@@ -9,6 +9,7 @@
 import { pool } from '../../db';
 import { HttpError } from '../../middleware/http-error';
 import { subscriptionFor, type Plan } from './plans';
+import { emitWebhookEvent, usageEvent, type UsageMeter } from '../webhooks/webhooks';
 
 export const METERED_SERVICES = ['desk_api', 'registry_api', 'market_validation_api'] as const;
 export type MeteredService = (typeof METERED_SERVICES)[number];
@@ -84,13 +85,41 @@ export async function enforceCallAllowance(userId: string, service: MeteredServi
 
 /** Counts one call that went through. Fire-and-forget: counting must never slow down or break the call itself. */
 export function recordCall(userId: string, service: MeteredService, now = new Date()): void {
-  Promise.resolve(
-    pool.query(
+  void (async () => {
+    await pool.query(
       `INSERT INTO api_usage (user_id, service, window_key, calls) VALUES ($1, $2, $3, 1), ($1, $2, $4, 1)
        ON CONFLICT (user_id, window_key, service) DO UPDATE SET calls = api_usage.calls + 1`,
       [userId, service, minuteWindow(now), monthWindow(now)],
-    ),
-  ).catch(() => {});
+    );
+    await checkMonthlyUsage(userId, service, now);
+  })().catch(() => {});
+}
+
+/** The 80% mark of a limit (rounded up), or null when it would be the limit itself or the limit is zero. */
+export const eightyPercentOf = (limit: number): number | null => {
+  const mark = Math.ceil(limit * 0.8);
+  return limit > 0 && mark < limit ? mark : null;
+};
+
+/** The percent (80 or 100) a meter has just reached, if its new count is exactly one of the two marks. */
+export const percentJustReached = (count: number, limit: number): 80 | 100 | null =>
+  limit <= 0 ? null : count === limit ? 100 : count === eightyPercentOf(limit) ? 80 : null;
+
+/**
+ * A call just went through: if it brought this API's month count, or the all-APIs month count, exactly to 80% or 100% of
+ * the plan's monthly limit, tell the person (a webhook event). Checked against the exact new count, so each mark fires once.
+ */
+async function checkMonthlyUsage(userId: string, service: MeteredService, now: Date): Promise<void> {
+  const month = (await callCounts(userId, now)).month;
+  const { plan } = await subscriptionFor('user', userId);
+  const reached: Array<[UsageMeter, 80 | 100, number, number]> = [];
+  const apiPercent = percentJustReached(month[service], plan.servicePerMonth);
+  if (apiPercent) reached.push([service, apiPercent, month[service], plan.servicePerMonth]);
+  const totalPercent = percentJustReached(month.total, plan.totalPerMonth);
+  if (totalPercent) reached.push(['total', totalPercent, month.total, plan.totalPerMonth]);
+  for (const [meter, percent, used, included] of reached) {
+    emitWebhookEvent({ userId }, usageEvent(meter, percent), { percent, used, included, month: now.toISOString().slice(0, 7) });
+  }
 }
 
 /** Pure: how many of a month's calls are billed as extra — each call beyond any monthly limit, counted once. */

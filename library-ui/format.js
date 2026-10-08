@@ -16,6 +16,7 @@ export function usageShare(used, included) {
   return { percent: Math.min(100, Math.round((u / inc) * 100)), over: u > inc, extra: Math.max(0, u - inc) };
 }
 
+// Listed in the order the Webhooks page shows them (the server's WEBHOOK_EVENTS order).
 export const EVENT_LABELS = {
   'key.created': 'An API key is created',
   'key.rotated': 'An API key is rotated',
@@ -28,7 +29,25 @@ export const EVENT_LABELS = {
   'key.share_accepted': 'Someone joins a shared key',
   'key.share_removed': 'Someone is removed from a shared key',
   'plan.changed': 'A plan changes',
+  'invoice.available': 'An invoice is available',
+  'usage.desk_api_80': 'Monthly Desk API usage reached 80% of the plan',
+  'usage.desk_api_100': 'Monthly Desk API usage reached 100% of the plan',
+  'usage.registry_api_80': 'Monthly Business Name Registry API usage reached 80% of the plan',
+  'usage.registry_api_100': 'Monthly Business Name Registry API usage reached 100% of the plan',
+  'usage.market_validation_api_80': 'Monthly Market Validation API usage reached 80% of the plan',
+  'usage.market_validation_api_100': 'Monthly Market Validation API usage reached 100% of the plan',
+  'usage.market_analyses_80': 'Uncached Market Validation Analyses usage reached 80% of the plan',
+  'usage.market_analyses_100': 'Uncached Market Validation Analyses usage reached 100% of the plan',
+  'usage.total_80': 'Monthly total API calls usage reached 80% of the plan',
+  'usage.total_100': 'Monthly total API calls usage reached 100% of the plan',
   'oauth.app_authorized': 'An app is authorized',
+  'oauth.app_removed': 'An app is removed',
+  'oauth.app_secret_rotated': 'An app secret is rotated',
+  'oauth.redirect_added': 'A redirect address for an app is added',
+  'oauth.redirect_removed': 'A redirect address for an app is removed',
+  'oauth.scope_added': 'A readable for an app is added',
+  'oauth.scope_removed': 'A readable for an app is removed',
+  // Events that existed before: still labeled, so an old delivery in the history table does not show a raw code.
   'usage.cap_reached': 'A daily usage cap is reached',
   'usage.threshold_reached': 'Monthly usage reaches 80% or 100% of the plan',
   'webhook.test': 'Test event', // not offered as a subscribable event (see WEBHOOK_EVENTS.filter in webhooks.js) -- this only
@@ -57,7 +76,13 @@ export const SCOPE_GROUPS = [
     { id: 'keys:name', name: 'API key names', children: [
       { id: 'keys:dates', name: 'Key dates' },
       { id: 'keys:apis', name: 'APIs each key can call' },
-      { id: 'usage:read', name: 'Usage' },
+      { id: 'usage:read', name: 'Monthly usage', info: "Each key's total calls and errors for a month. Never anything more detailed, like a single day." },
+    ] },
+    { id: 'webhooks:list', name: 'Webhook list', info: "The addresses of the person's webhooks. Never their signing secrets.", children: [
+      { id: 'webhooks:events', name: 'Events', info: 'The events each webhook listens for.' },
+      { id: 'webhooks:dates', name: 'Webhook date', info: 'The date each webhook was created.' },
+      { id: 'webhooks:active', name: 'Active/inactive', info: 'Whether each webhook is switched on.' },
+      { id: 'webhooks:deliveries', name: 'Deliveries', info: "Each webhook's deliveries from the last 30 days: date and time, event, progress, result and tries." },
     ] },
   ] },
 ];
@@ -73,6 +98,16 @@ export const SCOPE_LABELS = {
   businesses: 'Business names and industries',
   teams: 'API key names, dates, APIs and usage',
 };
+
+/** A period as a short range for tight places: "Oct 1 - Oct 31, 2026" (or with both years when it spans two). */
+export function periodShort(start, end) {
+  const first = new Date(start);
+  const last = new Date(new Date(end).getTime() - 86_400_000);
+  if (Number.isNaN(first.getTime()) || Number.isNaN(last.getTime())) return '';
+  const part = (d, year) => d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', ...(year ? { year: 'numeric' } : {}), timeZone: 'UTC' });
+  const sameYear = first.getUTCFullYear() === last.getUTCFullYear();
+  return `${part(first, !sameYear)} - ${part(last, true)}`;
+}
 
 /** One redirect address per line (or comma) -> a clean list; blank lines dropped, duplicates removed. */
 export function parseLines(text) {

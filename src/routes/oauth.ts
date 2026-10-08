@@ -176,12 +176,24 @@ function oauthHttpError(err: unknown): never {
   throw err;
 }
 
+/** One of the person's own apps as it is right now (before a change), or null. */
+async function ownClient(userId: string, id: string) {
+  return (await oauthClients.list(userId)).find((c) => c.id === id) ?? null;
+}
+
+/** Tells the person's webhooks about each item that is in `after` but not `before` (added) and the reverse (removed). */
+function emitListChanges(userId: string, client: { id: string; name: string }, before: string[], after: string[], added: 'oauth.redirect_added' | 'oauth.scope_added', removed: 'oauth.redirect_removed' | 'oauth.scope_removed', key: 'redirectUri' | 'scope') {
+  for (const item of after.filter((x) => !before.includes(x))) emitWebhookEvent({ userId }, added, { clientId: client.id, appName: client.name, [key]: item });
+  for (const item of before.filter((x) => !after.includes(x))) emitWebhookEvent({ userId }, removed, { clientId: client.id, appName: client.name, [key]: item });
+}
+
 /** Replace an app's redirect addresses (its owner only). */
 export async function updateClientRedirectsHandler(request: FastifyRequest, reply: FastifyReply) {
   await requireAuth(request, reply);
   const { id } = request.params as { id: string };
   const parsed = RedirectUrisSchema.safeParse(request.body ?? {});
   if (!parsed.success) throw validationError(parsed.error);
+  const before = await ownClient(request.currentUser!.id, id);
   let client;
   try {
     client = await oauthClients.setRedirectUris(request.currentUser!.id, id, parsed.data.redirectUris);
@@ -190,6 +202,7 @@ export async function updateClientRedirectsHandler(request: FastifyRequest, repl
   }
   if (!client) throw new HttpError(404, 'No such app.', 'oauth_not_found');
   audit(request, 'oauth_client_redirects_changed', { userId: request.currentUser!.id, clientId: id });
+  if (before) emitListChanges(request.currentUser!.id, client, before.redirectUris, client.redirectUris, 'oauth.redirect_added', 'oauth.redirect_removed', 'redirectUri');
   return reply.send({ client });
 }
 
@@ -201,6 +214,7 @@ export async function updateClientScopesHandler(request: FastifyRequest, reply: 
   const { id } = request.params as { id: string };
   const parsed = ScopesSchema.safeParse(request.body ?? {});
   if (!parsed.success) throw validationError(parsed.error);
+  const before = await ownClient(request.currentUser!.id, id);
   let client;
   try {
     client = await oauthClients.setScopes(request.currentUser!.id, id, parseScopes(parsed.data.scopes));
@@ -209,6 +223,7 @@ export async function updateClientScopesHandler(request: FastifyRequest, reply: 
   }
   if (!client) throw new HttpError(404, 'No such app.', 'oauth_not_found');
   audit(request, 'oauth_client_scopes_changed', { userId: request.currentUser!.id, clientId: id });
+  if (before) emitListChanges(request.currentUser!.id, client, before.scopes, client.scopes, 'oauth.scope_added', 'oauth.scope_removed', 'scope');
   return reply.send({ client });
 }
 
@@ -224,6 +239,8 @@ export async function rotateClientSecretHandler(request: FastifyRequest, reply: 
   }
   if (!secret) throw new HttpError(404, 'No such app.', 'oauth_not_found');
   audit(request, 'oauth_client_secret_rotated', { userId: request.currentUser!.id, clientId: id });
+  const rotated = await ownClient(request.currentUser!.id, id);
+  emitWebhookEvent({ userId: request.currentUser!.id }, 'oauth.app_secret_rotated', { clientId: id, appName: rotated?.name ?? null });
   return reply.send({ clientSecret: secret, note: 'This is the only time the client secret is shown. The old secret has stopped working.' });
 }
 
@@ -235,8 +252,10 @@ export async function listClientsHandler(request: FastifyRequest, reply: Fastify
 export async function deleteClientHandler(request: FastifyRequest, reply: FastifyReply) {
   await requireAuth(request, reply);
   const { id } = request.params as { id: string };
+  const removing = await ownClient(request.currentUser!.id, id);
   if (!(await oauthClients.remove(request.currentUser!.id, id))) throw new HttpError(404, 'No such app.', 'oauth_not_found');
   audit(request, 'oauth_client_deleted', { userId: request.currentUser!.id, clientId: id });
+  emitWebhookEvent({ userId: request.currentUser!.id }, 'oauth.app_removed', { clientId: id, appName: removing?.name ?? null });
   return reply.status(204).send();
 }
 
