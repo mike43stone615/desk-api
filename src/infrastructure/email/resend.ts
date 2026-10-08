@@ -180,10 +180,10 @@ export async function sendUsageThresholdEmail(config: AppConfig, to: string, per
   const atCap = percent >= 100;
   await sendEmail(config, {
     to,
-    subject: atCap ? "You've used this month's included analyses" : "You're near this month's included analyses",
+    subject: atCap ? "You've used this month's included uncached market validation analyses" : "You're near this month's included uncached market validation analyses",
     html: themedEmailHtml({
       title: atCap ? "You've reached this month's included amount" : `You've used ${percent}% of this month's included amount`,
-      body: `${used.toLocaleString('en-US')} of ${included.toLocaleString('en-US')} included market analyses used this month.${atCap ? ' Further analyses may cost extra or be refused, depending on your plan.' : ''}`,
+      body: `${used.toLocaleString('en-US')} of ${included.toLocaleString('en-US')} included uncached market validation analyses used this month.${atCap ? ' Further analyses may cost extra or be refused, depending on your plan.' : ''}`,
       actionLabel: 'Sign in to view your plan and usage',
       actionUrl: `${libraryBase()}/developer/billing`,
       note: 'This is sent once per threshold each month, not on every call.',

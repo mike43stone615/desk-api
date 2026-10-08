@@ -181,7 +181,7 @@ export function invoiceLines(plan: Plan, analyses: number, calls?: CallTally): I
   if (plan.monthlyPriceCents > 0) lines.push({ description: `${plan.name} plan, one month`, quantity: 1, unitCents: plan.monthlyPriceCents, totalCents: plan.monthlyPriceCents });
   const extra = Math.max(0, analyses - plan.includedAnalyses);
   if (extra > 0 && plan.overageCentsPerAnalysis) {
-    lines.push({ description: `Market analyses beyond the ${plan.includedAnalyses.toLocaleString('en-US')} included`, quantity: extra, unitCents: plan.overageCentsPerAnalysis, totalCents: extra * plan.overageCentsPerAnalysis });
+    lines.push({ description: `Uncached market validation analyses beyond the ${plan.includedAnalyses.toLocaleString('en-US')} included`, quantity: extra, unitCents: plan.overageCentsPerAnalysis, totalCents: extra * plan.overageCentsPerAnalysis });
   }
   const extraApiCalls = calls ? extraCalls(plan, calls) : 0;
   if (extraApiCalls > 0 && plan.overageCentsPerCall) {

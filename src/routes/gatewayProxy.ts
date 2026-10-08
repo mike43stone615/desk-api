@@ -100,7 +100,7 @@ const SERVICES: Record<
 
 const PASSTHROUGH_HEADERS = ['content-type', 'retry-after', 'x-ratelimit-limit', 'x-ratelimit-remaining', 'x-ratelimit-reset'];
 
-const MARKET_ANALYSIS_DAILY: Limit = { name: 'market-analysis-key-day', max: Number(process.env.MARKET_ANALYSES_PER_KEY_PER_DAY) || 200, windowMs: 24 * 60 * 60 * 1000, what: 'market analyses' };
+const MARKET_ANALYSIS_DAILY: Limit = { name: 'market-analysis-key-day', max: Number(process.env.MARKET_ANALYSES_PER_KEY_PER_DAY) || 200, windowMs: 24 * 60 * 60 * 1000, what: 'uncached market validation analyses' };
 
 async function forward(service: BrokeredService, request: FastifyRequest, reply: FastifyReply) {
   const presented = request.headers['x-api-key'];
@@ -160,7 +160,7 @@ async function forward(service: BrokeredService, request: FastifyRequest, reply:
     const wait = await hit(MARKET_ANALYSIS_DAILY, verified.id);
     if (wait > 0) {
       reply.header('Retry-After', String(wait));
-      throw new HttpError(429, `This key has used its ${MARKET_ANALYSIS_DAILY.max} market analyses for today. Try again in ${Math.ceil(wait / 3600)} hours, or ask for a higher limit.`, 'market_analysis_daily_cap');
+      throw new HttpError(429, `This key has used its ${MARKET_ANALYSIS_DAILY.max} uncached market validation analyses for today. Try again in ${Math.ceil(wait / 3600)} hours, or ask for a higher limit.`, 'market_analysis_daily_cap');
     }
   }
 

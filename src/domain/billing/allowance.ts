@@ -68,7 +68,7 @@ export function callRefusal(plan: Plan, counts: CallCounts, service: MeteredServ
 /** Pure: why one more market analysis must be refused, or null. Only a plan that does not bill extra analyses stops. */
 export function analysisRefusal(plan: Plan, usedThisMonth: number, now = new Date()): { code: string; message: string; retryAfterSeconds: number } | null {
   if (plan.overageCentsPerAnalysis !== null || usedThisMonth < plan.includedAnalyses) return null;
-  return { code: 'plan_analysis_limit', message: `Your ${plan.name} plan's ${plan.includedAnalyses} market analyses this month are used up. Upgrade your plan to run more.`, retryAfterSeconds: secondsToNextMonth(now) };
+  return { code: 'plan_analysis_limit', message: `Your ${plan.name} plan's ${plan.includedAnalyses} uncached market validation analyses this month are used up. Upgrade your plan to run more.`, retryAfterSeconds: secondsToNextMonth(now) };
 }
 
 /** A 429 the error handler turns into a problem answer with a Retry-After header. */

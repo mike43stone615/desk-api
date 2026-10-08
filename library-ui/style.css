@@ -842,3 +842,11 @@ button.plan-pill.upgrade:hover { background: var(--accent-hover); border-color: 
 .page.page-wide { max-width: none; }
 .page-wide .admin-grid-wrap { margin-inline: calc(-1 * var(--sp-2xl)); border-radius: 0; border-left: 0; border-right: 0; }
 @media (max-width: 520px) { .page-wide .admin-grid-wrap { margin-inline: calc(-1 * var(--sp-lg)); } }
+/* One scrollbar: in the Administration data view the table is part of the page itself, so the page scrolls (up and down, and
+   sideways when the table is wider than the window) instead of the table scrolling inside its own box. The column headers
+   stay in view just under the top bar, and the row details panel stays fixed beside the window. */
+.page-wide .admin-grid-wrap { overflow: visible; }
+.page-wide .admin-grid-scroll { overflow: visible; max-height: none; }
+.page-wide table.admin-table th { top: 57px; }
+.page-wide .row-detail-panel { position: fixed; top: 57px; bottom: 0; }
+html:has(.page-wide), body:has(.page-wide) { overflow-x: auto; }
