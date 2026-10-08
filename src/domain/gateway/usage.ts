@@ -68,12 +68,12 @@ export function limitsFor(plan: Plan): Array<{ service: string; perMinute: numbe
     ...extra,
   ].join('\n');
   const analyses = plan.overageCentsPerAnalysis === null
-    ? `Your plan includes ${num(plan.includedAnalyses)} market analyses a month; after that they are refused until next month.`
-    : `Your plan includes ${num(plan.includedAnalyses)} market analyses a month; each extra one costs ${dollars(plan.overageCentsPerAnalysis)}.`;
+    ? `Your plan includes ${num(plan.includedAnalyses)} uncached market validation analyses a month; after that they are refused until next month.`
+    : `Your plan includes ${num(plan.includedAnalyses)} uncached market validation analyses a month; each extra one costs ${dollars(plan.overageCentsPerAnalysis)}.`;
   return [
     { service: 'desk_api', perMinute: plan.servicePerMinute, note: lines('Desk API') },
     { service: 'registry_api', perMinute: plan.servicePerMinute, note: lines('Business Name Registry API', ['The answers carry X-RateLimit-* headers.']) },
-    { service: 'market_validation_api', perMinute: plan.servicePerMinute, note: lines('Market Validation API', [analyses, 'A key can run 2 market analyses at once.']) },
+    { service: 'market_validation_api', perMinute: plan.servicePerMinute, note: lines('Market Validation API', [analyses, 'A key can run 2 uncached market validation analyses at once.']) },
   ];
 }
 

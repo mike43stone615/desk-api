@@ -92,8 +92,8 @@ describe('the limit notes shown when picking an API for a key', () => {
   it('say what happens past a monthly limit on that plan', () => {
     expect(note(FREE, 'desk_api')).toContain('calls are refused until next month');
     expect(note(PRO, 'desk_api')).toContain('cost $0.05 each');
-    expect(note(PRO, 'market_validation_api')).toContain('75 market analyses a month; each extra one costs $0.15');
-    expect(note(FREE, 'market_validation_api')).toContain('5 market analyses a month; after that they are refused');
+    expect(note(PRO, 'market_validation_api')).toContain('75 uncached market validation analyses a month; each extra one costs $0.15');
+    expect(note(FREE, 'market_validation_api')).toContain('5 uncached market validation analyses a month; after that they are refused');
   });
 });
 
