@@ -78,11 +78,11 @@ export const SCOPE_GROUPS = [
       { id: 'keys:apis', name: 'APIs each key can call' },
       { id: 'usage:read', name: 'Monthly usage', info: "Each key's total calls and errors for a month. Never anything more detailed, like a single day." },
     ] },
-    { id: 'webhooks:list', name: 'Webhook list', info: "The addresses of the person's webhooks. Never their signing secrets.", children: [
-      { id: 'webhooks:events', name: 'Events', info: 'The events each webhook listens for.' },
-      { id: 'webhooks:dates', name: 'Webhook date', info: 'The date each webhook was created.' },
-      { id: 'webhooks:active', name: 'Active/inactive', info: 'Whether each webhook is switched on.' },
-      { id: 'webhooks:deliveries', name: 'Deliveries', info: "Each webhook's deliveries from the last 30 days: date and time, event, progress, result and tries." },
+    { id: 'webhooks:list', name: 'Webhook list', children: [
+      { id: 'webhooks:events', name: 'Events' },
+      { id: 'webhooks:dates', name: 'Webhook date' },
+      { id: 'webhooks:active', name: 'Active/inactive' },
+      { id: 'webhooks:deliveries', name: 'Deliveries' },
     ] },
   ] },
 ];
