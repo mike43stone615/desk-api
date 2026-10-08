@@ -16,12 +16,12 @@ const SAMPLES = [
   { month: '2026-07', planId: 'developer', status: 'paid', lines: [line('Pro plan, one month', 1, 1500)] },
   { month: '2026-08', planId: 'business', status: 'paid', lines: [
     line('Business plan, one month', 1, 5000),
-    line('Market analyses beyond the 350 included', 41, 30),
+    line('Market analyses beyond the 350 included', 41, 15),
     line("API calls beyond the plan's monthly limits", 2150, 3),
   ] },
   { month: '2026-09', planId: 'developer', status: 'open', lines: [
     line('Pro plan, one month', 1, 1500),
-    line('Market analyses beyond the 75 included', 37, 30),
+    line('Market analyses beyond the 75 included', 37, 15),
     line("API calls beyond the plan's monthly limits", 420, 5),
   ] },
 ];

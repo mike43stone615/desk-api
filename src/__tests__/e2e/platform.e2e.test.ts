@@ -93,9 +93,9 @@ describe.skipIf(!hasDb)('E2E: plans, invoices and webhooks', () => {
     const { invoices, hasMore } = await invoicesFor('user', u.id);
     expect(invoices).toHaveLength(1);
     expect(hasMore).toBe(false);
-    // the Pro fee, 2,936 analyses beyond the 75 included at 30 cents, 10 calls beyond a monthly limit at 5 cents
-    expect(invoices[0].lines.map((l) => l.totalCents)).toEqual([1500, 88080, 50]);
-    expect(invoices[0].subtotalCents).toBe(89630);
+    // the Pro fee, 2,936 analyses beyond the 75 included at 15 cents, 10 calls beyond a monthly limit at 5 cents
+    expect(invoices[0].lines.map((l) => l.totalCents)).toEqual([1500, 44040, 50]);
+    expect(invoices[0].subtotalCents).toBe(45590);
     expect(invoices[0]).toMatchObject({ status: 'draft', planName: 'Pro' });
     // the person's own view shows it; another person's does not
     const other = await mkUser('other');

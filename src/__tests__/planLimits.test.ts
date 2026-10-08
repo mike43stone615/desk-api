@@ -6,7 +6,7 @@ import { USAGE_METERS, WEBHOOK_EVENTS, usageEvent } from '../domain/webhooks/web
 
 const FREE = FALLBACK_FREE_PLAN;
 const PRO: Plan = {
-  ...FREE, id: 'developer', name: 'Pro', monthlyPriceCents: 1500, includedAnalyses: 75, overageCentsPerAnalysis: 30, maxApps: 3,
+  ...FREE, id: 'developer', name: 'Pro', monthlyPriceCents: 1500, includedAnalyses: 75, overageCentsPerAnalysis: 15, maxApps: 3,
   servicePerMinute: 600, servicePerMonth: 3000, totalPerMinute: 1000, totalPerMonth: 5000, overageCentsPerCall: 5,
 };
 const tally = (t: Partial<CallTally> = {}): CallTally => ({ desk_api: 0, registry_api: 0, market_validation_api: 0, total: 0, ...t });
@@ -92,7 +92,7 @@ describe('the limit notes shown when picking an API for a key', () => {
   it('say what happens past a monthly limit on that plan', () => {
     expect(note(FREE, 'desk_api')).toContain('calls are refused until next month');
     expect(note(PRO, 'desk_api')).toContain('cost $0.05 each');
-    expect(note(PRO, 'market_validation_api')).toContain('75 market analyses a month; each extra one costs $0.30');
+    expect(note(PRO, 'market_validation_api')).toContain('75 market analyses a month; each extra one costs $0.15');
     expect(note(FREE, 'market_validation_api')).toContain('5 market analyses a month; after that they are refused');
   });
 });

@@ -3,8 +3,9 @@
 What changed in the Desk API, newest first. Breaking changes are never made inside `v1` (see docs/API-VERSIONING.md);
 everything below is additive unless it says "safer".
 
-## 2026-10-08: webhook events, plan-aware limits, invoices you can print, app permissions for webhooks
+## 2026-10-08: extra analyses cost $0.15, webhook events, plan-aware limits, invoices you can print, app permissions for webhooks
 
+- **Plans:** an analysis beyond a paid plan's included number now costs $0.15 (it was $0.30). Needs migration 0031.
 - **Webhooks:** removed "A daily usage cap is reached" and "Monthly usage reaches 80% or 100% of the plan". New events, in a clearer
   order: an invoice is available; monthly usage reached 80% and 100% of the plan for the Desk API, the Business Name Registry API, the
   Market Validation API, uncached Market Validation analyses and total API calls; and, for apps, removed, secret rotated, redirect
