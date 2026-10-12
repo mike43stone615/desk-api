@@ -1,5 +1,6 @@
-// Administration (Desk administrators only): flip between the Desk, Registry and Market APIs and edit their data, and (for the
-// owner) choose who else may see this page. Data comes from /admin/tables (src/routes/admin.ts), who has access from /admin/access.
+// Administration (Desk administrators only): flip between the Desk, Business Name Registry and Market Validation APIs and edit
+// their data. The "Who has access" pop-up lists the owners and administrators; owners invite, remove and promote administrators.
+// Data comes from /admin/tables (src/routes/admin.ts), who has access from /admin/access (src/routes/adminAccess.ts).
 // The tab is only shown to administrators and every request is checked again on the server; hiding is a convenience, not the lock.
 import { registerRoute, api, esc, spinnerBtn, toast, icon, friendlyError, ADMIN_FILTER_DEBOUNCE_MS, reportHandledException, navigate, statusMsg, submitOnEnter, currentEpoch } from '../app.js';
 import { tabsHtml } from '../tabs.js';
@@ -63,8 +64,9 @@ registerRoute('/developer/admin', async (app) => {
   const myEpoch = currentEpoch();
   const isCurrent = () => currentEpoch() === myEpoch;
   const s = {
-    me: null, view: 'data', access: null, accessError: null, isAccessLoading: false,
-    addEmail: '', addNote: '', addError: null, isAdding: false, confirmRemove: null, isRemoving: false,
+    me: null, accessOpen: false, access: null, accessError: null, isAccessLoading: false,
+    addEmail: '', addError: null, isAdding: false, confirmAccess: null, isAccessBusy: false,
+    gridScrollLeft: 0,
     tables: [], rows: null, selectedTable: null, selectedSource: 'desk',
     errorMessage: null, isLoading: true, isSaving: false,
     undoStack: [], redoStack: [], savingCellKeys: new Set(),
@@ -126,7 +128,7 @@ registerRoute('/developer/admin', async (app) => {
     await selectTable(table.name);
   }
   async function selectTable(table) {
-    s.selectedTable = table; s.isLoading = true; s.errorMessage = null;
+    s.selectedTable = table; s.isLoading = true; s.errorMessage = null; s.gridScrollLeft = 0;
     s.filters = {}; s.sort = null; s.undoStack = []; s.redoStack = []; s.selectedRow = null;
     render();
     try {
@@ -270,8 +272,8 @@ registerRoute('/developer/admin', async (app) => {
     if (!s.addEmail.trim()) { s.addError = 'Enter the email address of a Desk account.'; render(); return; }
     s.isAdding = true; s.addError = null; render();
     try {
-      await api('/admin/access', { method: 'POST', body: { email: s.addEmail.trim(), note: s.addNote.trim() || undefined } });
-      s.addEmail = ''; s.addNote = '';
+      await api('/admin/access', { method: 'POST', body: { email: s.addEmail.trim() } });
+      s.addEmail = '';
       toast('Added. They can see the Administration tab the next time they open the page.');
       s.access = await api('/admin/access');
     } catch (err) {
@@ -279,91 +281,111 @@ registerRoute('/developer/admin', async (app) => {
       s.addError = friendlyError(err, 'We could not add that person.');
     } finally { s.isAdding = false; if (isCurrent()) render(); }
   }
-  async function removeAdminPerson() {
-    const target = s.confirmRemove;
-    if (!target || s.isRemoving) return;
-    s.isRemoving = true; render();
+  // Remove and promote both ask first (in a second pop-up over the list), then reload the list.
+  async function confirmAccessChange() {
+    const target = s.confirmAccess;
+    if (!target || s.isAccessBusy) return;
+    s.isAccessBusy = true; render();
     try {
-      await api(`/admin/access/${encodeURIComponent(target.userId)}`, { method: 'DELETE' });
-      toast('Access removed.');
+      if (target.kind === 'promote') {
+        await api(`/admin/access/${encodeURIComponent(target.userId)}/promote`, { method: 'POST' });
+        toast(`${target.name} is now an owner.`);
+      } else {
+        await api(`/admin/access/${encodeURIComponent(target.userId)}`, { method: 'DELETE' });
+        toast('Access removed.');
+      }
       s.access = await api('/admin/access');
     } catch (err) {
-      reportHandledException(err, 'removeAdmin');
-      toast(friendlyError(err, 'We could not remove that person.'), true);
-    } finally { s.confirmRemove = null; s.isRemoving = false; if (isCurrent()) render(); }
+      reportHandledException(err, target.kind === 'promote' ? 'promoteAdmin' : 'removeAdmin');
+      toast(friendlyError(err, target.kind === 'promote' ? 'We could not make that person an owner.' : 'We could not remove that person.'), true);
+    } finally { s.confirmAccess = null; s.isAccessBusy = false; if (isCurrent()) render(); }
   }
-  function accessHtml() {
-    if (s.isAccessLoading && !s.access) return `<div class="empty-state">${spinnerBtn(true, '', { dark: true })}</div>`;
-    if (s.accessError) return `<div class="empty-state">${icon('error_outline')}<div style="margin-top:var(--sp-md);">The list could not load</div><div class="hint">${esc(s.accessError)}</div><button type="button" class="btn" id="retry-access-btn" style="margin-top:var(--sp-lg);">${icon('refresh')} Try again</button></div>`;
-    const a = s.access || { owners: [], admins: [] };
-    const isOwner = s.me && s.me.isOwner;
-    const when = (iso) => { const d = new Date(iso); return Number.isNaN(d.getTime()) ? '' : d.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' }); };
+  function personName(p) { return `${p.firstName || ''} ${p.lastName || ''}`.trim(); }
+  function personRowHtml(p, actions = '') {
+    const name = personName(p);
     return `
-      <div class="card" style="margin-bottom:var(--sp-lg);">
-        <h2 class="biz-section-title">Who can see this page</h2>
-        <p class="biz-sub">Administrators can view and edit the data of every API here and use the other administrator tools. Only an owner can change this list. A person needs a Desk account with a confirmed email address.</p>
-        <div class="field-header"><label>Owners (set in the server settings, cannot be removed here)</label></div>
-        ${a.owners.map((o) => `<div class="state-card key-card"><div class="biz-icon neutral">${icon('lock')}</div><div class="biz-body"><div class="biz-title">${esc(o)}</div><div class="biz-sub">Owner</div></div></div>`).join('') || '<p class="biz-sub">None set.</p>'}
-      </div>
-      <div class="card" style="margin-bottom:var(--sp-lg);">
-        <h2 class="biz-section-title">Administrators you added</h2>
-        ${a.admins.length ? a.admins.map((p) => `
-          <div class="state-card key-card">
-            <div class="biz-icon neutral">${icon('group')}</div>
-            <div class="biz-body">
-              <div class="biz-title">${esc(`${p.firstName} ${p.lastName}`.trim() || p.email)}</div>
-              <div class="biz-sub">${esc(p.email)} · added ${esc(when(p.addedAt))}${p.addedBy ? ` by ${esc(p.addedBy)}` : ''}${p.note ? ` · ${esc(p.note)}` : ''}</div>
-            </div>
-            ${isOwner ? `<button type="button" class="btn btn-sm" data-remove-admin="${esc(p.userId)}" data-name="${esc(p.email)}" aria-label="Remove ${esc(p.email)}">Remove</button>` : ''}
-          </div>`).join('') : `<div class="state-card"><div class="biz-body"><div class="biz-title">Nobody yet</div><div class="biz-sub">Only the owner can see this page.</div></div></div>`}
-      </div>
-      ${isOwner ? `
-        <div class="card">
-          <h2 class="biz-section-title">Add someone</h2>
-          <p class="biz-sub" style="margin-bottom:var(--sp-md);">They must already have a Desk account (with a confirmed email address). Nobody is emailed.</p>
-          <form id="add-admin-form" novalidate>
-            <div class="field-float has-icon"><span class="field-icon">${icon('person_add')}</span><label>E-mail address</label><input name="email" type="email" placeholder=" " value="${esc(s.addEmail)}" autocomplete="off" /></div>
-            <div class="field-float has-icon"><span class="field-icon">${icon('group')}</span><label>Note (optional, only you see it)</label><input name="note" placeholder=" " maxlength="200" value="${esc(s.addNote)}" autocomplete="off" /></div>
-            ${s.addError ? statusMsg('error', s.addError, true) : ''}
-            <button type="submit" class="btn btn-primary" style="margin-top:var(--sp-md);" ${s.isAdding ? 'disabled' : ''}>${s.isAdding ? spinnerBtn(true, '') : `${icon('person_add')} Give access`}</button>
+      <div class="access-person">
+        <div class="access-person-text">
+          <div class="access-person-name">${esc(name || p.email)}</div>
+          ${name ? `<div class="access-person-email">${esc(p.email)}</div>` : ''}
+        </div>
+        ${actions}
+      </div>`;
+  }
+  function accessModalHtml() {
+    const isOwner = s.me && s.me.isOwner;
+    let body;
+    if (s.isAccessLoading && !s.access) body = `<div class="empty-state">${spinnerBtn(true, '', { dark: true })}</div>`;
+    else if (s.accessError) body = `<div class="empty-state">${icon('error_outline')}<div style="margin-top:var(--sp-md);">The list could not load</div><div class="hint">${esc(s.accessError)}</div><button type="button" class="btn" id="retry-access-btn" style="margin-top:var(--sp-lg);">${icon('refresh')} Try again</button></div>`;
+    else {
+      const a = s.access || { owners: [], admins: [] };
+      body = `
+        <h3 class="access-group-title">Owners</h3>
+        <div class="access-list">${a.owners.map((o) => personRowHtml(o)).join('') || '<p class="modal-text">None set.</p>'}</div>
+        <h3 class="access-group-title">Administrators</h3>
+        <div class="access-list">${a.admins.length ? a.admins.map((p) => personRowHtml(p, isOwner ? `
+          <div class="access-person-actions">
+            <button type="button" class="btn btn-sm" data-promote-admin="${esc(p.userId)}" data-name="${esc(personName(p) || p.email)}">Make owner</button>
+            <button type="button" class="btn btn-sm" data-remove-admin="${esc(p.userId)}" data-name="${esc(personName(p) || p.email)}">Remove</button>
+          </div>` : '')).join('') : '<p class="modal-text">No administrators yet.</p>'}</div>
+        ${isOwner ? `
+          <form id="add-admin-form" class="access-invite" novalidate>
+            <div class="field-float has-icon"><span class="field-icon">${icon('person_add')}</span><label>Invite by email</label><input name="email" type="email" placeholder=" " value="${esc(s.addEmail)}" autocomplete="off" /></div>
+            <button type="submit" class="btn btn-primary" ${s.isAdding ? 'disabled' : ''}>${s.isAdding ? spinnerBtn(true, '') : 'Invite'}</button>
           </form>
-        </div>` : `<p class="biz-sub">Only an owner can add or remove administrators.</p>`}`;
+          ${s.addError ? statusMsg('error', s.addError, true) : ''}
+          <p class="modal-text access-invite-hint">They need a Desk account with a confirmed email address.</p>` : ''}`;
+    }
+    return `
+      <div class="modal-backdrop" id="access-backdrop">
+        <div class="modal" role="dialog" aria-modal="true" aria-labelledby="access-title">
+          <div class="access-modal-head"><h2 id="access-title">Who has access</h2><button type="button" class="admin-icon-btn" id="close-access-btn" title="Close" aria-label="Close">${icon('close')}</button></div>
+          ${body}
+        </div>
+      </div>`;
+  }
+  function confirmAccessHtml() {
+    const c = s.confirmAccess;
+    const promote = c.kind === 'promote';
+    return `
+      <div class="modal-backdrop" id="confirm-access-backdrop">
+        <div class="modal" role="dialog" aria-modal="true" aria-labelledby="confirm-access-title">
+          <h2 id="confirm-access-title">${promote ? 'Make owner' : 'Remove access'}</h2>
+          <p class="modal-text">${promote
+            ? `Make ${esc(c.name)} an owner? Owners can invite, remove and promote administrators. Owners cannot be removed or demoted here afterwards.`
+            : `Take away administrator access from ${esc(c.name)}? It stops at once.`}</p>
+          <div class="modal-actions">
+            <button type="button" class="btn" id="cancel-access-btn" ${s.isAccessBusy ? 'disabled' : ''}>Cancel</button>
+            <button type="button" class="btn ${promote ? 'btn-primary' : 'btn-danger'}" id="confirm-access-btn" ${s.isAccessBusy ? 'disabled' : ''}>${s.isAccessBusy ? spinnerBtn(true, '') : promote ? 'Make owner' : 'Remove'}</button>
+          </div>
+        </div>
+      </div>`;
   }
 
   function render() {
     if (!isCurrent()) return; // a page the person has already left must not draw over the new one
     const sources = [...new Set(s.tables.map((t) => t.source))];
-    const sourceLabels = { desk: 'Desk API', registry: 'Registry API', market: 'Market API', compliance: 'Compliance (retired)' };
+    const sourceLabels = { desk: 'Desk API', registry: 'Business Name Registry API', market: 'Market Validation API', compliance: 'Compliance (retired)' };
     const sourceTables = s.tables.filter((t) => t.source === s.selectedSource);
 
-    const dataView = s.view === 'data';
     app.innerHTML = `
-      <div class="page${dataView ? ' page-wide' : ''}">
+      <div class="page">
         <div class="page-head-row">
           <div class="head-text"><h1>API Library</h1><p>Administration: view and edit the data behind each API.</p></div>
-          ${dataView ? `<div style="display:flex;gap:var(--sp-xs);">
-            <button type="button" class="admin-icon-btn" id="undo-btn" title="Undo" aria-label="Undo" ${s.isSaving || !s.undoStack.length ? 'disabled' : ''}>${icon('undo')}</button>
-            <button type="button" class="admin-icon-btn" id="redo-btn" title="Redo" aria-label="Redo" ${s.isSaving || !s.redoStack.length ? 'disabled' : ''}>${icon('redo')}</button>
-            <button type="button" class="admin-icon-btn" id="refresh-tables-btn" title="Refresh tables" aria-label="Refresh tables" ${s.isLoading || s.isSaving ? 'disabled' : ''}>${icon('refresh')}</button>
-          </div>` : ''}
         </div>
         ${tabsHtml('/developer/admin')}
-        <div class="source-tabs" role="tablist" aria-label="Administration sections">
-          <button type="button" data-view="data" class="${dataView ? 'active' : ''}">Data</button>
-          <button type="button" data-view="access" class="${dataView ? '' : 'active'}">Who has access</button>
+        <div class="admin-source-row">
+          <div class="source-tabs" aria-label="API">${sources.map((src) => `<button type="button" data-source="${esc(src)}" class="${src === s.selectedSource ? 'active' : ''}">${esc(sourceLabels[src] || src)}</button>`).join('')}</div>
+          <button type="button" class="btn btn-sm admin-access-btn" id="open-access-btn">${icon('group')} Who has access</button>
         </div>
-        ${dataView ? `
-          ${s.tables.length ? `
-            <div class="source-tabs" aria-label="API">${sources.map((src) => `<button type="button" data-source="${esc(src)}" class="${src === s.selectedSource ? 'active' : ''}">${esc(sourceLabels[src] || src)}</button>`).join('')}</div>
-            <div class="table-tabs">${sourceTables.map((t) => `<button type="button" data-table="${esc(t.name)}" class="${t.name === s.selectedTable ? 'active' : ''}">${esc(titleize(t.rawName || t.name))}</button>`).join('')}</div>
-          ` : ''}
-          ${s.sourceErrors ? Object.entries(s.sourceErrors).map(([src, msg]) => `<p class="hint" style="color:var(--warning);">${esc(sourceLabels[src] || src)} could not be reached: ${esc(msg)}</p>`).join('') : ''}
-          ${s.errorMessage ? `<div class="empty-state">${icon('error_outline')}<div style="margin-top:var(--sp-md);">Something went wrong</div><div class="hint">${esc(s.errorMessage)}</div></div>`
-            : s.isLoading ? `<div class="empty-state">${spinnerBtn(true, '', { dark: true })}</div>`
-            : gridHtml()}
-        ` : accessHtml()}
+        ${s.tables.length ? `<div class="table-tabs">${sourceTables.map((t) => `<button type="button" data-table="${esc(t.name)}" class="${t.name === s.selectedTable ? 'active' : ''}">${esc(titleize(t.rawName || t.name))}</button>`).join('')}</div>` : ''}
+        ${s.sourceErrors ? Object.entries(s.sourceErrors).map(([src, msg]) => `<p class="hint" style="color:var(--warning);">${esc(sourceLabels[src] || src)} could not be reached: ${esc(msg)}</p>`).join('') : ''}
+        ${s.errorMessage ? `<div class="empty-state">${icon('error_outline')}<div style="margin-top:var(--sp-md);">Something went wrong</div><div class="hint">${esc(s.errorMessage)}</div></div>`
+          : s.isLoading ? `<div class="empty-state">${spinnerBtn(true, '', { dark: true })}</div>`
+          : gridHtml()}
       </div>
-      ${s.confirmRemove ? `<div class="modal-backdrop" id="remove-admin-backdrop"><div class="modal" role="dialog" aria-modal="true" aria-labelledby="remove-admin-title"><h2 id="remove-admin-title">Remove access</h2><p>Take away administrator access from ${esc(s.confirmRemove.email)}? It stops at once.</p><div style="display:flex;justify-content:flex-end;gap:var(--sp-sm);margin-top:var(--sp-xl);"><button type="button" class="btn" id="cancel-remove-admin-btn" ${s.isRemoving ? 'disabled' : ''}>Cancel</button><button type="button" class="btn btn-danger" id="confirm-remove-admin-btn" ${s.isRemoving ? 'disabled' : ''}>${s.isRemoving ? spinnerBtn(true, '') : 'Remove'}</button></div></div></div>` : ''}
+      ${s.accessOpen ? accessModalHtml() : ''}
+      ${s.confirmAccess ? confirmAccessHtml() : ''}
       ${s.confirmDeleteRow ? `
         <div class="modal-backdrop" id="delete-row-modal-backdrop">
           <div class="modal">
@@ -380,12 +402,38 @@ registerRoute('/developer/admin', async (app) => {
     wire();
   }
 
+  // The grid is the normal page width and the page itself scrolls up and down (no second scrollbar inside it). The column headers
+  // (with the undo/redo/refresh buttons above them) stay just under the top bar, and the sideways scrollbar stays at the bottom
+  // of the window while the table is in view. The headers and the rows are two tables with the same fixed column widths, so they
+  // line up; wire() keeps the header, the rows and the sideways scrollbar at the same scroll position.
   function gridHtml() {
     const table = s.rows;
     if (!table) return `<div class="empty-state">No table selected<div class="hint">Choose a table to inspect its rows.</div></div>`;
     const hidden = s.hiddenColumnsByTable[table.table] || new Set();
     const visibleColumns = table.columns.filter((c) => !hidden.has(c));
     const filterCount = Object.keys(s.filters).length;
+    const ACTIONS_WIDTH = 76;
+    const tableWidth = ACTIONS_WIDTH + visibleColumns.reduce((sum, col) => sum + columnWidth(col), 0);
+    const colgroup = `<colgroup><col style="width:${ACTIONS_WIDTH}px;">${visibleColumns.map((col) => `<col style="width:${columnWidth(col)}px;">`).join('')}</colgroup>`;
+    const tableStyle = `style="width:${tableWidth}px;"`;
+
+    const headHtml = `
+      <div class="admin-grid-head">
+        <table class="admin-table" ${tableStyle}>
+          ${colgroup}
+          <thead>
+            <tr>
+              <th><span class="col-name">Actions</span></th>
+              ${visibleColumns.map((col) => `
+                <th data-sort="${esc(col)}">
+                  <span class="col-name">${esc(titleize(col))}${s.sort && s.sort.column === col ? (s.sort.ascending ? ' ▲' : ' ▼') : ''}</span>
+                  <input class="col-filter" data-filter="${esc(col)}" value="${esc(s.filters[col] || '')}" placeholder="Filter" />
+                </th>
+              `).join('')}
+            </tr>
+          </thead>
+        </table>
+      </div>`;
 
     let bodyHtml;
     if (!table.rows.length) {
@@ -393,18 +441,8 @@ registerRoute('/developer/admin', async (app) => {
     } else {
       bodyHtml = `
         <div class="admin-grid-scroll">
-          <table class="admin-table">
-            <thead>
-              <tr>
-                <th style="width:76px;">Actions</th>
-                ${visibleColumns.map((col) => `
-                  <th data-sort="${esc(col)}" style="min-width:${columnWidth(col)}px;">
-                    <span class="col-name">${esc(titleize(col))}${s.sort && s.sort.column === col ? (s.sort.ascending ? ' ▲' : ' ▼') : ''}</span>
-                    <input class="col-filter" data-filter="${esc(col)}" value="${esc(s.filters[col] || '')}" placeholder="Filter" />
-                  </th>
-                `).join('')}
-              </tr>
-            </thead>
+          <table class="admin-table" ${tableStyle}>
+            ${colgroup}
             <tbody>
               ${table.rows.map((row) => {
                 const id = String(row[table.primaryKey]);
@@ -421,27 +459,36 @@ registerRoute('/developer/admin', async (app) => {
             </tbody>
           </table>
         </div>
+        <div class="admin-hscroll" aria-hidden="true"><div style="width:${tableWidth}px;"></div></div>
       `;
     }
 
     return `
       <div class="admin-grid-wrap">
-        <div class="admin-grid-toolbar">
-          <div class="filter-chips" style="flex:1;">
-            ${filterCount
-              ? Object.entries(s.filters).map(([k, v]) => `<button type="button" class="chip selected" data-remove-filter="${esc(k)}" aria-label="Remove ${esc(titleize(k))} filter">${esc(titleize(k))}: ${esc(v)} <span class="x" aria-hidden="true">✕</span></button>`).join('') + `<button type="button" class="btn-link" id="clear-filters-btn">Clear filters</button>`
-              : `<span class="hint">${esc(titleize(table.rawName))} · ${table.totalRows} rows</span>`}
+        <div class="admin-grid-sticky">
+          <div class="admin-grid-toolbar">
+            <div class="admin-history-btns">
+              <button type="button" class="admin-icon-btn" id="undo-btn" title="Undo" aria-label="Undo" ${s.isSaving || !s.undoStack.length ? 'disabled' : ''}>${icon('undo')}</button>
+              <button type="button" class="admin-icon-btn" id="redo-btn" title="Redo" aria-label="Redo" ${s.isSaving || !s.redoStack.length ? 'disabled' : ''}>${icon('redo')}</button>
+              <button type="button" class="admin-icon-btn" id="refresh-tables-btn" title="Refresh tables" aria-label="Refresh tables" ${s.isLoading || s.isSaving ? 'disabled' : ''}>${icon('refresh')}</button>
+            </div>
+            <div class="filter-chips" style="flex:1;">
+              ${filterCount
+                ? Object.entries(s.filters).map(([k, v]) => `<button type="button" class="chip selected" data-remove-filter="${esc(k)}" aria-label="Remove ${esc(titleize(k))} filter">${esc(titleize(k))}: ${esc(v)} <span class="x" aria-hidden="true">✕</span></button>`).join('') + `<button type="button" class="btn-link" id="clear-filters-btn">Clear filters</button>`
+                : `<span class="hint">${esc(titleize(table.rawName))} · ${table.totalRows} rows</span>`}
+            </div>
+            <div class="column-menu">
+              <button type="button" class="admin-icon-btn" id="column-menu-btn" title="Show or hide columns">${icon('view_column_outlined')} Columns</button>
+              ${s.columnMenuOpen ? `
+                <div class="column-menu-list">
+                  ${table.columns.map((col) => `<label><input type="checkbox" data-col-toggle="${esc(col)}" ${hidden.has(col) ? '' : 'checked'} /> ${esc(titleize(col))}</label>`).join('')}
+                </div>
+              ` : ''}
+            </div>
           </div>
-          <div class="column-menu">
-            <button type="button" class="admin-icon-btn" id="column-menu-btn" title="Show or hide columns">${icon('view_column_outlined')} Columns</button>
-            ${s.columnMenuOpen ? `
-              <div class="column-menu-list">
-                ${table.columns.map((col) => `<label><input type="checkbox" data-col-toggle="${esc(col)}" ${hidden.has(col) ? '' : 'checked'} /> ${esc(titleize(col))}</label>`).join('')}
-              </div>
-            ` : ''}
-          </div>
+          ${headHtml}
+          ${s.isRefreshingRows ? `<div style="height:2px;background:var(--accent);"></div>` : ''}
         </div>
-        ${s.isRefreshingRows ? `<div style="height:2px;background:var(--accent);"></div>` : ''}
         ${bodyHtml}
         <div class="admin-footer">
           <span>${table.totalRows > 0 ? `${table.rows.length} of ${table.totalRows} rows loaded` : `${table.rows.length} rows loaded`}</span>
@@ -510,21 +557,22 @@ registerRoute('/developer/admin', async (app) => {
 
   function wire() {
     app.querySelectorAll('[data-nav]').forEach((a) => a.addEventListener('click', (e) => { e.preventDefault(); navigate(a.dataset.nav); }));
-    app.querySelectorAll('[data-view]').forEach((btn) => btn.addEventListener('click', () => {
-      s.view = btn.dataset.view; render();
-      if (s.view === 'access' && !s.access) loadAccess();
-    }));
+    const openAccess = document.getElementById('open-access-btn');
+    if (openAccess) openAccess.addEventListener('click', () => { s.accessOpen = true; s.addError = null; render(); if (!s.access) loadAccess(); });
+    const closeAccess = () => { s.accessOpen = false; render(); };
+    const closeAccessBtn = document.getElementById('close-access-btn'); if (closeAccessBtn) closeAccessBtn.addEventListener('click', closeAccess);
+    const accessBackdrop = document.getElementById('access-backdrop'); if (accessBackdrop) accessBackdrop.addEventListener('click', (e) => { if (e.target === accessBackdrop) closeAccess(); });
     const retryAccess = document.getElementById('retry-access-btn'); if (retryAccess) retryAccess.addEventListener('click', loadAccess);
     const addForm = document.getElementById('add-admin-form');
     if (addForm) {
       addForm.addEventListener('submit', addAdminPerson); submitOnEnter(addForm);
       addForm.querySelector('input[name="email"]').addEventListener('input', (e) => { s.addEmail = e.target.value; });
-      addForm.querySelector('input[name="note"]').addEventListener('input', (e) => { s.addNote = e.target.value; });
     }
-    app.querySelectorAll('[data-remove-admin]').forEach((b) => b.addEventListener('click', () => { s.confirmRemove = { userId: b.dataset.removeAdmin, email: b.dataset.name }; render(); }));
-    const cancelRemove = document.getElementById('cancel-remove-admin-btn'); if (cancelRemove) { cancelRemove.addEventListener('click', () => { s.confirmRemove = null; render(); }); cancelRemove.focus(); }
-    const confirmRemoveBtn = document.getElementById('confirm-remove-admin-btn'); if (confirmRemoveBtn) confirmRemoveBtn.addEventListener('click', removeAdminPerson);
-    const removeBackdrop = document.getElementById('remove-admin-backdrop'); if (removeBackdrop) removeBackdrop.addEventListener('click', (e) => { if (e.target === removeBackdrop && !s.isRemoving) { s.confirmRemove = null; render(); } });
+    app.querySelectorAll('[data-remove-admin]').forEach((b) => b.addEventListener('click', () => { s.confirmAccess = { kind: 'remove', userId: b.dataset.removeAdmin, name: b.dataset.name }; render(); }));
+    app.querySelectorAll('[data-promote-admin]').forEach((b) => b.addEventListener('click', () => { s.confirmAccess = { kind: 'promote', userId: b.dataset.promoteAdmin, name: b.dataset.name }; render(); }));
+    const cancelAccess = document.getElementById('cancel-access-btn'); if (cancelAccess) { cancelAccess.addEventListener('click', () => { s.confirmAccess = null; render(); }); cancelAccess.focus(); }
+    const confirmAccessBtn = document.getElementById('confirm-access-btn'); if (confirmAccessBtn) confirmAccessBtn.addEventListener('click', confirmAccessChange);
+    const confirmBackdrop = document.getElementById('confirm-access-backdrop'); if (confirmBackdrop) confirmBackdrop.addEventListener('click', (e) => { if (e.target === confirmBackdrop && !s.isAccessBusy) { s.confirmAccess = null; render(); } });
     const undoBtn = document.getElementById('undo-btn'); if (undoBtn) undoBtn.addEventListener('click', undo);
     const redoBtn = document.getElementById('redo-btn'); if (redoBtn) redoBtn.addEventListener('click', redo);
     const refreshBtn = document.getElementById('refresh-tables-btn'); if (refreshBtn) refreshBtn.addEventListener('click', loadTables);
@@ -558,15 +606,19 @@ registerRoute('/developer/admin', async (app) => {
       if (row) deleteRow(row);
     }));
     const loadMoreBtn = document.getElementById('load-more-btn'); if (loadMoreBtn) loadMoreBtn.addEventListener('click', loadMoreRows);
-    // Auto-load near the bottom, matching the Flutter grid's ScrollController
-    // threshold (240px from the end) — loadMoreRows() already no-ops when
-    // already loading or there's nothing more, so this is safe to call often.
+    // Sideways scrolling: the rows (scrolled by trackpad, touch or shift+wheel), the header (scrolled when a filter box takes
+    // focus) and the scrollbar pinned to the bottom of the window all follow each other. The position survives a redraw.
     const gridScroll = app.querySelector('.admin-grid-scroll');
-    if (gridScroll) {
-      gridScroll.addEventListener('scroll', () => {
-        if (gridScroll.scrollTop + gridScroll.clientHeight >= gridScroll.scrollHeight - 240) loadMoreRows();
-      });
-    }
+    const gridHead = app.querySelector('.admin-grid-head');
+    const hScroll = app.querySelector('.admin-hscroll');
+    const scrollers = [gridScroll, gridHead, hScroll].filter(Boolean);
+    const follow = (source) => {
+      const x = source.scrollLeft; s.gridScrollLeft = x;
+      scrollers.forEach((el) => { if (el !== source && el.scrollLeft !== x) el.scrollLeft = x; });
+    };
+    scrollers.forEach((el) => { el.scrollLeft = s.gridScrollLeft; el.addEventListener('scroll', () => follow(el)); });
+    if (hScroll && gridScroll) hScroll.hidden = gridScroll.scrollWidth <= gridScroll.clientWidth + 1;
+    setTopbarHeight();
     const cancelDeleteRow = document.getElementById('cancel-delete-row-btn'); if (cancelDeleteRow) cancelDeleteRow.addEventListener('click', () => { s.confirmDeleteRow = null; render(); });
     const confirmDeleteRowBtn = document.getElementById('confirm-delete-row-btn'); if (confirmDeleteRowBtn) confirmDeleteRowBtn.addEventListener('click', confirmDeleteRow);
     const deleteRowBackdrop = document.getElementById('delete-row-modal-backdrop');
@@ -613,6 +665,25 @@ registerRoute('/developer/admin', async (app) => {
     app.querySelectorAll('[data-nav]').forEach((a) => a.addEventListener('click', (e) => { e.preventDefault(); navigate(a.dataset.nav); }));
     return;
   }
+  // The grid's sticky header sits just under the top bar, whose height depends on the window width.
+  function setTopbarHeight() {
+    const bar = document.querySelector('.topbar');
+    if (bar && !bar.hidden) document.documentElement.style.setProperty('--topbar-h', `${bar.offsetHeight}px`);
+  }
+  // The page scrolls (not the grid), so more rows load when the window nears the bottom of the page (240px, as the Flutter grid
+  // did). A resize may add or remove the need for the sideways scrollbar. Both listeners remove themselves once the page is left.
+  const onWindowScroll = () => {
+    if (!isCurrent()) { window.removeEventListener('scroll', onWindowScroll); return; }
+    if (window.innerHeight + window.scrollY >= document.documentElement.scrollHeight - 240) loadMoreRows();
+  };
+  const onWindowResize = () => {
+    if (!isCurrent()) { window.removeEventListener('resize', onWindowResize); return; }
+    setTopbarHeight();
+    const gridScroll = app.querySelector('.admin-grid-scroll'); const hScroll = app.querySelector('.admin-hscroll');
+    if (gridScroll && hScroll) hScroll.hidden = gridScroll.scrollWidth <= gridScroll.clientWidth + 1;
+  };
+  window.addEventListener('scroll', onWindowScroll, { passive: true });
+  window.addEventListener('resize', onWindowResize);
   render();
   await loadTables();
 });

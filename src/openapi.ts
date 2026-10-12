@@ -680,11 +680,14 @@ const BASE_SPEC = {
       get: { tags: ['Admin'], summary: 'Whether the signed-in person may use the administrator pages (never an error for a non-administrator)', security: [{ SessionToken: [] }], responses: { '200': { description: 'OK: { isAdmin, isOwner }' } } },
     },
     '/admin/access': {
-      get: { tags: ['Admin'], summary: 'Who has administrator access: the owner(s) and the listed administrators', security: [{ SessionToken: [] }], responses: { '200': { description: 'OK' }, '403': { description: 'Admin access required' } } },
+      get: { tags: ['Admin'], summary: 'Who has administrator access: owners ({ userId, email, firstName, lastName, fromSettings }) and the listed administrators', security: [{ SessionToken: [] }], responses: { '200': { description: 'OK' }, '403': { description: 'Admin access required' } } },
       post: { tags: ['Admin'], summary: 'Give an existing, e-mail-confirmed account administrator access (owner only)', security: [{ SessionToken: [] }], requestBody: { required: true, content: { 'application/json': { schema: { type: 'object', required: ['email'], properties: { email: { type: 'string' }, note: { type: 'string' } } } } } }, responses: { '201': { description: 'Added' }, '403': { description: 'Only an owner can do this' }, '404': { description: 'No account with that address' }, '409': { description: 'Already on the list, an owner, or the address is not confirmed' } } },
     },
     '/admin/access/{userId}': {
-      delete: { tags: ['Admin'], summary: 'Take administrator access away from a listed person (owner only)', security: [{ SessionToken: [] }], parameters: [{ name: 'userId', in: 'path', required: true, schema: { type: 'string' } }], responses: { '204': { description: 'Removed' }, '403': { description: 'Only an owner can do this' }, '404': { description: 'That person is not on the list' } } },
+      delete: { tags: ['Admin'], summary: 'Take administrator access away from a listed person (owner only)', security: [{ SessionToken: [] }], parameters: [{ name: 'userId', in: 'path', required: true, schema: { type: 'string' } }], responses: { '204': { description: 'Removed' }, '403': { description: 'Only an owner can do this' }, '409': { description: 'That person is an owner (owners cannot be removed here)' }, '404': { description: 'That person is not on the list' } } },
+    },
+    '/admin/access/{userId}/promote': {
+      post: { tags: ['Admin'], summary: 'Make a listed administrator an owner (owner only; owners cannot be promoted or removed here)', security: [{ SessionToken: [] }], parameters: [{ name: 'userId', in: 'path', required: true, schema: { type: 'string' } }], responses: { '200': { description: 'Promoted' }, '403': { description: 'Only an owner can do this' }, '404': { description: 'That person is not on the list' }, '409': { description: 'That person is already an owner' } } },
     },
     '/admin/tables': {
       get: { tags: ['Admin'], summary: 'List browsable tables (this service, registry-api and market-validation-api)', security: [{ SessionToken: [] }], responses: { '200': { description: 'OK' }, '403': { description: 'Admin access required' } } },

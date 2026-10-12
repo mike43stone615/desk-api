@@ -99,7 +99,7 @@ export const ERROR_CODES: Record<string, string> = {
   admin_access_no_such_account: 'There is no Desk account with that address.',
   admin_access_unconfirmed: 'That account has not confirmed its e-mail address yet.',
   admin_access_already_admin: 'That person is already on the administrator list.',
-  admin_access_is_owner: 'That address is an owner and always has access.',
+  admin_access_is_owner: 'That person is an owner: owners always have access and cannot be removed or promoted here.',
   admin_access_not_listed: 'That person is not on the administrator list.',
   admin_key_ip_not_allowed: 'The administrator key is not accepted from this address.',
   account_suspended: 'This account has been suspended.',

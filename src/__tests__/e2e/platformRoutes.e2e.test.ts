@@ -247,7 +247,7 @@ describe.skipIf(!hasDb)('E2E: status, changelog, billing, GraphQL and webhook re
     // the listed person: is an administrator, sees the list and the tables, edits data, but cannot change the list
     expect((await call('GET', '/v1/admin/me', helper)).json()).toEqual({ isAdmin: true, isOwner: false });
     const list = (await call('GET', '/v1/admin/access', helper)).json();
-    expect(list.owners).toContain(adminEmail.toLowerCase());
+    expect(list.owners).toContainEqual(expect.objectContaining({ email: adminEmail.toLowerCase(), userId: owner.id, fromSettings: true }));
     expect(list.admins.map((a: { email: string }) => a.email)).toContain(helper.email);
     expect((await call('POST', '/v1/admin/access', helper, { email: stranger.email })).statusCode).toBe(403);
     expect((await call('DELETE', `/v1/admin/access/${owner.id}`, helper)).statusCode).toBe(403);
@@ -287,5 +287,30 @@ describe.skipIf(!hasDb)('E2E: status, changelog, billing, GraphQL and webhook re
     await pool.query('UPDATE users SET email_confirmed_at = NULL WHERE id = $1', [stranger.id]);
     expect((await call('GET', '/v1/admin/me', stranger)).json().isAdmin).toBe(false);
     await pool.query('DELETE FROM platform_admins WHERE user_id = $1', [stranger.id]);
+
+    // promotion: an owner makes an administrator an owner; nobody removes or promotes an owner from the page
+    const deputy = await mkUser('acc-deputy');
+    const junior = await mkUser('acc-junior');
+    try {
+      expect((await call('POST', '/v1/admin/access', owner, { email: deputy.email })).statusCode).toBe(201);
+      expect((await call('POST', `/v1/admin/access/${deputy.id}/promote`, helper)).statusCode).toBe(403);
+      expect((await call('POST', `/v1/admin/access/${stranger.id}/promote`, owner)).statusCode).toBe(404);
+      const promoted = await call('POST', `/v1/admin/access/${deputy.id}/promote`, owner);
+      expect(promoted.statusCode, promoted.body).toBe(200);
+      expect((await call('GET', '/v1/admin/me', deputy)).json()).toEqual({ isAdmin: true, isOwner: true });
+      const after = (await call('GET', '/v1/admin/access', deputy)).json();
+      expect(after.owners).toContainEqual(expect.objectContaining({ email: deputy.email, userId: deputy.id, fromSettings: false }));
+      expect(after.admins.map((a: { email: string }) => a.email)).not.toContain(deputy.email);
+      expect((await call('POST', `/v1/admin/access/${deputy.id}/promote`, owner)).statusCode).toBe(409);
+      expect((await call('DELETE', `/v1/admin/access/${deputy.id}`, owner)).statusCode).toBe(409);
+      // the promoted owner can manage administrators, but not the other owners
+      expect((await call('POST', '/v1/admin/access', deputy, { email: junior.email })).statusCode).toBe(201);
+      expect((await call('POST', `/v1/admin/access/${owner.id}/promote`, deputy)).statusCode).toBe(409);
+      expect((await call('DELETE', `/v1/admin/access/${owner.id}`, deputy)).statusCode).toBe(409);
+      expect((await call('DELETE', `/v1/admin/access/${junior.id}`, deputy)).statusCode).toBe(204);
+      expect((await call('GET', '/v1/admin/me', owner)).json()).toEqual({ isAdmin: true, isOwner: true });
+    } finally {
+      await pool.query('DELETE FROM platform_admins WHERE user_id = ANY($1)', [[deputy.id, junior.id]]);
+    }
   });
 });

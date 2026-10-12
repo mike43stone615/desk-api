@@ -122,7 +122,7 @@ import { graphqlHandler } from './routes/graphql';
 import { changelogAtomHandler, changelogHandler, incidentsHandler, openIncidentHandler, updateIncidentHandler } from './routes/statusInfo';
 import { listIncidents } from './domain/status/incidents';
 import { invoicesHandler, listPlansHandler, subscriptionHandler } from './routes/billing';
-import { adminAccessAddHandler, adminAccessListHandler, adminAccessRemoveHandler, adminMeHandler } from './routes/adminAccess';
+import { adminAccessAddHandler, adminAccessListHandler, adminAccessPromoteHandler, adminAccessRemoveHandler, adminMeHandler } from './routes/adminAccess';
 import { gatewayMarketProxyHandler, gatewayRegistryProxyHandler } from './routes/gatewayProxy';
 import { registerLibraryUi } from './routes/libraryUi';
 import { adminReconcileReportHandler, adminReconcileRunHandler, adminListKeysHandler, adminResumeKeyHandler, adminSuspendKeyHandler, adminSetKeyLimitHandler, adminAssignPlanHandler, adminGenerateInvoicesHandler, adminInvoiceStatusHandler, adminSuspendUserHandler, adminUnsuspendUserHandler } from './routes/adminAccounts';
@@ -562,6 +562,7 @@ async function registerLegacyAndVersionedRoutes(instance: FastifyInstance) {
   instance.get('/admin/access', adminAccessListHandler);
   instance.post('/admin/access', small, adminAccessAddHandler);
   instance.delete('/admin/access/:userId', small, adminAccessRemoveHandler);
+  instance.post('/admin/access/:userId/promote', small, adminAccessPromoteHandler);
   instance.get('/admin/tables', adminTablesHandler);
   instance.get('/admin/tables/:table/rows', adminTableRowsHandler);
   instance.patch('/admin/tables/:table/rows/:id', adminTableUpdateRowHandler);

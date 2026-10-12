@@ -62,7 +62,9 @@
   --shadow: 0 1px 2px rgba(0,0,0,.35), 0 10px 28px -14px rgba(0,0,0,.55);
 }
 * { box-sizing: border-box; min-width: 0; }
-html, body { height: auto; overflow-x: hidden; }
+/* clip, not hidden: hidden turns the page into its own scroll box, which stops anything sticky (the top bar, the admin grid's
+   headers and sideways scrollbar) from sticking. clip still cuts off anything wider than the window. */
+html, body { height: auto; overflow-x: clip; }
 body {
   margin: 0; background: var(--bg); color: var(--ink);
   font-family: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
@@ -838,15 +840,45 @@ button.plan-pill.upgrade:hover { background: var(--accent-hover); border-color: 
   #print-invoice .plain-table th, #print-invoice .plain-table td { border-bottom: 1px solid #cccccc !important; }
 }
 
-/* Administration data view: the tables run the full width of the page (edge to edge), not in a rounded box inside it. */
-.page.page-wide { max-width: none; }
-.page-wide .admin-grid-wrap { margin-inline: calc(-1 * var(--sp-2xl)); border-radius: 0; border-left: 0; border-right: 0; }
-@media (max-width: 520px) { .page-wide .admin-grid-wrap { margin-inline: calc(-1 * var(--sp-lg)); } }
-/* One scrollbar: in the Administration data view the table is part of the page itself, so the page scrolls (up and down, and
-   sideways when the table is wider than the window) instead of the table scrolling inside its own box. The column headers
-   stay in view just under the top bar, and the row details panel stays fixed beside the window. */
-.page-wide .admin-grid-wrap { overflow: visible; }
-.page-wide .admin-grid-scroll { overflow: visible; max-height: none; }
-.page-wide table.admin-table th { top: 57px; }
-.page-wide .row-detail-panel { position: fixed; top: 57px; bottom: 0; }
-html:has(.page-wide), body:has(.page-wide) { overflow-x: auto; }
+/* Administration data view: the grid is the same width as every other page, and the page's own scrollbar is the only up-and-down
+   one. The toolbar (undo/redo/refresh, filters, columns) and the column headers stay in view just under the top bar (--topbar-h, measured by admin.js), and
+   the sideways scrollbar stays at the bottom of the window while the grid is in view. The rows scroll sideways too (trackpad,
+   touch, shift+wheel) with their own scrollbar hidden; admin.js keeps the header, rows and bottom scrollbar in step. */
+.admin-grid-wrap { overflow: visible; }
+.admin-grid-sticky { position: sticky; top: var(--topbar-h, 57px); z-index: 4; background: var(--input-bg); border-radius: var(--r-xl) var(--r-xl) 0 0; }
+.admin-grid-sticky .admin-grid-toolbar { border-radius: var(--r-xl) var(--r-xl) 0 0; }
+.admin-history-btns { display: flex; gap: var(--sp-2xs); }
+.admin-grid-head { overflow: hidden; }
+.admin-grid-head table.admin-table th { position: static; }
+.admin-grid-scroll { overflow-x: auto; overflow-y: hidden; max-height: none; scrollbar-width: none; }
+.admin-grid-scroll::-webkit-scrollbar { display: none; }
+table.admin-table { table-layout: fixed; min-width: 0; }
+table.admin-table td { max-width: none; overflow-wrap: anywhere; }
+table.admin-table th .col-filter { width: 100%; box-sizing: border-box; }
+.admin-hscroll { position: sticky; bottom: 0; z-index: 3; overflow-x: auto; overflow-y: hidden; background: var(--surface); border-top: 1px solid var(--line-subtle); scrollbar-color: var(--line-strong) var(--surface); }
+.admin-hscroll[hidden] { display: none; }
+.admin-hscroll > div { height: 1px; }
+.admin-footer { border-radius: 0 0 var(--r-xl) var(--r-xl); }
+.admin-grid-wrap .row-detail-panel { position: fixed; top: var(--topbar-h, 57px); bottom: 0; }
+/* The API buttons share a line with "Who has access", which sits at the far right. */
+.admin-source-row { display: flex; align-items: flex-start; gap: var(--sp-md); }
+.admin-source-row .source-tabs { flex: 1; min-width: 0; }
+.admin-access-btn { flex-shrink: 0; }
+.access-modal-head { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-md); margin-bottom: var(--sp-lg); }
+.access-modal-head h2 { margin: 0; }
+.access-group-title { font-size: .85rem; font-weight: 700; color: var(--ink-soft); margin: var(--sp-lg) 0 var(--sp-sm); }
+.access-modal-head + .access-group-title { margin-top: 0; }
+.access-list { display: flex; flex-direction: column; gap: var(--sp-xs); }
+.access-person { display: flex; align-items: center; gap: var(--sp-md); padding: var(--sp-sm) var(--sp-md); border: 1px solid var(--line); border-radius: var(--r-md); }
+.access-person-text { flex: 1; min-width: 0; }
+.access-person-name { font-weight: 700; font-size: .9rem; overflow-wrap: anywhere; }
+.access-person-email { color: var(--ink-faint); font-size: .8rem; overflow-wrap: anywhere; }
+.access-person-actions { display: flex; gap: var(--sp-xs); flex-shrink: 0; }
+.access-invite { display: flex; align-items: stretch; gap: var(--sp-sm); margin-top: var(--sp-xl); }
+.access-invite .field-float { flex: 1; margin: 0; }
+.modal .access-invite-hint { margin-top: var(--sp-sm); }
+@media (max-width: 520px) {
+  .admin-source-row { flex-direction: column-reverse; }
+  .access-person { flex-wrap: wrap; }
+  .access-person-text { flex-basis: 100%; }
+}

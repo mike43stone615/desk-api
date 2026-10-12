@@ -130,6 +130,7 @@ export function createFakeDb() {
 
     // Listed administrators (migration 0024): none unless a test adds one to platformAdmins.
     if (s.startsWith('SELECT 1 FROM platform_admins a JOIN users u')) return platformAdmins.has(p[0]) ? { rows: [{}], rowCount: 1 } : { rows: [], rowCount: 0 };
+    if (s.startsWith('SELECT a.role FROM platform_admins a JOIN users u')) return platformAdmins.has(p[0]) ? { rows: [{ role: 'admin' }], rowCount: 1 } : { rows: [], rowCount: 0 };
     if (s === 'SELECT 1 FROM account_suspensions WHERE user_id = $1') return accountSuspensions.has(p[0]) ? { rows: [{}], rowCount: 1 } : { rows: [], rowCount: 0 };
     if (s === 'SELECT 1 FROM users WHERE id = $1') return users.has(p[0]) ? { rows: [{}], rowCount: 1 } : { rows: [], rowCount: 0 };
     if (s.startsWith('INSERT INTO account_suspensions')) { accountSuspensions.set(p[0], { user_id: p[0], reason: p[1], suspended_by: p[2], suspended_at: nowIso() }); return { rows: [], rowCount: 1 }; }
