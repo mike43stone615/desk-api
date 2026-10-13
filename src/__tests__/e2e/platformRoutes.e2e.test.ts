@@ -190,6 +190,17 @@ describe.skipIf(!hasDb)('E2E: status, changelog, billing, GraphQL and webhook re
       expect((await call(method, missing, u)).statusCode, `${method} ${missing}`).toBe(404);
     }
     expect((await call('DELETE', `/v1/gateway/webhooks/${id}`, u)).statusCode).toBe(204);
+
+    // Every event at once is accepted, on create and on change (the cap used to be a fixed 20 while there are 29).
+    const events = (await call('GET', '/v1/gateway/webhook-events', u)).json().events as string[];
+    expect(events.length).toBeGreaterThan(20);
+    const all = await call('POST', '/v1/gateway/webhooks', u, { url: PUBLIC_URL, events });
+    expect(all.statusCode, all.body).toBe(201);
+    expect(all.json().endpoint.events).toHaveLength(events.length);
+    const allId = all.json().endpoint.id as string;
+    const put = await app.inject({ method: 'PUT', url: `/v1/gateway/webhooks/${allId}/events`, headers: { ...u.headers, 'cf-connecting-ip': '203.0.113.9' }, payload: { events } });
+    expect(put.statusCode, put.body).toBe(200);
+    expect((await call('DELETE', `/v1/gateway/webhooks/${allId}`, u)).statusCode).toBe(204);
   });
 
   it('a receiver that cannot be reached is recorded as a failed try, and old finished deliveries are cleared out', async () => {

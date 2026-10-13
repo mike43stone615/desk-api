@@ -529,7 +529,10 @@ export async function keyBucketInfo(plaintext: string, perMinuteOfAnAddress: num
       `SELECT k.rate_limit_per_minute, p.total_per_minute AS plan_limit, k.revoked_at IS NOT NULL AS revoked
          FROM gateway_api_keys k
          LEFT JOIN subscriptions s ON s.subject_type = 'user' AND s.subject_id = k.owner_user_id AND s.status <> 'canceled'
-         LEFT JOIN plans p ON p.id = s.plan_id
+         -- No (active) subscription means the Free plan. Without the fallback a Free key's bucket was the standard 60 a
+         -- minute for ALL APIs together, so the Free plan's own 100-a-minute total could never be reached and the 61st
+         -- call was refused by this bucket rather than the plan (found by a live test 2026-10-13).
+         LEFT JOIN plans p ON p.id = COALESCE(s.plan_id, 'free')
         WHERE k.key_hash = $1`,
       [hash],
     );

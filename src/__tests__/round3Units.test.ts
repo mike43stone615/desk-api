@@ -67,9 +67,14 @@ describe('the mail queue', () => {
     expect(result).toMatchObject({ sent: 1, gaveUp: 2, waiting: 1 });
     const sqls = queryMock.mock.calls.map((c) => String(c[0]));
     expect(sqls.filter((s) => s.startsWith('DELETE FROM email_outbox')).length).toBe(3); // sent, last, refused
-    expect(sqls.filter((s) => s.startsWith('UPDATE email_outbox')).length).toBe(1); // again
-    expect(sqls.find((s) => s.startsWith('UPDATE email_outbox'))).toContain("($3 || ' minutes')::interval");
-    expect(sqls.find((s) => s.includes('FROM email_outbox WHERE next_attempt_at'))).toContain('next_attempt_at <= now()');
+    const retries = sqls.filter((s) => s.startsWith('UPDATE email_outbox') && !s.includes('SKIP LOCKED')); // not the claim
+    expect(retries.length).toBe(1); // again
+    expect(retries[0]).toContain("($3 || ' minutes')::interval");
+    const claim = sqls.find((s) => s.includes('FROM email_outbox WHERE next_attempt_at'));
+    expect(claim).toContain('next_attempt_at <= now()');
+    // claimed, not just read: two runs (or servers) never take the same e-mail (2026-10-13)
+    expect(claim).toContain('FOR UPDATE SKIP LOCKED');
+    expect(claim).toMatch(/^UPDATE email_outbox SET next_attempt_at = now\(\) \+ interval '5 minutes'/);
   });
 
   it('the third failed try is still retried once more; the fourth is the last', async () => {
@@ -84,7 +89,7 @@ describe('the mail queue', () => {
       await processOutbox(mail);
       const sqls = queryMock.mock.calls.map((c) => String(c[0]));
       expect(sqls.some((s) => s.startsWith('DELETE FROM email_outbox')), `attempts ${attempts}`).toBe(deleted);
-      expect(sqls.some((s) => s.startsWith('UPDATE email_outbox')), `attempts ${attempts}`).toBe(!deleted);
+      expect(sqls.some((s) => s.startsWith('UPDATE email_outbox') && !s.includes('SKIP LOCKED')), `attempts ${attempts}`).toBe(!deleted);
     }
   });
 

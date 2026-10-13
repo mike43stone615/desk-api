@@ -68,8 +68,14 @@ export async function processOutbox(config: Pick<AppConfig, 'resendApiKey' | 'em
   let sent = 0;
   let gaveUp = 0;
   if (!config.resendApiKey) return { sent, gaveUp, waiting: 0 };
+  // Claimed, not just read: the rows taken are moved 5 minutes ahead in the same statement, so another run (or another
+  // server) never sends the same e-mail; a run that dies mid-send leaves them to be tried again in 5 minutes. Until
+  // 2026-10-13 this was a plain SELECT, and a scheduling slip ran many copies of this job at once (see jobs/cron.ts), each
+  // of which would have sent every waiting e-mail.
   const { rows } = await pool.query<{ id: string; to_email: string; subject: string; html: string; attempts: number }>(
-    `SELECT id, to_email, subject, html, attempts FROM email_outbox WHERE next_attempt_at <= now() ORDER BY next_attempt_at LIMIT 20`,
+    `UPDATE email_outbox SET next_attempt_at = now() + interval '5 minutes'
+      WHERE id IN (SELECT id FROM email_outbox WHERE next_attempt_at <= now() ORDER BY next_attempt_at LIMIT 20 FOR UPDATE SKIP LOCKED)
+      RETURNING id, to_email, subject, html, attempts`,
   );
   for (const row of rows) {
     const result = await deliverViaProvider(config, { to: row.to_email, subject: row.subject, html: row.html });

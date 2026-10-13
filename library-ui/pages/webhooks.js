@@ -31,6 +31,14 @@ function infoIcon(lines, openRight = false) {
 
 /** How long to wait before quietly reloading an open Deliveries pop-up while something is still waiting to retry. */
 const DELIVERIES_REFRESH_MS = 30_000;
+/** After a try is due: the server delivers every 10 seconds and a try can take up to 5, so the new result is in by then. */
+const TRY_SETTLE_MS = 15_000;
+/** The soonest useful reload: just after the next due try lands (so a full bar is replaced by the result at once), else 30 s. */
+export function nextDeliveriesRefreshMs(deliveries, now = Date.now()) {
+  const due = deliveries.filter((d) => d.status === 'pending' && d.nextAttemptAt).map((d) => Date.parse(d.nextAttemptAt)).filter((t) => !Number.isNaN(t));
+  if (due.length === 0) return DELIVERIES_REFRESH_MS;
+  return Math.max(3000, Math.min(DELIVERIES_REFRESH_MS, Math.min(...due) - now + TRY_SETTLE_MS));
+}
 
 registerRoute('/developer/webhooks', async (app) => {
   const myEpoch = currentEpoch();
@@ -150,7 +158,7 @@ registerRoute('/developer/webhooks', async (app) => {
         // Keep the table honest while something is still waiting for its next try (each try updates the row).
         if (s.deliveriesFor === id && s.deliveries.some((d) => d.status === 'pending')) {
           if (s.deliveriesTimer) clearTimeout(s.deliveriesTimer);
-          s.deliveriesTimer = setTimeout(() => { if (isCurrent() && s.deliveriesFor === id) fetchDeliveries(id, true); }, DELIVERIES_REFRESH_MS);
+          s.deliveriesTimer = setTimeout(() => { if (isCurrent() && s.deliveriesFor === id) fetchDeliveries(id, true); }, nextDeliveriesRefreshMs(s.deliveries));
         }
       }
     }
@@ -252,7 +260,9 @@ registerRoute('/developer/webhooks', async (app) => {
     const total = d.retryWaitSeconds * 1000;
     const remaining = Math.max(0, next - Date.now());
     const pct = Math.min(100, Math.max(0, ((total - remaining) / total) * 100));
-    return `<div class="delivery-progress"><div class="delivery-fill filling" style="--from:${pct.toFixed(2)}%;animation-duration:${Math.round(remaining / 1000)}s"></div></div><div class="delivery-next">Next try ${esc(timeOnly(d.nextAttemptAt))}</div>`;
+    // Once the wait is over the try happens within seconds; say so rather than show a "next try" time that has passed.
+    const label = remaining === 0 ? 'Trying now' : `Next try ${esc(timeOnly(d.nextAttemptAt))}`;
+    return `<div class="delivery-progress"><div class="delivery-fill filling" style="--from:${pct.toFixed(2)}%;animation-duration:${Math.round(remaining / 1000)}s"></div></div><div class="delivery-next">${label}</div>`;
   }
 
   function resultHtml(d) {

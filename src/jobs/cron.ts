@@ -51,10 +51,22 @@ export function startCleanupCron(log: FastifyBaseLogger): void {
   // queued while the service was down.
   sweepTask = cron.schedule('*/5 * * * *', () => {
     void runBackendKeySweep(log);
+  });
+  // (Until 2026-10-13 this callback was not closed here but after the mail-key check below, so every job from here to
+  // there was registered INSIDE the 5-minute sweep: nothing below ran until the first 5-minute mark after a start, and
+  // each sweep tick added another copy of every one of them. Found by a live webhook test.)
   // E-mails the provider could not take are tried again each minute; a changed mail key is proven once when it appears.
-  // Outbound webhooks: deliver what is due every minute, and forget old delivery records once a day.
-  cron.schedule('* * * * *', () => {
-    processDueDeliveries().catch((err) => log.error({ err }, 'webhook delivery run failed'));
+  // Outbound webhooks: deliver what is due every 10 seconds, and forget old delivery records once a day. (Once a minute
+  // made a retry due a moment after the minute wait for the next one: a "5 minute" wait was up to 6, and the Deliveries
+  // pop-up's progress bar sat full past its "next try" time. Found by a live test 2026-10-13.) A run still going (slow
+  // receivers) is not doubled; overlapping runs would be safe anyway (rows are locked), just wasteful.
+  let deliveriesRunning = false;
+  cron.schedule('*/10 * * * * *', () => {
+    if (deliveriesRunning) return;
+    deliveriesRunning = true;
+    processDueDeliveries()
+      .catch((err) => log.error({ err }, 'webhook delivery run failed'))
+      .finally(() => { deliveriesRunning = false; });
   });
   cron.schedule('31 3 * * *', () => {
     deleteOldDeliveries().catch((err) => log.error({ err }, 'webhook clean-up failed'));
@@ -72,7 +84,6 @@ export function startCleanupCron(log: FastifyBaseLogger): void {
   });
   void checkMailKeyIfChanged(config);
   cron.schedule('43 * * * *', () => void checkMailKeyIfChanged(config));
-  });
   void runBackendKeySweep(log);
   // The reconcile job compares this service's database with the backends and REVOKES keys it does not know. A
   // development copy (dev database, but possibly the same real backends) knows none of the real keys, so it must not run.

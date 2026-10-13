@@ -7,9 +7,13 @@ import { requireAuth, requireConfirmedEmail } from '../middleware/auth';
 import { recordSecurityEvent } from '../modules/audit/security-events';
 import { WEBHOOK_EVENTS, WebhookError, webhooks } from '../domain/webhooks/webhooks';
 
+/** What an endpoint can listen for: every event except the test one (that is sent on request, to one endpoint). */
+const SUBSCRIBABLE_EVENTS = WEBHOOK_EVENTS.filter((e) => e !== 'webhook.test');
+
 const CreateSchema = z.object({
   url: z.string().trim().min(1, 'A URL is required.').max(500, 'That address is too long.'),
-  events: z.array(z.enum(WEBHOOK_EVENTS.filter((e) => e !== 'webhook.test') as [string, ...string[]])).min(1, 'Choose at least one event.').max(20),
+  // Up to every event there is (was a fixed 20 while there are 29, so "all events" was refused; found 2026-10-13).
+  events: z.array(z.enum(SUBSCRIBABLE_EVENTS as [string, ...string[]])).min(1, 'Choose at least one event.').max(SUBSCRIBABLE_EVENTS.length),
 });
 
 const EventsSchema = z.object({ events: CreateSchema.shape.events });

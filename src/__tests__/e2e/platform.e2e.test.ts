@@ -72,10 +72,10 @@ describe.skipIf(!hasDb)('E2E: plans, invoices and webhooks', () => {
     await pool.query(`UPDATE gateway_api_keys SET key_hash = $2 WHERE id = $1`, [keyId, hashGatewayKey('deskgw_plan_limit_probe')]);
     forgetKeyRateFactors();
     expect((await keyBucketInfo('deskgw_plan_limit_probe', 120))).toMatchObject({ known: true, factor: 1000 / 120 });
-    // back to Free
+    // back to Free: the key is sized by the Free plan's 100 calls a minute in all (not the standard 60 for every API together)
     await call('POST', `/v1/admin/billing/user/${u.id}/plan`, adminUser as { headers: Record<string, string> }, { planId: 'free' });
     forgetKeyRateFactors();
-    expect((await keyBucketInfo('deskgw_plan_limit_probe', 120)).factor).toBeNull();
+    expect((await keyBucketInfo('deskgw_plan_limit_probe', 120)).factor).toBe(100 / 120);
   });
 
   it('meters analyses exactly and produces one invoice per month with the plan fee and the overage', async () => {
