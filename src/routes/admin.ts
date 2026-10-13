@@ -315,12 +315,14 @@ const TABLES = {
     secret: [],
     deletable: false, // revoke a key from the API Keys page or the key tools, so its backend keys are ended too
   },
+  // The audit record: read-only for everyone, owners included (the owner's every-column rule does not reach these).
   mutation_audit_log: {
     primaryKey: 'id',
     columns: ['id', 'user_email', 'action', 'entity_type', 'entity_id', 'before', 'after', 'ip_address', 'created_at'],
     editable: [],
     secret: [],
     deletable: false,
+    readOnly: true,
   },
   security_events: {
     primaryKey: 'id',
@@ -328,6 +330,7 @@ const TABLES = {
     editable: [],
     secret: [],
     deletable: false,
+    readOnly: true,
   },
 } as const;
 
@@ -342,6 +345,8 @@ type AdminTableConfig = {
   secret: readonly string[];
   options?: Record<string, readonly string[]>;
   deletable?: boolean;
+  /** Never edited by anyone, owners included (the audit tables). */
+  readOnly?: boolean;
 };
 
 type UpstreamTableSummary = {
@@ -511,6 +516,7 @@ async function callerIsOwner(request: FastifyRequest): Promise<boolean> {
 
 /** Administrators edit the listed columns; an owner edits every column except a single id column (other rows point at it). */
 function editableFor(table: AdminTableConfig, owner: boolean): readonly string[] {
+  if (table.readOnly) return [];
   if (!owner) return table.editable;
   return table.keyColumns ? table.columns : table.columns.filter((c) => c !== table.primaryKey);
 }

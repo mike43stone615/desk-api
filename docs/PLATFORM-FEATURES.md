@@ -42,7 +42,8 @@ written to `mutation_audit_log` like any other.
 ## Administrator tables: who edits what
 
 Listed administrators edit only the columns each table lists in `TABLES` (`src/routes/admin.ts`). Owners edit every column of
-every table except a table's single id column (other rows point at it), on all three APIs: desk-api asks the Registry and
+every table except a table's single id column (other rows point at it) and the two audit tables (`mutation_audit_log`,
+`security_events`), which are read-only for everyone, on all three APIs: desk-api asks the Registry and
 Market services on an owner's behalf with the header `x-desk-admin-owner`. A table with no single id column (`usage_meter`,
 `api_usage`, four Market cache tables) is answered with `primaryKey: "_rowKey"` and a `_rowKey` on each row, built from its key
 columns, so an edit reaches exactly one row (and a changed key column gives the row a new `_rowKey`). Values are fitted to the

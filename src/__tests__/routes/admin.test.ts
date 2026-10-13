@@ -132,7 +132,17 @@ describe('owners edit every column; listed administrators keep the per-table lis
     expect(meter.editableColumns).toEqual(expect.arrayContaining(['quantity', 'month']));
     const calls = tables.find((t) => t.name === 'desk.api_usage')!;
     expect(calls.editableColumns).toContain('calls');
-    for (const t of tables.filter((x) => x.name.startsWith('desk.'))) expect(t.editableColumns.length, t.name).toBeGreaterThan(0);
+    const audit = ['desk.mutation_audit_log', 'desk.security_events'];
+    for (const t of tables.filter((x) => x.name.startsWith('desk.') && !audit.includes(x.name))) expect(t.editableColumns.length, t.name).toBeGreaterThan(0);
+    // the audit record stays read-only, even for an owner
+    for (const name of audit) expect(tables.find((t) => t.name === name)!.editableColumns, name).toEqual([]);
+  });
+
+  it('an owner cannot edit the audit tables', async () => {
+    for (const table of ['mutation_audit_log', 'security_events']) {
+      const res = await app.inject({ method: 'PATCH', url: `/admin/tables/desk.${table}/rows/any-row`, headers: adminHeaders, payload: { values: { ip_address: '0.0.0.0', created_at: '2020-01-01T00:00:00Z' } } });
+      expect(res.statusCode, table).toBe(400);
+    }
   });
 
   it('a listed administrator gets the same short lists as before, and cannot edit beyond them', async () => {
