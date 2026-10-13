@@ -526,7 +526,7 @@ export async function keyBucketInfo(plaintext: string, perMinuteOfAnAddress: num
   let info: KeyBucketInfo;
   try {
     const { rows } = await pool.query<{ rate_limit_per_minute: number | null; plan_limit: number | null; revoked: boolean }>(
-      `SELECT k.rate_limit_per_minute, p.per_minute_limit AS plan_limit, k.revoked_at IS NOT NULL AS revoked
+      `SELECT k.rate_limit_per_minute, p.total_per_minute AS plan_limit, k.revoked_at IS NOT NULL AS revoked
          FROM gateway_api_keys k
          LEFT JOIN subscriptions s ON s.subject_type = 'user' AND s.subject_id = k.owner_user_id AND s.status <> 'canceled'
          LEFT JOIN plans p ON p.id = s.plan_id

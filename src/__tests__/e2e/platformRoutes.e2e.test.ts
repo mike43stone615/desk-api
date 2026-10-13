@@ -258,18 +258,18 @@ describe.skipIf(!hasDb)('E2E: status, changelog, billing, GraphQL and webhook re
 
     // editing a plan: a good value is saved (and audited), bad ones are refused in plain words
     const patch = (values: Record<string, unknown>) => app.inject({ method: 'PATCH', url: '/v1/admin/tables/desk.plans/rows/developer', headers: { ...helper.headers, 'cf-connecting-ip': '203.0.113.9' }, payload: { values } });
-    const before = (await pool.query(`SELECT monthly_price_cents, max_keys, per_minute_limit FROM plans WHERE id = 'developer'`)).rows[0];
+    const before = (await pool.query(`SELECT monthly_price_cents, max_keys, overage_cents_per_call FROM plans WHERE id = 'developer'`)).rows[0];
     try {
-      const ok = await patch({ monthly_price_cents: '3100', per_minute_limit: '' });
+      const ok = await patch({ monthly_price_cents: '3100', overage_cents_per_call: '' });
       expect(ok.statusCode, ok.body).toBe(200);
-      expect(ok.json().row).toMatchObject({ monthly_price_cents: 3100, per_minute_limit: null });
+      expect(ok.json().row).toMatchObject({ monthly_price_cents: 3100, overage_cents_per_call: null });
       expect((await patch({ monthly_price_cents: 'lots' })).statusCode).toBe(400);
       expect((await patch({ monthly_price_cents: -5 })).statusCode).toBe(400);
       expect((await patch({ active: 'maybe' })).statusCode).toBe(400);
       expect((await patch({ max_keys: '0' })).statusCode).toBe(400); // the database's own rule (must be above zero)
       expect((await patch({ id: 'other' })).statusCode).toBe(400); // not an editable column
     } finally {
-      await pool.query(`UPDATE plans SET monthly_price_cents = $1, max_keys = $2, per_minute_limit = $3 WHERE id = 'developer'`, [before.monthly_price_cents, before.max_keys, before.per_minute_limit]);
+      await pool.query(`UPDATE plans SET monthly_price_cents = $1, max_keys = $2, overage_cents_per_call = $3 WHERE id = 'developer'`, [before.monthly_price_cents, before.max_keys, before.overage_cents_per_call]);
     }
     expect((await pool.query(`SELECT COUNT(*)::int n FROM mutation_audit_log WHERE user_email = $1 AND action = 'admin_table.update' AND entity_id = 'developer'`, [helper.email])).rows[0].n).toBeGreaterThanOrEqual(1);
     // some tables cannot be deleted from here

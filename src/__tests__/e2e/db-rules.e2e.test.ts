@@ -55,10 +55,33 @@ describe.skipIf(!hasDb)('E2E: rules enforced by the database itself', () => {
     const { rows } = await pool.query<{ table_name: string }>(`SELECT table_name FROM information_schema.tables WHERE table_schema = 'public'`);
     const names = new Set(rows.map((r) => r.table_name));
     for (const t of [
-      'users', 'sessions', 'password_reset_tokens', 'email_confirmation_tokens', 'business_setup_drafts', 'businesses',
+      'users', 'sessions', 'email_tokens', 'business_setup_drafts', 'businesses',
       'business_memberships', 'mutation_audit_log', 'idempotency_keys', 'gateway_api_keys', 'gateway_api_key_grants',
       'gateway_backend_key_revocations', 'schema_migrations',
     ]) expect(names.has(t), t).toBe(true);
+  });
+
+  it('e-mailed links (migration 0033): a confirmation link never works as a reset link, and the reverse; deleting the user removes both', async () => {
+    const { PgDatabaseAdapter } = await import('../../infrastructure/database/pg/adapter');
+    const db = new PgDatabaseAdapter(pool);
+    const u = await mkUser();
+    const reset = `reset-${rid()}`;
+    const confirm = `confirm-${rid()}`;
+    const later = new Date(Date.now() + 3_600_000).toISOString();
+    await db.createResetToken(rid(), u, reset, later);
+    await db.createEmailConfirmationToken(rid(), u, confirm, later);
+    expect((await db.findResetToken(reset))?.userId).toBe(u);
+    expect((await db.findEmailConfirmationToken(confirm))?.userId).toBe(u);
+    expect(await db.findResetToken(confirm)).toBeNull();
+    expect(await db.findEmailConfirmationToken(reset)).toBeNull();
+    // marking one kind used leaves the other kind alone
+    await db.markUnusedResetTokensUsedForUser(u, ts());
+    expect((await db.findEmailConfirmationToken(confirm))?.usedAt ?? null).toBeNull();
+    await db.markEmailConfirmationTokenUsed(reset, ts()); // wrong kind: changes nothing
+    expect((await db.findResetToken(reset))?.usedAt).toBeTruthy();
+    expect((await pool.query(`SELECT purpose FROM email_tokens WHERE user_id = $1 ORDER BY purpose`, [u])).rows.map((r) => r.purpose)).toEqual(['email_confirmation', 'password_reset']);
+    await pool.query('DELETE FROM users WHERE id = $1', [u]);
+    expect((await pool.query(`SELECT count(*)::int n FROM email_tokens WHERE user_id = $1`, [u])).rows[0].n).toBe(0);
   });
 
   describe('deleting a user (any path, including raw SQL)', () => {

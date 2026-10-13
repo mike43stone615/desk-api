@@ -145,14 +145,14 @@ export class PgDatabaseAdapter implements DatabaseRepository {
     expiresAt: string,
   ): Promise<void> {
     await this.pool.query(
-      `INSERT INTO password_reset_tokens (id, user_id, token, expires_at) VALUES ($1, $2, $3, $4)`,
+      `INSERT INTO email_tokens (id, purpose, user_id, token, expires_at) VALUES ($1, 'password_reset', $2, $3, $4)`,
       [id, userId, hashToken(token), expiresAt],
     );
   }
 
   async findResetToken(token: string): Promise<PasswordResetToken | null> {
     const { rows } = await this.pool.query<ResetTokenRow>(
-      `SELECT id, user_id, token, expires_at, used_at, created_at FROM password_reset_tokens WHERE token = $1`,
+      `SELECT id, user_id, token, expires_at, used_at, created_at FROM email_tokens WHERE purpose = 'password_reset' AND token = $1`,
       [hashToken(token)],
     );
     return rows[0] ? mapResetToken(rows[0]) : null;
@@ -161,14 +161,14 @@ export class PgDatabaseAdapter implements DatabaseRepository {
   async findLatestResetTokenForUser(userId: string): Promise<PasswordResetToken | null> {
     const { rows } = await this.pool.query<ResetTokenRow>(
       `SELECT id, user_id, token, expires_at, used_at, created_at
-       FROM password_reset_tokens WHERE user_id = $1 ORDER BY created_at DESC LIMIT 1`,
+       FROM email_tokens WHERE purpose = 'password_reset' AND user_id = $1 ORDER BY created_at DESC LIMIT 1`,
       [userId],
     );
     return rows[0] ? mapResetToken(rows[0]) : null;
   }
 
   async markResetTokenUsed(token: string, usedAt: string): Promise<void> {
-    await this.pool.query(`UPDATE password_reset_tokens SET used_at = $1 WHERE token = $2`, [
+    await this.pool.query(`UPDATE email_tokens SET used_at = $1 WHERE purpose = 'password_reset' AND token = $2`, [
       usedAt,
       hashToken(token),
     ]);
@@ -176,13 +176,13 @@ export class PgDatabaseAdapter implements DatabaseRepository {
 
   async markUnusedResetTokensUsedForUser(userId: string, usedAt: string): Promise<void> {
     await this.pool.query(
-      `UPDATE password_reset_tokens SET used_at = $2 WHERE user_id = $1 AND used_at IS NULL`,
+      `UPDATE email_tokens SET used_at = $2 WHERE purpose = 'password_reset' AND user_id = $1 AND used_at IS NULL`,
       [userId, usedAt],
     );
   }
 
   async deleteExpiredPasswordResetTokens(): Promise<void> {
-    await this.pool.query(`DELETE FROM password_reset_tokens WHERE expires_at < $1`, [nowUtc()]);
+    await this.pool.query(`DELETE FROM email_tokens WHERE purpose = 'password_reset' AND expires_at < $1`, [nowUtc()]);
   }
 
   async createEmailConfirmationToken(
@@ -192,18 +192,18 @@ export class PgDatabaseAdapter implements DatabaseRepository {
     expiresAt: string,
   ): Promise<void> {
     await this.pool.query(
-      `DELETE FROM email_confirmation_tokens WHERE user_id = $1 AND used_at IS NULL`,
+      `DELETE FROM email_tokens WHERE purpose = 'email_confirmation' AND user_id = $1 AND used_at IS NULL`,
       [userId],
     );
     await this.pool.query(
-      `INSERT INTO email_confirmation_tokens (id, user_id, token, expires_at) VALUES ($1, $2, $3, $4)`,
+      `INSERT INTO email_tokens (id, purpose, user_id, token, expires_at) VALUES ($1, 'email_confirmation', $2, $3, $4)`,
       [id, userId, hashToken(token), expiresAt],
     );
   }
 
   async findEmailConfirmationToken(token: string): Promise<EmailConfirmationToken | null> {
     const { rows } = await this.pool.query<EmailConfirmationTokenRow>(
-      `SELECT id, user_id, token, expires_at, used_at, created_at FROM email_confirmation_tokens WHERE token = $1`,
+      `SELECT id, user_id, token, expires_at, used_at, created_at FROM email_tokens WHERE purpose = 'email_confirmation' AND token = $1`,
       [hashToken(token)],
     );
     return rows[0] ? mapEmailConfirmationToken(rows[0]) : null;
@@ -214,21 +214,21 @@ export class PgDatabaseAdapter implements DatabaseRepository {
   ): Promise<EmailConfirmationToken | null> {
     const { rows } = await this.pool.query<EmailConfirmationTokenRow>(
       `SELECT id, user_id, token, expires_at, used_at, created_at
-       FROM email_confirmation_tokens WHERE user_id = $1 ORDER BY created_at DESC LIMIT 1`,
+       FROM email_tokens WHERE purpose = 'email_confirmation' AND user_id = $1 ORDER BY created_at DESC LIMIT 1`,
       [userId],
     );
     return rows[0] ? mapEmailConfirmationToken(rows[0]) : null;
   }
 
   async markEmailConfirmationTokenUsed(token: string, usedAt: string): Promise<void> {
-    await this.pool.query(`UPDATE email_confirmation_tokens SET used_at = $1 WHERE token = $2`, [
+    await this.pool.query(`UPDATE email_tokens SET used_at = $1 WHERE purpose = 'email_confirmation' AND token = $2`, [
       usedAt,
       hashToken(token),
     ]);
   }
 
   async deleteExpiredEmailConfirmationTokens(): Promise<void> {
-    await this.pool.query(`DELETE FROM email_confirmation_tokens WHERE expires_at < $1`, [
+    await this.pool.query(`DELETE FROM email_tokens WHERE purpose = 'email_confirmation' AND expires_at < $1`, [
       nowUtc(),
     ]);
   }

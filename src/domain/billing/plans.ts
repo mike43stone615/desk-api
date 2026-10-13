@@ -20,6 +20,7 @@ export interface Plan {
   monthlyPriceCents: number;
   includedAnalyses: number;
   overageCentsPerAnalysis: number | null;
+  /** Kept for API compatibility: the same number as totalPerMinute (plans.per_minute_limit was dropped in 0034). */
   perMinuteLimit: number | null;
   maxKeys: number;
   maxWebhooks: number;
@@ -35,17 +36,17 @@ export interface Plan {
 
 interface PlanRow {
   id: string; name: string; description: string; monthly_price_cents: number; included_analyses: number;
-  overage_cents_per_analysis: number | null; per_minute_limit: number | null; max_keys: number; max_webhooks: number;
+  overage_cents_per_analysis: number | null; max_keys: number; max_webhooks: number;
   max_apps: number; service_per_minute: number; service_per_month: number; total_per_minute: number; total_per_month: number;
   overage_cents_per_call: number | null;
 }
-const PLAN_FIELDS = ['id', 'name', 'description', 'monthly_price_cents', 'included_analyses', 'overage_cents_per_analysis', 'per_minute_limit',
+const PLAN_FIELDS = ['id', 'name', 'description', 'monthly_price_cents', 'included_analyses', 'overage_cents_per_analysis',
   'max_keys', 'max_webhooks', 'max_apps', 'service_per_minute', 'service_per_month', 'total_per_minute', 'total_per_month', 'overage_cents_per_call'];
 const PLAN_COLUMNS = PLAN_FIELDS.join(', ');
 const PLAN_COLUMNS_P = PLAN_FIELDS.map((f) => `p.${f}`).join(', ');
 const toPlan = (r: PlanRow): Plan => ({
   id: r.id, name: r.name, description: r.description, monthlyPriceCents: r.monthly_price_cents, includedAnalyses: r.included_analyses,
-  overageCentsPerAnalysis: r.overage_cents_per_analysis ?? null, perMinuteLimit: r.per_minute_limit ?? null, maxKeys: r.max_keys, maxWebhooks: r.max_webhooks,
+  overageCentsPerAnalysis: r.overage_cents_per_analysis ?? null, perMinuteLimit: r.total_per_minute, maxKeys: r.max_keys, maxWebhooks: r.max_webhooks,
   maxApps: r.max_apps, servicePerMinute: r.service_per_minute, servicePerMonth: r.service_per_month, totalPerMinute: r.total_per_minute,
   totalPerMonth: r.total_per_month, overageCentsPerCall: r.overage_cents_per_call ?? null,
 });

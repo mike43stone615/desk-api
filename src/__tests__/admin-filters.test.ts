@@ -54,7 +54,7 @@ describe('validateEditableValue for the platform tables', () => {
   it('whole-number columns take numbers and numeric text, and only the optional ones may be emptied', () => {
     expect(validateEditableValue('plans' as never, 'monthly_price_cents', '3100')).toBe(3100);
     expect(validateEditableValue('plans' as never, 'max_keys', 25)).toBe(25);
-    expect(validateEditableValue('plans' as never, 'per_minute_limit', '')).toBeNull();
+    expect(validateEditableValue('plans' as never, 'overage_cents_per_call', '')).toBeNull();
     expect(validateEditableValue('teams' as never, 'rate_limit_per_minute', null)).toBeNull();
     bad('plans' as never, 'monthly_price_cents', '');
     bad('plans' as never, 'monthly_price_cents', 'lots');

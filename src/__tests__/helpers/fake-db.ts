@@ -338,24 +338,24 @@ export function createFakeDb() {
       return { rows: [], rowCount: count };
     }
 
-    // ── password reset tokens ────────────────────────────────────────────
-    if (s.startsWith('INSERT INTO password_reset_tokens')) {
+    // ── email_tokens (migration 0033): password reset links ────────────────────────────────────────────
+    if (s.startsWith("INSERT INTO email_tokens (id, purpose, user_id, token, expires_at) VALUES ($1, 'password_reset'")) {
       const [id, user_id, token, expires_at] = p;
       const row: FakeRow = { id, user_id, token, expires_at, used_at: null, created_at: nowIso() };
       passwordResetTokens.set(token, row);
       return { rows: [row], rowCount: 1 };
     }
-    if (s.includes('FROM password_reset_tokens WHERE token = $1')) {
+    if (s.includes("FROM email_tokens WHERE purpose = 'password_reset' AND token = $1")) {
       const row = passwordResetTokens.get(p[0]);
       return { rows: row ? [row] : [], rowCount: row ? 1 : 0 };
     }
-    if (s.includes('FROM password_reset_tokens WHERE user_id = $1')) {
+    if (s.includes("FROM email_tokens WHERE purpose = 'password_reset' AND user_id = $1")) {
       const matches = [...passwordResetTokens.values()]
         .filter((r) => r.user_id === p[0])
         .sort((a, b) => (b.created_at as string).localeCompare(a.created_at as string));
       return { rows: matches[0] ? [matches[0]] : [], rowCount: matches[0] ? 1 : 0 };
     }
-    if (s.startsWith('UPDATE password_reset_tokens SET used_at = $2 WHERE user_id')) {
+    if (s.startsWith("UPDATE email_tokens SET used_at = $2 WHERE purpose = 'password_reset' AND user_id")) {
       const [userId, usedAt] = p;
       let count = 0;
       for (const row of passwordResetTokens.values()) {
@@ -366,7 +366,7 @@ export function createFakeDb() {
       }
       return { rows: [], rowCount: count };
     }
-    if (s.startsWith('UPDATE password_reset_tokens SET used_at')) {
+    if (s.startsWith("UPDATE email_tokens SET used_at = $1 WHERE purpose = 'password_reset' AND token")) {
       const [usedAt, token] = p;
       const row = passwordResetTokens.get(token);
       if (row) row.used_at = usedAt;
@@ -374,26 +374,26 @@ export function createFakeDb() {
     }
 
     // ── email confirmation tokens ────────────────────────────────────────
-    if (s.startsWith('DELETE FROM email_confirmation_tokens WHERE user_id')) {
+    if (s.startsWith("DELETE FROM email_tokens WHERE purpose = 'email_confirmation' AND user_id")) {
       return { rows: [], rowCount: 0 };
     }
-    if (s.startsWith('INSERT INTO email_confirmation_tokens')) {
+    if (s.startsWith("INSERT INTO email_tokens (id, purpose, user_id, token, expires_at) VALUES ($1, 'email_confirmation'")) {
       const [id, user_id, token, expires_at] = p;
       const row: FakeRow = { id, user_id, token, expires_at, used_at: null, created_at: nowIso() };
       emailConfirmationTokens.set(token, row);
       return { rows: [row], rowCount: 1 };
     }
-    if (s.includes('FROM email_confirmation_tokens WHERE token = $1')) {
+    if (s.includes("FROM email_tokens WHERE purpose = 'email_confirmation' AND token = $1")) {
       const row = emailConfirmationTokens.get(p[0]);
       return { rows: row ? [row] : [], rowCount: row ? 1 : 0 };
     }
-    if (s.includes('FROM email_confirmation_tokens WHERE user_id = $1')) {
+    if (s.includes("FROM email_tokens WHERE purpose = 'email_confirmation' AND user_id = $1")) {
       const matches = [...emailConfirmationTokens.values()]
         .filter((r) => r.user_id === p[0])
         .sort((a, b) => (b.created_at as string).localeCompare(a.created_at as string));
       return { rows: matches[0] ? [matches[0]] : [], rowCount: matches[0] ? 1 : 0 };
     }
-    if (s.startsWith('UPDATE email_confirmation_tokens SET used_at')) {
+    if (s.startsWith("UPDATE email_tokens SET used_at = $1 WHERE purpose = 'email_confirmation' AND token")) {
       const [usedAt, token] = p;
       const row = emailConfirmationTokens.get(token);
       if (row) row.used_at = usedAt;
@@ -1064,7 +1064,7 @@ export function createFakeDb() {
       return { rows: [], rowCount: toDelete.length };
     }
     if (s.startsWith('SELECT s.id AS sid, s.status') || s.includes("FROM plans WHERE id = 'free'")) return { rows: [], rowCount: 0 };
-    if (s.startsWith('SELECT k.rate_limit_per_minute, p.per_minute_limit AS plan_limit')) {
+    if (s.startsWith('SELECT k.rate_limit_per_minute, p.total_per_minute AS plan_limit')) {
       const k = [...gatewayKeys.values()].find((x) => x.key_hash === p[0]);
       return { rows: k ? [{ rate_limit_per_minute: k.rate_limit_per_minute ?? null, plan_limit: null, revoked: Boolean(k.revoked_at) }] : [], rowCount: k ? 1 : 0 };
     }
