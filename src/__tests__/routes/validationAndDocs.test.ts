@@ -71,6 +71,18 @@ describe('identifiers in the address', () => {
     const good = await app.inject({ method: 'GET', url: '/setup/drafts/abc123' });
     expect([401, 404]).toContain(good.statusCode); // 401 here: no session; the point is that it is not 400
   });
+
+  it('an administrator table row may be named by a longer row key (same characters), and nothing else may', async () => {
+    const rowKey = 'Wy' + 'A'.repeat(120);
+    const adminRow = await app.inject({ method: 'PATCH', url: `/v1/admin/tables/desk.usage_meter/rows/${rowKey}`, payload: { values: {} } });
+    expect(adminRow.statusCode).toBe(401); // reached the route (no session), not refused as a malformed id
+    const tooLong = await app.inject({ method: 'PATCH', url: `/v1/admin/tables/desk.usage_meter/rows/${'A'.repeat(1025)}`, payload: { values: {} } });
+    expect(JSON.parse(tooLong.body).code).toBe('invalid_id');
+    const badChars = await app.inject({ method: 'PATCH', url: '/v1/admin/tables/desk.usage_meter/rows/a%20b', payload: { values: {} } });
+    expect(JSON.parse(badChars.body).code).toBe('invalid_id');
+    const elsewhere = await app.inject({ method: 'GET', url: `/setup/drafts/${'a'.repeat(65)}` });
+    expect(JSON.parse(elsewhere.body).code).toBe('invalid_id');
+  });
 });
 
 describe('ETag on reference data', () => {

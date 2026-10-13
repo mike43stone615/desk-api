@@ -6,14 +6,19 @@ import { HttpError } from './http-error';
 
 const ID_PARAMS = ['id', 'membershipId'];
 const ID_FORMAT = /^[A-Za-z0-9_-]{1,64}$/;
+// A row in the administrator tables is named by its id, or (for a table with no single id column, see
+// domain/adminTableEdits.ts) by a row key built from its key columns: the same characters, but it can be longer.
+const ADMIN_ROW_ID_FORMAT = /^[A-Za-z0-9_-]{1,1024}$/;
+const ADMIN_ROW_ROUTE = '/admin/tables/:table/rows/:id';
 
 export function registerPathParamCheck(app: FastifyInstance): void {
   app.addHook('preValidation', async (request) => {
     const params = request.params as Record<string, unknown> | undefined;
     if (!params) return;
+    const adminRow = (request.routeOptions.url ?? '').endsWith(ADMIN_ROW_ROUTE);
     for (const name of ID_PARAMS) {
       const value = params[name];
-      if (typeof value === 'string' && !ID_FORMAT.test(value)) throw new HttpError(400, `The ${name === 'id' ? 'identifier' : 'membership identifier'} in the address is not valid.`, 'invalid_id');
+      if (typeof value === 'string' && !(adminRow && name === 'id' ? ADMIN_ROW_ID_FORMAT : ID_FORMAT).test(value)) throw new HttpError(400, `The ${name === 'id' ? 'identifier' : 'membership identifier'} in the address is not valid.`, 'invalid_id');
     }
   });
 }

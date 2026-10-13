@@ -186,6 +186,10 @@ export async function buildApp(options: { logStream?: { write: (line: string) =>
     // with an empty value.
     ignoreTrailingSlash: true,
     ignoreDuplicateSlashes: true,
+    // One part of the address may be up to 1,100 characters (the default is 100): an administrator table row with no single
+    // id column is named by a row key built from its key columns (domain/adminTableEdits.ts). middleware/path-params.ts
+    // still holds every other identifier to 64 plain characters.
+    maxParamLength: 1100,
     bodyLimit: BODY_LIMIT_DEFAULT,
     // Slow or stalled clients (see docs/TIMEOUTS.md): the whole header block must arrive in 10 s and the whole request
     // in 30 s, so a client that trickles bytes cannot hold a connection (Cloudflare shields the origin, but the origin
