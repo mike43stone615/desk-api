@@ -141,8 +141,9 @@ async function forward(service: BrokeredService, request: FastifyRequest, reply:
 
   // A sandbox key never leaves this server: it gets a fixed sample answer, and nothing is counted, capped or billed.
   if (verified.sandbox) {
-    const publicPath = REGISTRY_NAME_CHECKS.find(([, up]) => up === upstreamPath)?.[0] ?? upstreamPath;
-    const sample = sandboxAnswer(service, request.method, publicPath, request.body);
+    // The sample is keyed by the public name, whichever spelling was called (an old path names its public one).
+    const publicPath = route.deprecatedFor ?? rest;
+    const sample = sandboxAnswer(service, request.method, publicPath, request.body, (request.query ?? {}) as Record<string, unknown>);
     if (!sample) throw new HttpError(404, 'The sandbox has no sample answer for this endpoint. Use a live key to call it.', 'sandbox_no_sample');
     reply.header(SANDBOX_HEADER, 'true');
     return reply.status(sample.status).send(sample.body);

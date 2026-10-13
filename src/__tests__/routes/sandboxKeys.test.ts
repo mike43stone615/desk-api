@@ -87,13 +87,94 @@ describe('sandbox keys', () => {
 
   it('are not held to the daily analysis cap', async () => {
     const { key } = await sandboxKey('e@example.com');
-    for (let i = 0; i < 12; i++) expect((await call(key.key, 'POST', '/gateway/market/research/analyze', { businessIdea: `idea ${i}` })).statusCode).toBe(200);
+    for (let i = 0; i < 12; i++) expect((await call(key.key, 'POST', '/gateway/market/research/analyze', { businessIdea: `idea ${i}`, formationState: 'OH' })).statusCode).toBe(200);
   });
 
-  it('say so plainly when there is no sample for an endpoint', async () => {
+  it('have a sample for every endpoint a live key can call, under the public and the old spelling', async () => {
     const { key } = await sandboxKey('f@example.com');
-    const res = await call(key.key, 'POST', '/gateway/registry/name-trend', { businessName: 'X' });
-    expect(res.statusCode).toBe(404);
-    expect(res.json().code).toBe('sandbox_no_sample');
+    const calls: Array<['GET' | 'POST', string, unknown?]> = [
+      ['POST', '/gateway/registry/name-availability', { businessName: 'X Co', stateOfFormation: 'FL' }],
+      ['POST', '/gateway/registry/functions/v1/check-business-name-availability', { businessName: 'X Co', stateOfFormation: 'FL' }],
+      ['POST', '/gateway/registry/dba-availability', { businessName: 'X Co', stateOfFormation: 'FL' }],
+      ['POST', '/gateway/registry/trademark-availability', { businessName: 'X Co' }],
+      ['POST', '/gateway/registry/multi-state-availability', { businessName: 'X Co', states: ['FL', 'VA'] }],
+      ['POST', '/gateway/registry/batch-availability', { names: ['X Co', 'Y Co'], stateOfFormation: 'FL' }],
+      ['POST', '/gateway/registry/name-trend', { businessName: 'X Co', stateOfFormation: 'FL' }],
+      ['POST', '/gateway/registry/functions/v1/check-name-trend', { businessName: 'X Co' }],
+      ['GET', '/gateway/registry/sync-status'],
+      ['GET', '/gateway/registry/functions/v1/registry-sync-status'],
+      ['GET', '/gateway/registry/business-structures'],
+      ['GET', '/gateway/registry/business-structures/limited_liability_company'],
+      ['POST', '/gateway/registry/business-structures/recommend', { ownerCount: 2 }],
+      ['POST', '/gateway/market/research/analyze', { businessIdea: 'Coffee shop', formationState: 'FL' }],
+      ['GET', '/gateway/market/scoring-methodology'],
+    ];
+    for (const [method, url, payload] of calls) {
+      const res = await call(key.key, method, url, payload);
+      expect(res.statusCode, url).toBe(200);
+      expect(res.headers['x-desk-sandbox'], url).toBe('true');
+      expect(res.json().sandbox, url).toBe(true);
+    }
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  // Field lists copied from the live APIs (2026-10-13). A sandbox answer may add `sandbox`; nothing else may differ.
+  it('answer with the same fields as the live APIs', async () => {
+    const { key } = await sandboxKey('g@example.com');
+    const fields = (o: object) => Object.keys(o).filter((k) => k !== 'sandbox').sort();
+    const ENVELOPE = ['responseId', 'servedAt'];
+    const NAME = ['status', 'available', 'message', 'matches', 'source', 'sourceUrl', 'verificationMode', 'lastCheckedAt', 'sourceUpdatedAt', 'disclaimer'];
+    const name = (await call(key.key, 'POST', '/gateway/registry/name-availability', { businessName: 'Free Name', stateOfFormation: 'FL' })).json();
+    expect(fields(name)).toEqual([...ENVELOPE, ...NAME].sort());
+    expect(name.responseId).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-8[0-9a-f]{3}-[0-9a-f]{12}$/);
+    const taken = (await call(key.key, 'POST', '/gateway/registry/name-availability', { businessName: 'Acme', stateOfFormation: 'FL' })).json();
+    expect(fields(taken)).toEqual([...ENVELOPE, ...NAME, 'matchDetails', 'suggestions'].sort());
+    expect(Object.keys(taken.matchDetails[0]).sort()).toEqual(['active', 'entityType', 'matchReason', 'matchType', 'name', 'score', 'status']);
+    const tm = (await call(key.key, 'POST', '/gateway/registry/trademark-availability', { businessName: 'Acme' })).json();
+    expect(fields(tm)).toEqual([...ENVELOPE, 'status', 'matches', 'source', 'sourceUrl', 'lastCheckedAt'].sort());
+    expect(Object.keys(tm.matches[0]).sort()).toEqual(['goodsServices', 'intlClass', 'live', 'markLiteralElements', 'ownerName', 'registrationNumber', 'serialNumber']);
+    const multi = (await call(key.key, 'POST', '/gateway/registry/multi-state-availability', { businessName: 'Free Name', states: ['FL', 'VA'] })).json();
+    expect(fields(multi)).toEqual([...ENVELOPE, 'businessName', 'results'].sort());
+    expect(Object.keys(multi.results)).toEqual(['FL', 'VA']);
+    expect(fields(multi.results.FL)).toEqual(NAME.slice().sort());
+    const batch = (await call(key.key, 'POST', '/gateway/registry/batch-availability', { names: ['A Co', 'Taken Co'], stateOfFormation: 'FL' })).json();
+    expect(fields(batch)).toEqual([...ENVELOPE, 'stateOfFormation', 'results'].sort());
+    expect(batch.results.map((r: { name: string }) => r.name)).toEqual(['A Co', 'Taken Co']);
+    expect(batch.results[1].result.available).toBe(false);
+    const trend = (await call(key.key, 'POST', '/gateway/registry/name-trend', { businessName: 'Sunrise', stateOfFormation: 'FL' })).json();
+    expect(fields(trend)).toEqual([...ENVELOPE, 'businessName', 'recentFilingsCount', 'period', 'trend', 'topNames', 'commonCoWords', 'stateOfFormation'].sort());
+    const sync = (await call(key.key, 'GET', '/gateway/registry/sync-status')).json();
+    expect(fields(sync)).toEqual([...ENVELOPE, 'generatedAt', 'memoryCache', 'states', 'summary'].sort());
+    const STRUCTURE = ['slug', 'name', 'category', 'family', 'aliases', 'summary', 'ownership', 'liability', 'taxation', 'management', 'formation', 'bestFor', 'cautions', 'taxElectionOptions', 'relatedStructures'];
+    const list = (await call(key.key, 'GET', '/gateway/registry/business-structures')).json();
+    expect(fields(list)).toEqual([...ENVELOPE, 'structures', 'count'].sort());
+    expect(Object.keys(list.structures[0]).sort()).toEqual(STRUCTURE.slice().sort());
+    const paged = (await call(key.key, 'GET', '/gateway/registry/business-structures?limit=1')).json();
+    expect(paged).toMatchObject({ count: 1, total: 3, nextCursor: '1' });
+    const rec = (await call(key.key, 'POST', '/gateway/registry/business-structures/recommend', { ownerCount: 2 })).json();
+    expect(fields(rec)).toEqual([...ENVELOPE, 'recommendations', 'count'].sort());
+    expect(Object.keys(rec.recommendations[0]).sort()).toEqual(['reasons', 'score', 'structure']);
+    expect((await call(key.key, 'GET', '/gateway/registry/business-structures/no_such_thing')).statusCode).toBe(404);
+    const analysis = (await call(key.key, 'POST', '/gateway/market/research/analyze', { businessIdea: 'Coffee shop', formationState: 'FL' })).json();
+    expect(fields(analysis)).toEqual([...ENVELOPE, 'summary', 'confidence', 'categories', 'overallScore', 'riskFlags', 'recommendedNextActions', 'sourcesUsed', 'dataVintages', 'fallbackSources', 'paidSourcesExcluded', 'disclaimer'].sort());
+    expect(['medium', 'limited']).toContain(analysis.confidence);
+    expect(Object.keys(analysis.categories[0]).sort()).toEqual(['evidence', 'key', 'label', 'primarySource', 'rationale', 'reasons', 'score', 'subSignals']);
+    const method = (await call(key.key, 'GET', '/gateway/market/scoring-methodology')).json();
+    expect(fields(method)).toEqual([...ENVELOPE, 'overview', 'overallScore', 'redistribution', 'categories'].sort());
+    expect(Object.keys(method.categories[0]).sort()).toEqual(['description', 'key', 'label', 'subSignals']);
+  });
+
+  it('refuse a call missing a required input, as a live key would', async () => {
+    const { key } = await sandboxKey('h@example.com');
+    for (const [url, payload] of [
+      ['/gateway/registry/name-availability', { businessName: 'X' }],
+      ['/gateway/registry/multi-state-availability', { businessName: 'X', states: [] }],
+      ['/gateway/registry/batch-availability', { names: Array.from({ length: 11 }, (_, i) => `N${i}`), stateOfFormation: 'FL' }],
+      ['/gateway/market/research/analyze', { businessIdea: 'Coffee shop' }],
+    ] as const) {
+      const res = await call(key.key, 'POST', url, payload);
+      expect(res.statusCode, url).toBe(400);
+      expect(res.headers['x-desk-sandbox'], url).toBe('true');
+    }
   });
 });

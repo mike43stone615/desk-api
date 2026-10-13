@@ -8,8 +8,10 @@ existed changed shape. The API description at `/v1/gateway/openapi.json` lists e
 Create a key with `"sandbox": true` (Registry and Market APIs only). It looks like `deskgw_test_...` and answers every call with
 **fixed sample data**: no backend is called, no backend key is made, nothing is counted, capped or billed, and the answer says
 `sandbox: true` and carries an `x-desk-sandbox` header. The sample answers have the real shapes, so code written against the
-sandbox works unchanged with a live key. Magic inputs: a business name containing "taken", "acme" or "conflict" is a conflict; an
-idea containing "risky" scores low. An endpoint with no sample answers `404 sandbox_no_sample`.
+sandbox works unchanged with a live key: every endpoint a live key can call has a sample with the live field list (pinned by
+`sandboxKeys.test.ts`), and a missing required input is a 400 just as it is live. Magic inputs: a business name containing "taken",
+"acme" or "conflict" is a conflict; an idea containing "risky" scores low. The sample business structures are
+`sole_proprietorship`, `limited_liability_company` and `s_corporation`; any other slug is a 404, as an unknown one is live.
 
 ## Plans, metering and invoices (no payment provider yet)
 
