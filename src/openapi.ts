@@ -93,7 +93,7 @@ const gatewayProxyPaths = {
   [`${REGISTRY}/business-structures`]: proxyPath('get', 'List legal business structures', 'Optional query: category, family, country, q.'),
   [`${REGISTRY}/business-structures/{slug}`]: proxyPath('get', 'One business structure by slug'),
   [`${REGISTRY}/business-structures/recommend`]: proxyPath('post', 'Recommend business structures for a situation', 'Body: the owner count, liability and tax preferences.'),
-  [`${MARKET}/research/analyze`]: proxyPath('post', 'Score a business idea', 'Body: { "businessIdea", "formationState", ...optional refinements }. Text fields are limited to 2000 characters (200 for most). Can take up to a minute.'),
+  [`${MARKET}/research/analyze`]: proxyPath('post', 'Score a business idea', 'Body: { "businessIdea", "formationState", ...optional refinements }. Text fields are limited to 2000 characters (200 for most). Can take up to a minute. Send an Idempotency-Key header (any unique value) so that a retry after a dropped connection returns the same answer instead of running, and counting, a second analysis.'),
   [`${MARKET}/scoring-methodology`]: proxyPath('get', 'How each score is calculated'),
 };
 

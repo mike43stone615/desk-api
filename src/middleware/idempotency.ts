@@ -30,10 +30,32 @@ const IDEMPOTENCY_TTL_MS = 24 * 60 * 60 * 1000; // 24h
 // that key in "in flight" for the full 24h TTL — treat a claim this old with
 // no recorded response as abandoned, and let a fresh request reclaim it.
 const IN_FLIGHT_STALE_MS = 30 * 1000; // 30s
+// A market analysis can take about a minute (the upstream allows longer), so its claim is not "abandoned" until well after.
+const ANALYSIS_IN_FLIGHT_STALE_MS = 3 * 60 * 1000;
+
+/**
+ * A market analysis through the API Library. Added 2026-10-13: a live test's connection was reset between the caller and
+ * Cloudflare while the analysis ran; the server finished it (200) and counted it, but the answer never arrived. With an
+ * Idempotency-Key the caller's retry gets that same answer back, and is not counted again.
+ */
+function isAnalysis(method: string, url: string): boolean {
+  return method === 'POST' && normalizePath(url) === '/gateway/market/research/analyze';
+}
+
+/**
+ * The key as stored. A call made with an API key keeps its Idempotency-Keys apart from every other key's (a hash of the
+ * key, never the key itself), so one caller can never be handed another's stored answer by choosing the same value.
+ */
+function storedKey(request: FastifyRequest, rawKey: string): string {
+  const apiKey = request.headers['x-api-key'];
+  if (typeof apiKey !== 'string' || !apiKey) return rawKey;
+  return `k:${createHash('sha256').update(apiKey).digest('hex').slice(0, 32)}:${rawKey}`;
+}
 
 /** Endpoints that opt into Idempotency-Key support. */
 function isIdempotencyEligible(method: string, url: string): boolean {
   const path = normalizePath(url);
+  if (isAnalysis(method, url)) return true;
   if (method === 'POST' && path === '/setup/drafts') return true;
   if (method === 'POST' && /^\/setup\/drafts\/[^/]+\/complete$/.test(path)) return true;
   if (isSecretBearing(method, url)) return true;
@@ -83,8 +105,9 @@ export function registerIdempotency(app: FastifyInstance) {
   app.addHook('preHandler', async (request: FastifyRequest, reply: FastifyReply) => {
     if (!isIdempotencyEligible(request.method, request.url)) return;
 
-    const rawKey = request.headers['idempotency-key'];
-    if (typeof rawKey !== 'string' || rawKey.length === 0) return;
+    const headerKey = request.headers['idempotency-key'];
+    if (typeof headerKey !== 'string' || headerKey.length === 0) return;
+    const rawKey = storedKey(request, headerKey);
 
     const requestHash = hashRequestBody(request.body);
     const expiresAt = new Date(Date.now() + IDEMPOTENCY_TTL_MS).toISOString();
@@ -130,7 +153,7 @@ export function registerIdempotency(app: FastifyInstance) {
       const isExpired = new Date(existing.expires_at).getTime() < Date.now();
       const isAbandonedInFlight =
         existing.response_status === null &&
-        Date.now() - new Date(existing.created_at).getTime() > IN_FLIGHT_STALE_MS;
+        Date.now() - new Date(existing.created_at).getTime() > (isAnalysis(request.method, request.url) ? ANALYSIS_IN_FLIGHT_STALE_MS : IN_FLIGHT_STALE_MS);
 
       if (isExpired || isAbandonedInFlight) {
         await pool.query(`DELETE FROM idempotency_keys WHERE key = $1`, [rawKey]).catch(() => {});
@@ -186,7 +209,8 @@ export function registerIdempotency(app: FastifyInstance) {
     // A failed key creation (bad input, not signed in, a backend hiccup) created
     // nothing, so it must not use up the Idempotency-Key: the caller's retry
     // has to be able to run for real.
-    if (isSecretBearing(request.method, request.url) && reply.statusCode >= 400) {
+    // Likewise a refused or failed analysis was not counted, so its retry must run for real rather than replay the refusal.
+    if ((isSecretBearing(request.method, request.url) || isAnalysis(request.method, request.url)) && reply.statusCode >= 400) {
       await pool.query(`DELETE FROM idempotency_keys WHERE key = $1`, [key]).catch(() => {});
       return payload;
     }

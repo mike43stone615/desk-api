@@ -719,6 +719,48 @@ describe('creating a key twice by accident (Idempotency-Key)', () => {
   });
 });
 
+describe('a market analysis retried after a dropped connection (Idempotency-Key)', () => {
+  const analyze = (key: string, idem: string, payload: Record<string, unknown> = { businessIdea: 'coffee cart', formationState: 'FL' }) =>
+    app.inject({ method: 'POST', url: '/v1/gateway/market/research/analyze', headers: { 'x-api-key': key, 'idempotency-key': idem }, payload });
+  const upstreamAnalyses = () => fetchCalls.filter((c) => c.url === 'http://market.test/research/analyze').length;
+
+  it('the retry gets the same answer back without a second analysis', async () => {
+    const user = seedUser('idem-analysis@example.com');
+    const key = JSON.parse((await createKey(user, ['market_validation_api'])).body).apiKey.key;
+    const first = await analyze(key, 'run-1');
+    expect(first.statusCode).toBe(200);
+    const retry = await analyze(key, 'run-1');
+    expect(retry.statusCode).toBe(200);
+    expect(retry.headers['idempotency-replayed']).toBe('true');
+    expect(JSON.parse(retry.body)).toEqual(JSON.parse(first.body));
+    expect(upstreamAnalyses()).toBe(1);
+  });
+
+  it("another key using the same value gets its own analysis, never the first key's answer", async () => {
+    const a = JSON.parse((await createKey(seedUser('idem-a@example.com'), ['market_validation_api'])).body).apiKey.key;
+    const b = JSON.parse((await createKey(seedUser('idem-b@example.com'), ['market_validation_api'])).body).apiKey.key;
+    await analyze(a, 'same-value');
+    const other = await analyze(b, 'same-value');
+    expect(other.headers['idempotency-replayed']).toBeUndefined();
+    expect(upstreamAnalyses()).toBe(2);
+    // and the key itself is never stored
+    expect(JSON.stringify([...fakeDb.idempotencyKeys.keys()])).not.toContain(a);
+  });
+
+  it('a failed analysis is not kept: the retry runs for real', async () => {
+    const key = JSON.parse((await createKey(seedUser('idem-fail-analysis@example.com'), ['market_validation_api'])).body).apiKey.key;
+    upstreamProxyStatus = 503;
+    try {
+      expect((await analyze(key, 'run-2')).statusCode).toBe(503);
+    } finally {
+      upstreamProxyStatus = 200;
+    }
+    const retry = await analyze(key, 'run-2');
+    expect(retry.statusCode).toBe(200);
+    expect(retry.headers['idempotency-replayed']).toBeUndefined();
+  });
+});
+
 describe('the public API description', () => {
   it('needs no key or sign-in, and lists only what developers can use', async () => {
     for (const url of ['/gateway/openapi.json', '/v1/gateway/openapi.json']) {

@@ -249,11 +249,22 @@ function Restore-PreviousFiles {
 
 if ($hot) {
   Write-Output "Hot reload: the running service keeps answering while the new version starts beside it"
-  try {
-    $r = Invoke-WebRequest -Uri "http://127.0.0.1:$ControlPort/reload" -Method Post -UseBasicParsing -TimeoutSec 120
-    Write-Output "Reload: $($r.Content)"
-  } catch {
-    Write-Output "The new version did not become ready: $($_.Exception.Message)"
+  # Two tries. On 2026-10-13 a new worker sat silent for the whole 45-second window (it never even printed its start-up
+  # warning: most likely the just-copied files were still being scanned); the very next try started in under a second.
+  $reloaded = $false
+  foreach ($try in 1..2) {
+    try {
+      $r = Invoke-WebRequest -Uri "http://127.0.0.1:$ControlPort/reload" -Method Post -UseBasicParsing -TimeoutSec 120
+      Write-Output "Reload: $($r.Content)"
+      $reloaded = $true
+      break
+    } catch {
+      Write-Output "Reload try $try did not become ready: $($_.Exception.Message)"
+      if ($try -lt 2) { Start-Sleep -Seconds 5 }
+    }
+  }
+  if (-not $reloaded) {
+    Write-Output "The new version did not become ready."
     # The old worker was never touched and is still serving. Put the old files back so a later restart starts the
     # same version that is running now.
     Restore-PreviousFiles

@@ -201,7 +201,7 @@ this closes the documentation gap, not a code gap.
 | Session/token cleanup | Yes — `node-cron` in-process job, daily at 02:00 UTC (`src/jobs/cron.ts`), replacing the earlier Cloudflare Cron Trigger |
 | CORS narrowed to configured origins | Yes — `CORS_ORIGINS` env var, defaults to `https://app.deskbusiness.co` |
 | Correlation IDs on all requests | Yes — `x-request-id` header, generated per-request in `src/app.ts` |
-| Idempotency-Key support on draft-creation endpoints | Yes — `POST /setup/drafts` and `POST /setup/drafts/:id/complete` (`src/middleware/idempotency.ts`) |
+| Idempotency-Key support on draft-creation endpoints | Yes — `POST /setup/drafts`, `POST /setup/drafts/:id/complete`, `POST /gateway/api-keys` (no replay of the secret) and `POST /gateway/market/research/analyze` (kept apart per API key; a failed analysis is not kept) (`src/middleware/idempotency.ts`) |
 | Mutation audit logging (admin table browser) | Yes — `mutation_audit_log` table, written on every admin PATCH/DELETE |
 | Postgres schema + migrations | Yes — `migrations/*.sql`, tracked in `schema_migrations`, applied via `npm run migrate` |
 | Node.js server entry point | Yes — `src/server.ts`, Fastify's own `.listen()`, no longer a `@hono/node-server` scaffold |

@@ -72,6 +72,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/gateway/api-keys/{id}/restrictions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Restrict one of your keys to an IP allowlist and/or one business
+         * @description Body: { "allowedIps"?: string[] | null, "businessId"?: string | null }. Omit a field to leave it unchanged; null clears it. A business restriction needs the Desk API with the "businesses" scope.
+         */
+        patch: operations["patchGatewayApiKeysIdRestrictions"];
+        trace?: never;
+    };
     "/gateway/api-keys/{id}/suspend": {
         parameters: {
             query?: never;
@@ -100,6 +120,297 @@ export interface paths {
         put?: never;
         /** Switch a suspended key back on */
         post: operations["postGatewayApiKeysIdResume"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/gateway/api-keys/{id}/rotate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Issue a new secret for one of your own keys; the old one stops working at once, everything else about the key is unchanged */
+        post: operations["postGatewayApiKeysIdRotate"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/gateway/shared-keys": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Keys other people have shared with you, pending and accepted */
+        get: operations["getGatewaySharedKeys"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/gateway/api-keys/{id}/shares": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Everyone one of your keys has been shared with, pending and accepted (owner only) */
+        get: operations["getGatewayApiKeysIdShares"];
+        put?: never;
+        /** Share one of your own keys with someone by e-mail (they must already have a confirmed Desk account) */
+        post: operations["postGatewayApiKeysIdShares"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/gateway/api-keys/{id}/shares/{shareId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Remove someone a key was shared with, pending or accepted (owner only) */
+        delete: operations["deleteGatewayApiKeysIdSharesShareId"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/gateway/shares/{shareId}/accept": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Accept a key someone shared with you */
+        post: operations["postGatewaySharesShareIdAccept"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/gateway/shares/{shareId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Decline a pending share, or remove yourself from one you had accepted */
+        delete: operations["deleteGatewaySharesShareId"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/gateway/webhook-events": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The events a webhook can listen for */
+        get: operations["getGatewayWebhookEvents"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/gateway/webhooks": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Your webhook endpoints */
+        get: operations["getGatewayWebhooks"];
+        put?: never;
+        /** Add a webhook endpoint. https only, public addresses only. The signing secret is shown once */
+        post: operations["postGatewayWebhooks"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/gateway/webhooks/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Remove a webhook endpoint */
+        delete: operations["deleteGatewayWebhooksId"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/gateway/webhooks/{id}/rotate-secret": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Make a new signing secret (shown once) */
+        post: operations["postGatewayWebhooksIdRotateSecret"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/gateway/webhooks/{id}/suspend": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Switch an endpoint off: nothing is sent to it until it is switched back on */
+        post: operations["postGatewayWebhooksIdSuspend"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/gateway/webhooks/{id}/resume": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Switch an endpoint back on (also after it was switched off for repeated failures) */
+        post: operations["postGatewayWebhooksIdResume"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/gateway/webhooks/{id}/events": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Replace the events an endpoint listens for */
+        put: operations["putGatewayWebhooksIdEvents"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/gateway/webhooks/{id}/test": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Send a test event to one endpoint */
+        post: operations["postGatewayWebhooksIdTest"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/gateway/webhooks/{id}/deliveries": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The last 30 days of deliveries to an endpoint, with their results and retry progress */
+        get: operations["getGatewayWebhooksIdDeliveries"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/gateway/webhooks/{id}/deliveries/{deliveryId}/retry": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Puts one failed delivery back in line right now, with a fresh set of tries */
+        post: operations["postGatewayWebhooksIdDeliveriesDeliveryIdRetry"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/graphql": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Read-only GraphQL over your own data: one request instead of several. Limits: 8,000 characters, depth 6, 150 fields, 10 aliases; no mutations */
+        post: operations["postGraphql"];
         delete?: never;
         options?: never;
         head?: never;
@@ -457,7 +768,7 @@ export interface paths {
         put?: never;
         /**
          * Score a business idea
-         * @description Body: { "businessIdea", "formationState", ...optional refinements }. Text fields are limited to 2000 characters (200 for most). Can take up to a minute.
+         * @description Body: { "businessIdea", "formationState", ...optional refinements }. Text fields are limited to 2000 characters (200 for most). Can take up to a minute. Send an Idempotency-Key header (any unique value) so that a retry after a dropped connection returns the same answer instead of running, and counting, a second analysis.
          */
         post: operations["postGatewayMarketResearchAnalyze"];
         delete?: never;
@@ -528,6 +839,7 @@ export interface components {
          *     server_error: Something went wrong on our side.
          *     validation_error: A field is missing or invalid; detail says which.
          *     invalid_json: The body is not valid JSON.
+         *     invalid_characters: A text value contains the NUL character (U+0000), which cannot be stored.
          *     invalid_request: The request was rejected by the service behind this API.
          *     invalid_signature: The request is not signed correctly by the sender.
          *     invalid_id: An identifier in the address is not in the expected format.
@@ -556,19 +868,57 @@ export interface components {
          *     api_key_required: An x-api-key header is required.
          *     invalid_api_key: The API key is unknown or has been revoked.
          *     api_key_service_not_enabled: The key is not enabled for this API.
-         *     market_analysis_daily_cap: The key has used its market analyses for today.
+         *     market_analysis_daily_cap: The key has used its uncached market validation analyses for today.
+         *     plan_minute_limit: The calls a minute allowed by the plan (for one API, or all together) are used up; try again in a minute.
+         *     plan_monthly_limit: The calls this month allowed by the Free plan (for one API, or all together) are used up; upgrade to keep calling.
+         *     plan_analysis_limit: The uncached market validation analyses this month included in the Free plan are used up; upgrade to run more.
+         *     invalid_page: The page of results asked for is out of range (limit 1 to 50, offset 0 or more).
          *     api_key_scope_missing: The key does not include the part of the Desk API this endpoint belongs to.
          *     api_key_endpoint_not_allowed: A key cannot call this endpoint.
          *     api_key_limit_reached: The account already has the maximum number of active keys.
          *     api_key_service_unavailable: One of the chosen APIs is not available for new keys right now.
          *     api_key_not_found: That key does not exist or is not yours.
          *     api_key_already_revoked: That key was already revoked.
+         *     api_key_sandbox_desk_api: A sandbox key cannot carry the Desk API; it only gives sample answers.
+         *     sandbox_no_sample: The sandbox has no sample answer for that endpoint; use a live key.
+         *     webhook_invalid_url: The webhook address or event list was not acceptable (https only, public addresses only).
+         *     webhook_limit_reached: The plan allows no more webhook endpoints.
+         *     webhook_delivery_not_found: No such webhook endpoint, or that delivery has not failed.
+         *     webhook_not_found: That webhook endpoint does not exist, or is not yours.
+         *     webhook_forbidden: Only a team admin or owner can manage its webhooks.
+         *     webhook_unavailable: Webhook storage is not configured.
+         *     unknown_plan: No such plan.
+         *     invalid_token: The OAuth access token is invalid, expired or revoked.
+         *     oauth_endpoint_not_allowed: An app access token cannot call this endpoint.
+         *     oauth_insufficient_scope: The app was not given the scope this endpoint needs.
+         *     oauth_invalid_request: The authorization request was not valid.
+         *     oauth_limit_reached: The account already has the maximum number of registered apps.
+         *     oauth_not_found: No such app, or it has no access to the account.
+         *     region_read_only: This copy of the service is a read-only standby; the change was not made. Try again shortly.
+         *     team_not_found: That team, member or invitation does not exist, or you are not part of it.
+         *     team_forbidden: Your role in the team does not allow that.
+         *     team_limit_reached: A team limit was reached (teams per person, members, or keys).
+         *     team_last_owner: A team must keep at least one owner.
          *     admin_required: Administrator access is required.
-         *     admin_recent_signin_required: Administrator routes need a sign-in from the last 24 hours; sign in again.
+         *     mfa_token_invalid: That pending sign-in has expired or does not exist; sign in again.
+         *     invalid_2fa_code: That two-factor code is wrong.
+         *     mfa_not_configured: Two-factor authentication is not available right now.
+         *     mfa_already_enabled: Two-factor authentication is already on.
+         *     mfa_not_set_up: Start setup before confirming a code.
+         *     mfa_not_enabled: Two-factor authentication is not on.
+         *     mfa_invalid_code: That code is wrong.
+         *     mfa_invalid_or_expired: That is wrong or has expired.
+         *     admin_owner_required: Only an owner can change who has administrator access.
+         *     admin_access_no_such_account: There is no Desk account with that address.
+         *     admin_access_unconfirmed: That account has not confirmed its e-mail address yet.
+         *     admin_access_already_admin: That person is already on the administrator list.
+         *     admin_access_is_owner: That person is an owner: owners always have access and cannot be removed or promoted here.
+         *     admin_access_not_listed: That person is not on the administrator list.
          *     admin_key_ip_not_allowed: The administrator key is not accepted from this address.
          *     account_suspended: This account has been suspended.
          *     api_key_expired: The API key is past its expiry date.
          *     api_key_idle: The API key was not used for six months and was switched off.
+         *     api_key_ip_not_allowed: This API key is not accepted from this address.
          *     api_key_suspended: This API key is suspended (switched off without being revoked).
          *     admin_not_available_for_keys: Administrator routes cannot be used with an API key.
          *     business_not_found: That business does not exist or you are not a member.
@@ -600,9 +950,12 @@ export interface components {
          *     table_not_found: That table does not exist.
          *     row_not_found: That row does not exist.
          *     delete_disabled: Deleting is not allowed on that table.
+         *     invalid_value: A value in an administrator edit is not allowed for that column.
+         *     row_in_use: Other records still refer to that row, or the value points at a row that does not exist.
+         *     duplicate_value: Another row already has that value.
          * @enum {string}
          */
-        ErrorCode: "bad_request" | "unauthorized" | "forbidden" | "not_found" | "method_not_allowed" | "conflict" | "precondition_failed" | "draft_version_conflict" | "payload_too_large" | "unsupported_media_type" | "unprocessable" | "rate_limited" | "internal_error" | "bad_gateway" | "service_unavailable" | "gateway_timeout" | "client_error" | "server_error" | "validation_error" | "invalid_json" | "invalid_request" | "invalid_signature" | "invalid_id" | "client_closed" | "idempotency_conflict" | "authentication_required" | "session_invalid" | "session_not_found" | "invalid_credentials" | "current_password_incorrect" | "signin_locked" | "email_not_confirmed" | "email_in_use" | "password_reset_required" | "password_too_short" | "password_too_long" | "password_missing_uppercase" | "password_missing_lowercase" | "password_missing_number" | "password_missing_symbol" | "first_name_required" | "last_name_required" | "invalid_or_expired_token" | "origin_not_allowed" | "cross_site_blocked" | "api_key_required" | "invalid_api_key" | "api_key_service_not_enabled" | "market_analysis_daily_cap" | "api_key_scope_missing" | "api_key_endpoint_not_allowed" | "api_key_limit_reached" | "api_key_service_unavailable" | "api_key_not_found" | "api_key_already_revoked" | "admin_required" | "admin_recent_signin_required" | "admin_key_ip_not_allowed" | "account_suspended" | "api_key_expired" | "api_key_idle" | "api_key_suspended" | "admin_not_available_for_keys" | "business_not_found" | "draft_not_found" | "draft_limit_reached" | "draft_too_large" | "draft_unreadable" | "business_name_required" | "business_name_too_long" | "industry_too_long" | "insufficient_role" | "owner_role_required" | "last_owner" | "already_member" | "invite_not_found" | "invite_limit_reached" | "membership_not_found" | "unknown_endpoint" | "api_unavailable" | "upstream_unavailable" | "upstream_unreachable" | "upstream_rejected" | "upstream_response_too_large" | "upstream_not_configured" | "upstream_provisioning_failed" | "service_busy" | "too_many_in_flight" | "structure_not_found" | "table_not_found" | "row_not_found" | "delete_disabled";
+        ErrorCode: "bad_request" | "unauthorized" | "forbidden" | "not_found" | "method_not_allowed" | "conflict" | "precondition_failed" | "draft_version_conflict" | "payload_too_large" | "unsupported_media_type" | "unprocessable" | "rate_limited" | "internal_error" | "bad_gateway" | "service_unavailable" | "gateway_timeout" | "client_error" | "server_error" | "validation_error" | "invalid_json" | "invalid_characters" | "invalid_request" | "invalid_signature" | "invalid_id" | "client_closed" | "idempotency_conflict" | "authentication_required" | "session_invalid" | "session_not_found" | "invalid_credentials" | "current_password_incorrect" | "signin_locked" | "email_not_confirmed" | "email_in_use" | "password_reset_required" | "password_too_short" | "password_too_long" | "password_missing_uppercase" | "password_missing_lowercase" | "password_missing_number" | "password_missing_symbol" | "first_name_required" | "last_name_required" | "invalid_or_expired_token" | "origin_not_allowed" | "cross_site_blocked" | "api_key_required" | "invalid_api_key" | "api_key_service_not_enabled" | "market_analysis_daily_cap" | "plan_minute_limit" | "plan_monthly_limit" | "plan_analysis_limit" | "invalid_page" | "api_key_scope_missing" | "api_key_endpoint_not_allowed" | "api_key_limit_reached" | "api_key_service_unavailable" | "api_key_not_found" | "api_key_already_revoked" | "api_key_sandbox_desk_api" | "sandbox_no_sample" | "webhook_invalid_url" | "webhook_limit_reached" | "webhook_delivery_not_found" | "webhook_not_found" | "webhook_forbidden" | "webhook_unavailable" | "unknown_plan" | "invalid_token" | "oauth_endpoint_not_allowed" | "oauth_insufficient_scope" | "oauth_invalid_request" | "oauth_limit_reached" | "oauth_not_found" | "region_read_only" | "team_not_found" | "team_forbidden" | "team_limit_reached" | "team_last_owner" | "admin_required" | "mfa_token_invalid" | "invalid_2fa_code" | "mfa_not_configured" | "mfa_already_enabled" | "mfa_not_set_up" | "mfa_not_enabled" | "mfa_invalid_code" | "mfa_invalid_or_expired" | "admin_owner_required" | "admin_access_no_such_account" | "admin_access_unconfirmed" | "admin_access_already_admin" | "admin_access_is_owner" | "admin_access_not_listed" | "admin_key_ip_not_allowed" | "account_suspended" | "api_key_expired" | "api_key_idle" | "api_key_ip_not_allowed" | "api_key_suspended" | "admin_not_available_for_keys" | "business_not_found" | "draft_not_found" | "draft_limit_reached" | "draft_too_large" | "draft_unreadable" | "business_name_required" | "business_name_too_long" | "industry_too_long" | "insufficient_role" | "owner_role_required" | "last_owner" | "already_member" | "invite_not_found" | "invite_limit_reached" | "membership_not_found" | "unknown_endpoint" | "api_unavailable" | "upstream_unavailable" | "upstream_unreachable" | "upstream_rejected" | "upstream_response_too_large" | "upstream_not_configured" | "upstream_provisioning_failed" | "service_busy" | "too_many_in_flight" | "structure_not_found" | "table_not_found" | "row_not_found" | "delete_disabled" | "invalid_value" | "row_in_use" | "duplicate_value";
     };
     responses: never;
     parameters: never;
@@ -651,6 +1004,15 @@ export interface operations {
             };
             /** @description Session expired or invalid */
             401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Refused: not allowed for this credential or person (a key or token used where it is not accepted, a missing scope, a suspended key or account, or a cookie request from another website) */
+            403: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -724,7 +1086,7 @@ export interface operations {
                      *         {
                      *           "service": "desk_api",
                      *           "perMinute": 60,
-                     *           "note": "Each key may make 60 calls a minute to the Desk API, and every account 300 across all its keys and devices."
+                     *           "note": "Each key may make 60 calls a minute to the Desk API, and every account 300 calls a minute across all its keys and devices."
                      *         }
                      *       ]
                      *     }
@@ -763,6 +1125,15 @@ export interface operations {
             };
             /** @description Missing, invalid or expired credentials */
             401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Refused: not allowed for this credential or person (a key or token used where it is not accepted, a missing scope, a suspended key or account, or a cookie request from another website) */
+            403: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -883,6 +1254,15 @@ export interface operations {
                     "application/problem+json": components["schemas"]["Problem"];
                 };
             };
+            /** @description Refused: not allowed for this credential or person (a key or token used where it is not accepted, a missing scope, a suspended key or account, or a cookie request from another website) */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
             /** @description Not your key */
             404: {
                 headers: {
@@ -996,6 +1376,15 @@ export interface operations {
                     "application/problem+json": components["schemas"]["Problem"];
                 };
             };
+            /** @description Refused: not allowed for this credential or person (a key or token used where it is not accepted, a missing scope, a suspended key or account, or a cookie request from another website) */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
             /** @description Not your key */
             404: {
                 headers: {
@@ -1007,6 +1396,137 @@ export interface operations {
             };
             /** @description A key needs at least one API */
             409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Too many requests (see the Retry-After header) */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Something went wrong on our side */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    patchGatewayApiKeysIdRestrictions: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                /**
+                 * @example {
+                 *       "allowedIps": [
+                 *         "203.0.113.9"
+                 *       ]
+                 *     }
+                 */
+                "application/json": {
+                    allowedIps?: string[];
+                    businessId?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The key with its restrictions */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "apiKey": {
+                     *         "id": "3f1c2c0e-7a51-4f6e-9a0b-6b0c1f7e2d11",
+                     *         "label": "my server",
+                     *         "keyPrefix": "deskgw_a1b2c",
+                     *         "createdAt": "2026-09-01T12:00:00Z",
+                     *         "lastUsedAt": "2026-09-19T08:30:00Z",
+                     *         "expiresAt": null,
+                     *         "deskScopes": [
+                     *           "profile",
+                     *           "drafts",
+                     *           "businesses"
+                     *         ],
+                     *         "rateLimitPerMinute": null,
+                     *         "services": [
+                     *           "desk_api"
+                     *         ],
+                     *         "suspended": false,
+                     *         "allowedIps": [
+                     *           "203.0.113.9"
+                     *         ],
+                     *         "restrictedBusinessId": null
+                     *       }
+                     *     }
+                     */
+                    "application/json": {
+                        apiKey: {
+                            id: string;
+                            label: string;
+                            keyPrefix: string;
+                            createdAt: string;
+                            lastUsedAt: string | null;
+                            expiresAt: string | null;
+                            deskScopes: string[];
+                            rateLimitPerMinute: unknown;
+                            services: string[];
+                            suspended: boolean;
+                            allowedIps: string[];
+                            restrictedBusinessId: unknown;
+                        };
+                    };
+                };
+            };
+            /** @description Not eligible for a business restriction */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Missing, invalid or expired credentials */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Refused: not allowed for this credential or person (a key or token used where it is not accepted, a missing scope, a suspended key or account, or a cookie request from another website) */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Not your key, or no such business */
+            404: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -1074,6 +1594,15 @@ export interface operations {
             };
             /** @description Missing, invalid or expired credentials */
             401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Refused: not allowed for this credential or person (a key or token used where it is not accepted, a missing scope, a suspended key or account, or a cookie request from another website) */
+            403: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -1157,8 +1686,1861 @@ export interface operations {
                     "application/problem+json": components["schemas"]["Problem"];
                 };
             };
+            /** @description Refused: not allowed for this credential or person (a key or token used where it is not accepted, a missing scope, a suspended key or account, or a cookie request from another website) */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
             /** @description Not suspended, or not your key */
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Too many requests (see the Retry-After header) */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Something went wrong on our side */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    postGatewayApiKeysIdRotate: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The key with its new plaintext secret (shown once) */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "apiKey": {
+                     *         "id": "3f1c2c0e-7a51-4f6e-9a0b-6b0c1f7e2d11",
+                     *         "label": "my server",
+                     *         "keyPrefix": "deskgw_f9e8d",
+                     *         "createdAt": "2026-09-01T12:00:00Z",
+                     *         "lastUsedAt": "2026-09-19T08:30:00Z",
+                     *         "expiresAt": null,
+                     *         "services": [
+                     *           "desk_api",
+                     *           "registry_api"
+                     *         ],
+                     *         "key": "deskgw_f9e8d7c6b5a4f3e2d1c0b9a8f7e6d5c4b3a2f1e0d9c8b7a6 (shown once, never again)"
+                     *       }
+                     *     }
+                     */
+                    "application/json": {
+                        apiKey: {
+                            id: string;
+                            label: string;
+                            keyPrefix: string;
+                            createdAt: string;
+                            lastUsedAt: string | null;
+                            expiresAt: string | null;
+                            services: string[];
+                            key: string;
+                        };
+                    };
+                };
+            };
+            /** @description The request was not valid (see `code` and `errors`) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Missing, invalid or expired credentials */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Refused: not allowed for this credential or person (a key or token used where it is not accepted, a missing scope, a suspended key or account, or a cookie request from another website) */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Not your key */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Already revoked */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Too many requests (see the Retry-After header) */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Something went wrong on our side */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    getGatewaySharedKeys: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The shared keys */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "sharedKeys": [
+                     *         {
+                     *           "id": "3f1c2c0e-7a51-4f6e-9a0b-6b0c1f7e2d11",
+                     *           "label": "my server",
+                     *           "keyPrefix": "deskgw_f9e8d",
+                     *           "createdAt": "2026-09-01T12:00:00Z",
+                     *           "lastUsedAt": "2026-09-19T08:30:00Z",
+                     *           "expiresAt": null,
+                     *           "services": [
+                     *             "desk_api",
+                     *             "registry_api"
+                     *           ],
+                     *           "shareId": "b2b6d6d0-7a41-4a8e-9a6f-1b2c3d4e5f60",
+                     *           "shareAcceptedAt": null,
+                     *           "owner": {
+                     *             "email": "owner@example.com",
+                     *             "firstName": "Owner",
+                     *             "lastName": "Person"
+                     *           }
+                     *         }
+                     *       ]
+                     *     }
+                     */
+                    "application/json": {
+                        sharedKeys: {
+                            id: string;
+                            label: string;
+                            keyPrefix: string;
+                            createdAt: string;
+                            lastUsedAt: string | null;
+                            expiresAt: string | null;
+                            services: string[];
+                            shareId: string;
+                            shareAcceptedAt: unknown;
+                            owner: {
+                                email: string;
+                                firstName: string;
+                                lastName: string;
+                            };
+                        }[];
+                    };
+                };
+            };
+            /** @description Missing, invalid or expired credentials */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Refused: not allowed for this credential or person (a key or token used where it is not accepted, a missing scope, a suspended key or account, or a cookie request from another website) */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Too many requests (see the Retry-After header) */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Something went wrong on our side */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    getGatewayApiKeysIdShares: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The shares */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "shares": [
+                     *         {
+                     *           "id": "b2b6d6d0-7a41-4a8e-9a6f-1b2c3d4e5f60",
+                     *           "apiKeyId": "3f1c2c0e-7a51-4f6e-9a0b-6b0c1f7e2d11",
+                     *           "acceptedAt": null,
+                     *           "createdAt": "2026-09-19T08:30:00Z",
+                     *           "sharedWith": {
+                     *             "email": "colleague@example.com",
+                     *             "firstName": "Colleague",
+                     *             "lastName": "Person"
+                     *           }
+                     *         }
+                     *       ]
+                     *     }
+                     */
+                    "application/json": {
+                        shares: {
+                            id: string;
+                            apiKeyId: string;
+                            acceptedAt: unknown;
+                            createdAt: string;
+                            sharedWith: {
+                                email: string;
+                                firstName: string;
+                                lastName: string;
+                            };
+                        }[];
+                    };
+                };
+            };
+            /** @description The request was not valid (see `code` and `errors`) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Missing, invalid or expired credentials */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Refused: not allowed for this credential or person (a key or token used where it is not accepted, a missing scope, a suspended key or account, or a cookie request from another website) */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Not your key */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Too many requests (see the Retry-After header) */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Something went wrong on our side */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    postGatewayApiKeysIdShares: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                /**
+                 * @example {
+                 *       "email": "colleague@example.com"
+                 *     }
+                 */
+                "application/json": {
+                    email: string;
+                };
+            };
+        };
+        responses: {
+            /** @description Shared */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "share": {
+                     *         "id": "b2b6d6d0-7a41-4a8e-9a6f-1b2c3d4e5f60",
+                     *         "apiKeyId": "3f1c2c0e-7a51-4f6e-9a0b-6b0c1f7e2d11",
+                     *         "acceptedAt": null,
+                     *         "createdAt": "2026-09-19T08:30:00Z",
+                     *         "sharedWith": {
+                     *           "email": "colleague@example.com",
+                     *           "firstName": "Colleague",
+                     *           "lastName": "Person"
+                     *         }
+                     *       }
+                     *     }
+                     */
+                    "application/json": {
+                        share: {
+                            id: string;
+                            apiKeyId: string;
+                            acceptedAt: unknown;
+                            createdAt: string;
+                            sharedWith: {
+                                email: string;
+                                firstName: string;
+                                lastName: string;
+                            };
+                        };
+                    };
+                };
+            };
+            /** @description The request was not valid (see `code` and `errors`) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Missing, invalid or expired credentials */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Refused: not allowed for this credential or person (a key or token used where it is not accepted, a missing scope, a suspended key or account, or a cookie request from another website) */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Not your key */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description No confirmed account at that address, that is already you, or the key has reached its share limit */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Too many requests (see the Retry-After header) */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Something went wrong on our side */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    deleteGatewayApiKeysIdSharesShareId: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+                shareId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Removed */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /** @example {} */
+                    "application/json": Record<string, never>;
+                };
+            };
+            /** @description The request was not valid (see `code` and `errors`) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Missing, invalid or expired credentials */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Refused: not allowed for this credential or person (a key or token used where it is not accepted, a missing scope, a suspended key or account, or a cookie request from another website) */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Not your key, or no such share */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Too many requests (see the Retry-After header) */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Something went wrong on our side */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    postGatewaySharesShareIdAccept: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                shareId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Accepted */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "ok": true
+                     *     }
+                     */
+                    "application/json": {
+                        ok: boolean;
+                    };
+                };
+            };
+            /** @description The request was not valid (see `code` and `errors`) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Missing, invalid or expired credentials */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Refused: not allowed for this credential or person (a key or token used where it is not accepted, a missing scope, a suspended key or account, or a cookie request from another website) */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description No such invitation */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Too many requests (see the Retry-After header) */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Something went wrong on our side */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    deleteGatewaySharesShareId: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                shareId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Declined */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /** @example {} */
+                    "application/json": Record<string, never>;
+                };
+            };
+            /** @description The request was not valid (see `code` and `errors`) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Missing, invalid or expired credentials */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Refused: not allowed for this credential or person (a key or token used where it is not accepted, a missing scope, a suspended key or account, or a cookie request from another website) */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description No such share */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Too many requests (see the Retry-After header) */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Something went wrong on our side */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    getGatewayWebhookEvents: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The event names */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "events": [
+                     *         "key.created",
+                     *         "key.revoked",
+                     *         "plan.changed",
+                     *         "invoice.available",
+                     *         "usage.desk_api_80",
+                     *         "usage.desk_api_100",
+                     *         "oauth.app_authorized",
+                     *         "oauth.app_removed"
+                     *       ]
+                     *     }
+                     */
+                    "application/json": {
+                        events: string[];
+                    };
+                };
+            };
+            /** @description Missing, invalid or expired credentials */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Refused: not allowed for this credential or person (a key or token used where it is not accepted, a missing scope, a suspended key or account, or a cookie request from another website) */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Too many requests (see the Retry-After header) */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Something went wrong on our side */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    getGatewayWebhooks: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The endpoints */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "hasMore": false,
+                     *       "endpoints": [
+                     *         {
+                     *           "id": "6f1c2e34-9a5b-4d1e-8c7f-0a1b2c3d4e5f",
+                     *           "url": "https://example.com/desk-webhook",
+                     *           "events": [
+                     *             "key.created",
+                     *             "key.revoked"
+                     *           ],
+                     *           "active": true,
+                     *           "disabledReason": null,
+                     *           "createdAt": "2026-09-21T15:00:00Z",
+                     *           "consecutiveFailures": 0
+                     *         }
+                     *       ]
+                     *     }
+                     */
+                    "application/json": {
+                        hasMore: boolean;
+                        endpoints: {
+                            id: string;
+                            url: string;
+                            events: string[];
+                            active: boolean;
+                            disabledReason: unknown;
+                            createdAt: string;
+                            consecutiveFailures: number;
+                        }[];
+                    };
+                };
+            };
+            /** @description Missing, invalid or expired credentials */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Refused: not allowed for this credential or person (a key or token used where it is not accepted, a missing scope, a suspended key or account, or a cookie request from another website) */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Too many requests (see the Retry-After header) */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Something went wrong on our side */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    postGatewayWebhooks: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                /**
+                 * @example {
+                 *       "url": "https://example.com/desk-webhook",
+                 *       "events": [
+                 *         "key.created",
+                 *         "key.revoked"
+                 *       ]
+                 *     }
+                 */
+                "application/json": {
+                    url: string;
+                    events: string[];
+                };
+            };
+        };
+        responses: {
+            /** @description Created (Location header); includes the secret once */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "endpoint": {
+                     *         "id": "6f1c2e34-9a5b-4d1e-8c7f-0a1b2c3d4e5f",
+                     *         "url": "https://example.com/desk-webhook",
+                     *         "events": [
+                     *           "key.created",
+                     *           "key.revoked"
+                     *         ],
+                     *         "active": true,
+                     *         "disabledReason": null,
+                     *         "createdAt": "2026-09-21T15:00:00Z",
+                     *         "consecutiveFailures": 0
+                     *       },
+                     *       "secret": "whsec_0123456789abcdef0123456789abcdef0123456789abcdef",
+                     *       "note": "This is the only time the signing secret is shown."
+                     *     }
+                     */
+                    "application/json": {
+                        endpoint: {
+                            id: string;
+                            url: string;
+                            events: string[];
+                            active: boolean;
+                            disabledReason: unknown;
+                            createdAt: string;
+                            consecutiveFailures: number;
+                        };
+                        secret: string;
+                        note: string;
+                    };
+                };
+            };
+            /** @description The address or events were not acceptable (code webhook_invalid_url) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Missing, invalid or expired credentials */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Refused: not allowed for this credential or person (a key or token used where it is not accepted, a missing scope, a suspended key or account, or a cookie request from another website) */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description The plan allows no more endpoints (code webhook_limit_reached) */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Too many requests (see the Retry-After header) */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Something went wrong on our side */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    deleteGatewayWebhooksId: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Removed */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /** @example {} */
+                    "application/json": Record<string, never>;
+                };
+            };
+            /** @description The request was not valid (see `code` and `errors`) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Missing, invalid or expired credentials */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Refused: not allowed for this credential or person (a key or token used where it is not accepted, a missing scope, a suspended key or account, or a cookie request from another website) */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Not your endpoint */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Too many requests (see the Retry-After header) */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Something went wrong on our side */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    postGatewayWebhooksIdRotateSecret: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The new secret */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "secret": "whsec_fedcba9876543210fedcba9876543210fedcba9876543210",
+                     *       "note": "This is the only time the signing secret is shown."
+                     *     }
+                     */
+                    "application/json": {
+                        secret: string;
+                        note: string;
+                    };
+                };
+            };
+            /** @description The request was not valid (see `code` and `errors`) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Missing, invalid or expired credentials */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Refused: not allowed for this credential or person (a key or token used where it is not accepted, a missing scope, a suspended key or account, or a cookie request from another website) */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Not your endpoint */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Too many requests (see the Retry-After header) */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Something went wrong on our side */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    postGatewayWebhooksIdSuspend: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The endpoint */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "endpoint": {
+                     *         "id": "6f1c2e34-9a5b-4d1e-8c7f-0a1b2c3d4e5f",
+                     *         "url": "https://example.com/desk-webhook",
+                     *         "events": [
+                     *           "key.created",
+                     *           "key.revoked"
+                     *         ],
+                     *         "active": false,
+                     *         "disabledReason": "Switched off by you.",
+                     *         "createdAt": "2026-09-21T15:00:00Z",
+                     *         "consecutiveFailures": 0
+                     *       }
+                     *     }
+                     */
+                    "application/json": {
+                        endpoint: {
+                            id: string;
+                            url: string;
+                            events: string[];
+                            active: boolean;
+                            disabledReason: string;
+                            createdAt: string;
+                            consecutiveFailures: number;
+                        };
+                    };
+                };
+            };
+            /** @description The request was not valid (see `code` and `errors`) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Missing, invalid or expired credentials */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Refused: not allowed for this credential or person (a key or token used where it is not accepted, a missing scope, a suspended key or account, or a cookie request from another website) */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Not your endpoint */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Too many requests (see the Retry-After header) */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Something went wrong on our side */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    postGatewayWebhooksIdResume: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The endpoint */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "endpoint": {
+                     *         "id": "6f1c2e34-9a5b-4d1e-8c7f-0a1b2c3d4e5f",
+                     *         "url": "https://example.com/desk-webhook",
+                     *         "events": [
+                     *           "key.created",
+                     *           "key.revoked"
+                     *         ],
+                     *         "active": true,
+                     *         "disabledReason": null,
+                     *         "createdAt": "2026-09-21T15:00:00Z",
+                     *         "consecutiveFailures": 0
+                     *       }
+                     *     }
+                     */
+                    "application/json": {
+                        endpoint: {
+                            id: string;
+                            url: string;
+                            events: string[];
+                            active: boolean;
+                            disabledReason: unknown;
+                            createdAt: string;
+                            consecutiveFailures: number;
+                        };
+                    };
+                };
+            };
+            /** @description The request was not valid (see `code` and `errors`) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Missing, invalid or expired credentials */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Refused: not allowed for this credential or person (a key or token used where it is not accepted, a missing scope, a suspended key or account, or a cookie request from another website) */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Not your endpoint */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Too many requests (see the Retry-After header) */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Something went wrong on our side */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    putGatewayWebhooksIdEvents: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                /**
+                 * @example {
+                 *       "events": [
+                 *         "key.created",
+                 *         "key.rotated",
+                 *         "key.revoked"
+                 *       ]
+                 *     }
+                 */
+                "application/json": {
+                    events: string[];
+                };
+            };
+        };
+        responses: {
+            /** @description The endpoint */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "endpoint": {
+                     *         "id": "6f1c2e34-9a5b-4d1e-8c7f-0a1b2c3d4e5f",
+                     *         "url": "https://example.com/desk-webhook",
+                     *         "events": [
+                     *           "key.created",
+                     *           "key.rotated",
+                     *           "key.revoked"
+                     *         ],
+                     *         "active": true,
+                     *         "disabledReason": null,
+                     *         "createdAt": "2026-09-21T15:00:00Z",
+                     *         "consecutiveFailures": 0
+                     *       }
+                     *     }
+                     */
+                    "application/json": {
+                        endpoint: {
+                            id: string;
+                            url: string;
+                            events: string[];
+                            active: boolean;
+                            disabledReason: unknown;
+                            createdAt: string;
+                            consecutiveFailures: number;
+                        };
+                    };
+                };
+            };
+            /** @description No events, or an unknown one */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Missing, invalid or expired credentials */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Refused: not allowed for this credential or person (a key or token used where it is not accepted, a missing scope, a suspended key or account, or a cookie request from another website) */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Not your endpoint */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Too many requests (see the Retry-After header) */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Something went wrong on our side */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    postGatewayWebhooksIdTest: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Queued */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "ok": true,
+                     *       "message": "A test event is queued; see the deliveries list for the result."
+                     *     }
+                     */
+                    "application/json": {
+                        ok: boolean;
+                        message: string;
+                    };
+                };
+            };
+            /** @description The request was not valid (see `code` and `errors`) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Missing, invalid or expired credentials */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Refused: not allowed for this credential or person (a key or token used where it is not accepted, a missing scope, a suspended key or account, or a cookie request from another website) */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Not your endpoint */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Too many requests (see the Retry-After header) */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Something went wrong on our side */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    getGatewayWebhooksIdDeliveries: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The deliveries */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "hasMore": false,
+                     *       "deliveries": [
+                     *         {
+                     *           "id": "d1",
+                     *           "eventId": "evt_0123456789abcdef01234567",
+                     *           "eventType": "key.created",
+                     *           "status": "delivered",
+                     *           "attempts": 1,
+                     *           "lastStatus": 200,
+                     *           "lastError": null,
+                     *           "createdAt": "2026-09-21T15:00:01Z",
+                     *           "deliveredAt": "2026-09-21T15:00:02Z",
+                     *           "maxAttempts": 6,
+                     *           "nextAttemptAt": null,
+                     *           "retryWaitSeconds": null
+                     *         },
+                     *         {
+                     *           "id": "d2",
+                     *           "eventId": "evt_89abcdef0123456789abcdef",
+                     *           "eventType": "key.revoked",
+                     *           "status": "pending",
+                     *           "attempts": 2,
+                     *           "lastStatus": 522,
+                     *           "lastError": "receiver answered 522",
+                     *           "createdAt": "2026-09-21T15:10:00Z",
+                     *           "deliveredAt": null,
+                     *           "maxAttempts": 6,
+                     *           "nextAttemptAt": "2026-09-21T15:16:00Z",
+                     *           "retryWaitSeconds": 300
+                     *         }
+                     *       ]
+                     *     }
+                     */
+                    "application/json": {
+                        hasMore: boolean;
+                        deliveries: {
+                            id: string;
+                            eventId: string;
+                            eventType: string;
+                            status: string;
+                            attempts: number;
+                            lastStatus: number;
+                            lastError: string;
+                            createdAt: string;
+                            deliveredAt: string;
+                            maxAttempts: number;
+                            nextAttemptAt: string;
+                            retryWaitSeconds: number;
+                        }[];
+                    };
+                };
+            };
+            /** @description The request was not valid (see `code` and `errors`) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Missing, invalid or expired credentials */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Refused: not allowed for this credential or person (a key or token used where it is not accepted, a missing scope, a suspended key or account, or a cookie request from another website) */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Not your endpoint */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Too many requests (see the Retry-After header) */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Something went wrong on our side */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    postGatewayWebhooksIdDeliveriesDeliveryIdRetry: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+                deliveryId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Queued */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "ok": true,
+                     *       "message": "Queued to try again."
+                     *     }
+                     */
+                    "application/json": {
+                        ok: boolean;
+                        message: string;
+                    };
+                };
+            };
+            /** @description The request was not valid (see `code` and `errors`) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Missing, invalid or expired credentials */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Refused: not allowed for this credential or person (a key or token used where it is not accepted, a missing scope, a suspended key or account, or a cookie request from another website) */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Not your endpoint, or that delivery has not failed */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Too many requests (see the Retry-After header) */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Something went wrong on our side */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    postGraphql: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                /**
+                 * @example {
+                 *       "query": "{ viewer { id firstName } businesses(first: 5) { id name role } }"
+                 *     }
+                 */
+                "application/json": {
+                    query: string;
+                    variables?: Record<string, never>;
+                    operationName?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The GraphQL answer ({data, errors}); a resolver error is a normal answer with errors */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "data": {
+                     *         "viewer": {
+                     *           "id": "f4baaa6d940aef8395c51a1f9d0fe809",
+                     *           "firstName": "Ada"
+                     *         },
+                     *         "businesses": [
+                     *           {
+                     *             "id": "c04e999158d8ca138f622d3d7dfc960a",
+                     *             "name": "Analytical Engines LLC",
+                     *             "role": "owner"
+                     *           }
+                     *         ]
+                     *       }
+                     *     }
+                     */
+                    "application/json": {
+                        data: {
+                            viewer: {
+                                id: string;
+                                firstName: string;
+                            };
+                            businesses: {
+                                id: string;
+                                name: string;
+                                role: string;
+                            }[];
+                        };
+                    };
+                };
+            };
+            /** @description A malformed, too large, too deep or too costly query, or a mutation (extensions.code says which) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Missing, invalid or expired credentials */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Refused: not allowed for this credential or person (a key or token used where it is not accepted, a missing scope, a suspended key or account, or a cookie request from another website) */
+            403: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -1225,6 +3607,15 @@ export interface operations {
             };
             /** @description Missing, invalid or expired credentials */
             401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Refused: not allowed for this credential or person (a key or token used where it is not accepted, a missing scope, a suspended key or account, or a cookie request from another website) */
+            403: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -1302,6 +3693,15 @@ export interface operations {
             };
             /** @description Missing, invalid or expired credentials */
             401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Refused: not allowed for this credential or person (a key or token used where it is not accepted, a missing scope, a suspended key or account, or a cookie request from another website) */
+            403: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -1393,6 +3793,15 @@ export interface operations {
             };
             /** @description Missing, invalid or expired credentials */
             401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Refused: not allowed for this credential or person (a key or token used where it is not accepted, a missing scope, a suspended key or account, or a cookie request from another website) */
+            403: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -1504,6 +3913,15 @@ export interface operations {
                     "application/problem+json": components["schemas"]["Problem"];
                 };
             };
+            /** @description Refused: not allowed for this credential or person (a key or token used where it is not accepted, a missing scope, a suspended key or account, or a cookie request from another website) */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
             /** @description No such item */
             404: {
                 headers: {
@@ -1581,6 +3999,15 @@ export interface operations {
                     "application/problem+json": components["schemas"]["Problem"];
                 };
             };
+            /** @description Refused: not allowed for this credential or person (a key or token used where it is not accepted, a missing scope, a suspended key or account, or a cookie request from another website) */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
             /** @description Too many requests (see the Retry-After header) */
             429: {
                 headers: {
@@ -1628,7 +4055,7 @@ export interface operations {
                      *         },
                      *         {
                      *           "service": "registry_api",
-                     *           "name": "Registry API",
+                     *           "name": "Business Name Registry API",
                      *           "description": "Business registry lookups.",
                      *           "basePath": "/v1/gateway/registry",
                      *           "available": true
@@ -1649,6 +4076,15 @@ export interface operations {
             };
             /** @description Missing, invalid or expired credentials */
             401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Refused: not allowed for this credential or person (a key or token used where it is not accepted, a missing scope, a suspended key or account, or a cookie request from another website) */
+            403: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -1733,6 +4169,15 @@ export interface operations {
                     "application/problem+json": components["schemas"]["Problem"];
                 };
             };
+            /** @description Refused: not allowed for this credential or person (a key or token used where it is not accepted, a missing scope, a suspended key or account, or a cookie request from another website) */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
             /** @description Too many requests (see the Retry-After header) */
             429: {
                 headers: {
@@ -1787,6 +4232,9 @@ export interface operations {
                      */
                     deskScopes?: ("profile" | "drafts" | "businesses")[];
                     expiresInDays?: number;
+                    sandbox?: boolean;
+                    allowedIps?: string[];
+                    businessId?: string;
                 };
             };
         };
@@ -1931,6 +4379,15 @@ export interface operations {
             };
             /** @description Missing, invalid or expired credentials */
             401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Refused: not allowed for this credential or person (a key or token used where it is not accepted, a missing scope, a suspended key or account, or a cookie request from another website) */
+            403: {
                 headers: {
                     [name: string]: unknown;
                 };
