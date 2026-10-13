@@ -8,6 +8,7 @@ import { recordSecurityEvent } from '../modules/audit/security-events';
 import { notifySecurityEvent } from '../domain/auth/security-notices';
 import { sendKeyShareEmail } from '../infrastructure/email/resend';
 import type { FastifyReply, FastifyRequest } from 'fastify';
+import { emailFingerprint } from '../middleware/log-redaction';
 import { HttpError, validationError } from '../middleware/http-error';
 import { sendWithEtag } from '../middleware/etag';
 import { requireAuth, requireConfirmedEmail } from '../middleware/auth';
@@ -250,7 +251,8 @@ export async function shareGatewayKeyHandler(request: FastifyRequest, reply: Fas
   const user = request.currentUser!;
   try {
     const share = await keyShares.share(user.id, id, parsed.data.email);
-    auditKey(request, 'gateway_key_shared', { userId: user.id, keyId: id, sharedWithEmail: parsed.data.email });
+    // The invitee is recorded by fingerprint, never by address: this line goes to the log and to security_events.
+    auditKey(request, 'gateway_key_shared', { userId: user.id, keyId: id, shareId: share.id, sharedWith: emailFingerprint(parsed.data.email) });
     const key = await gatewayApiKeys.summaryOf(id);
     void sendKeyShareEmail(config, share.sharedWith.email, key?.label ?? 'a key', user.email, request.id).catch(() => {});
     emitWebhookEvent({ userId: user.id }, 'key.share_invited', { keyId: id, sharedWithEmail: parsed.data.email });

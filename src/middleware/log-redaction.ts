@@ -22,6 +22,35 @@ export function emailFingerprint(email: string): string {
   return `email:${createHash('sha256').update(email.trim().toLowerCase()).digest('hex').slice(0, 12)}`;
 }
 
+// Safety net under the rule above: any e-mail address that still reaches a log line (a new field, a message string, an
+// error text) is replaced by its fingerprint before the line is written. Found October 2026: the key-sharing audit line
+// logged the invitee's address in full under a field name the redaction paths did not cover.
+const EMAIL_IN_TEXT = /[A-Za-z0-9._%+-]{1,64}@[A-Za-z0-9.-]{1,255}\.[A-Za-z]{2,}/g;
+
+/** The text with every e-mail address replaced by its fingerprint. */
+export function scrubEmailText(text: string): string {
+  return text.includes('@') ? text.replace(EMAIL_IN_TEXT, (m) => emailFingerprint(m)) : text;
+}
+
+/** A copy of a value with every e-mail address inside it (any depth, any field) replaced by its fingerprint. */
+export function scrubEmails(value: unknown, depth = 0): unknown {
+  if (typeof value === 'string') return scrubEmailText(value);
+  if (value === null || typeof value !== 'object' || depth > 8) return value;
+  if (value instanceof Error) {
+    const out: Record<string, unknown> = { type: value.name, message: scrubEmailText(value.message), stack: value.stack ? scrubEmailText(value.stack) : undefined };
+    for (const [k, v] of Object.entries(value)) out[k] = scrubEmails(v, depth + 1);
+    return out;
+  }
+  if (Array.isArray(value)) return value.map((v) => scrubEmails(v, depth + 1));
+  // Only plain data is copied: a class instance (the request, a socket) is left to its own serializer, which would lose
+  // its getters (method, url) on a copy. The request serializer scrubs addresses from the URL itself.
+  const proto = Object.getPrototypeOf(value);
+  if (proto !== Object.prototype && proto !== null) return value;
+  const out: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(value as Record<string, unknown>)) out[k] = scrubEmails(v, depth + 1);
+  return out;
+}
+
 export const REDACT_PATHS = [
   'req.headers.authorization',
   'req.headers.cookie',
@@ -54,7 +83,7 @@ export const LOGGER_SERIALIZERS = {
     const cf = request.headers?.['cf-connecting-ip'];
     return {
       method: request.method,
-      url: scrubUrl(request.url),
+      url: scrubEmailText(scrubUrl(request.url)),
       host: request.hostname,
       clientIp: typeof cf === 'string' ? cf : request.ip,
     };
@@ -62,7 +91,18 @@ export const LOGGER_SERIALIZERS = {
 };
 
 export function loggerOptions(level: string) {
-  return { level, redact: { paths: REDACT_PATHS, censor: '[redacted]' }, serializers: LOGGER_SERIALIZERS };
+  return {
+    level,
+    redact: { paths: REDACT_PATHS, censor: '[redacted]' },
+    serializers: LOGGER_SERIALIZERS,
+    formatters: { log: (object: Record<string, unknown>) => scrubEmails(object) as Record<string, unknown> },
+    hooks: {
+      // the message strings too ("sent to someone@x.com"), not only the logged object
+      logMethod(this: unknown, args: unknown[], method: (...a: unknown[]) => void) {
+        method.apply(this, args.map((a) => (typeof a === 'string' ? scrubEmailText(a) : a)));
+      },
+    },
+  };
 }
 
 const SENSITIVE_HEADERS = ['authorization', 'cookie', 'x-api-key', 'set-cookie', 'proxy-authorization'];

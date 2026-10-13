@@ -59,6 +59,21 @@ describe('the logger', () => {
   });
 });
 
+describe('the e-mail safety net', () => {
+  it('replaces an address anywhere in a log line (any field, the message, an error) with its fingerprint', () => {
+    const out: string[] = [];
+    const log = pino(loggerOptions('info'), { write: (l: string) => out.push(l) });
+    const address = 'invitee.person@gmail.com';
+    log.info({ level: 'audit', event: 'gateway_key_shared', sharedWithEmail: address, nested: { list: [`to ${address}`] } }, `shared with ${address}`);
+    log.error({ err: new Error(`could not mail ${address}`) }, 'mail failed');
+    const text = out.join('');
+    expect(text).not.toContain(address);
+    expect(text.split(emailFingerprint(address)).length - 1).toBe(5); // field, list item, message, error message, error stack
+    expect(text).toContain('mail failed');
+    expect(JSON.parse(out[1]).err.message).toBe(`could not mail ${emailFingerprint(address)}`);
+  });
+});
+
 describe('what the running service logs', () => {
   it('never contains the credentials or addresses a request carried', async () => {
     lines.length = 0;
