@@ -1,6 +1,6 @@
 // Administrator tools for accounts and API keys: see every key, and switch an account or a key off (and back on)
 // without deleting anything. Same guard as the rest of /admin (an allowlisted admin session, or the admin key).
-import { assignPlan, BillingError, generateInvoices, setInvoiceStatus } from '../domain/billing/plans';
+import { BillingError, changePlan, generateInvoices, setInvoiceStatus } from '../domain/billing/plans';
 import { emitWebhookEvent } from '../domain/webhooks/webhooks';
 import type { FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
@@ -108,7 +108,8 @@ export async function adminSetKeyLimitHandler(request: FastifyRequest, reply: Fa
   return reply.send({ ok: true, perMinute: parsed.data.perMinute });
 }
 
-const AssignPlanSchema = z.object({ planId: z.string().trim().min(1).max(40) });
+// when: 'auto' (default) = an upgrade at once (prorated), a downgrade on the 1st of next month; 'now' = at once either way.
+const AssignPlanSchema = z.object({ planId: z.string().trim().min(1).max(40), when: z.enum(['auto', 'now']).default('auto') });
 const InvoiceStatusSchema = z.object({ status: z.enum(['draft', 'open', 'paid', 'void']) });
 const GenerateInvoicesSchema = z.object({ month: z.string().regex(/^\d{4}-(0[1-9]|1[0-2])$/, 'month must look like 2026-09').optional() });
 
@@ -120,11 +121,12 @@ export async function adminAssignPlanHandler(request: FastifyRequest, reply: Fas
   const parsed = AssignPlanSchema.safeParse(request.body ?? {});
   if (!parsed.success) throw validationError(parsed.error);
   try {
-    const sub = await assignPlan(type, id, parsed.data.planId);
+    const { subscription: sub, effectiveAt, scheduled } = await changePlan(type, id, parsed.data.planId, parsed.data.when);
     forgetKeyRateFactors();
-    record(request, 'assign_plan', type, id, { planId: parsed.data.planId });
-    emitWebhookEvent({ userId: id }, 'plan.changed', { subjectType: type, subjectId: id, plan: sub.plan.id });
-    return reply.send({ subscription: sub });
+    record(request, 'assign_plan', type, id, { planId: parsed.data.planId, when: parsed.data.when, scheduled, effectiveAt });
+    // A scheduled downgrade is announced now (with its date) and again when it takes effect (applyDueScheduledChanges).
+    emitWebhookEvent({ userId: id }, 'plan.changed', { subjectType: type, subjectId: id, plan: scheduled ? parsed.data.planId : sub.plan.id, scheduled, effectiveAt });
+    return reply.send({ subscription: sub, scheduled, effectiveAt });
   } catch (err) {
     if (err instanceof BillingError) throw new HttpError(err.code === 'not_found' ? 404 : 400, err.message, err.code === 'not_found' ? 'not_found' : 'unknown_plan');
     throw err;

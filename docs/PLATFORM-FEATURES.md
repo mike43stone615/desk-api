@@ -15,15 +15,22 @@ sandbox works unchanged with a live key: every endpoint a live key can call has 
 
 ## Plans, metering and invoices (no payment provider yet)
 
-- `GET /billing/plans` (public) lists **Free, Developer, Business**. The prices are **draft figures** in the `plans` table:
+- `GET /billing/plans` (public) lists **Free, Pro (id `developer`), Business**. The prices are **draft figures** in the `plans` table:
   change them there (`UPDATE plans ...`) before charging anyone.
 - Everyone is on Free unless an administrator moves them (`POST /admin/billing/{user|team}/{id}/plan`). Free has the limits that
   applied before plans existed, so nothing changed for anyone.
 - A plan sets: calls a minute per key, how many keys, how many webhook endpoints, and the price and the included market analyses.
   An administrator's own limit for a key or team still wins over the plan's.
 - Every successful market analysis is metered exactly (`usage_meter`), against the team when the key is a team's.
+- **Changing plans.** An upgrade (a dearer plan) starts at once. A downgrade (a cheaper plan) is **scheduled for 00:00 UTC on
+  the 1st of next month**: the person keeps the current plan and its limits until then, the Billing page shows "Changes to Free
+  on Nov 1, 2026", and choosing the current plan again cancels the change. An administrator can force a downgrade at once with
+  `"when": "now"`. Scheduled changes are applied by a job at 00:05 UTC on the 1st, and also the moment the subscription is next
+  read after the due time, so a late job never leaves anyone on the old plan.
 - On the 1st of each month a **draft invoice** is made for every paid subscription: the monthly fee, plus analyses beyond the
-  included number at the plan's overage price. `GET /billing/subscription` and `/billing/invoices` show a person (or a team's
+  included number at the plan's overage price. **Proration:** when the plan changed during the month, each plan is charged
+  only for its own share of the month to the second (e.g. Free to Pro on Oct 28 = 4 of 31 days of Pro = $1.94); extra calls
+  and analyses are charged at the rates of the plan in force at the end of the month. `GET /billing/subscription` and `/billing/invoices` show a person (or a team's
   admins) their own. **Nothing is charged**: to collect money, connect a payment provider that turns an `open` invoice into a
   payment and marks it `paid`; the counting and the invoices already exist.
 
@@ -61,11 +68,18 @@ or removed), `plan.changed`, `invoice.available`, a monthly-usage event at 80% a
 
 ## OAuth 2.0 for third-party apps
 
-A developer registers an app (`POST /oauth/clients`: name, redirect addresses, scopes; a confidential app gets a secret, shown
-once). The app sends the person to `GET /oauth/authorize` (authorization code with **PKCE S256, required for every app**); after
-they approve on the consent screen (`/developer/authorize`) the app exchanges the code at `POST /oauth/token` (form or JSON,
-client secret in the body or as HTTP Basic). Access tokens last **1 hour**; refresh tokens **30 days** and work **once** (each use
-issues a new pair). Scopes are read-only: `profile`, `drafts`, `businesses`, `teams` (GraphQL only). An access token can reach
+A developer registers an app (`POST /oauth/clients`: name, 1 to 50 redirect addresses, scopes; a confidential (multi-page,
+server) app gets a secret, shown once; a public (single-page or mobile) app has none). Redirect addresses must be **https**;
+plain **http only for localhost** (development): a sign-in code is never sent unencrypted to a public address. Addresses can be
+changed later; a removed address stops working at once, even for a code issued to it just before. The app sends the person to
+`GET /oauth/authorize` (authorization code with **PKCE S256, required for every app**); after they approve on the consent
+screen (`/developer/authorize`) the app exchanges the code at `POST /oauth/token` (form or JSON; a confidential app also sends
+its secret, in the body or as HTTP Basic). Access tokens last **1 hour**; refresh tokens **30 days** and work **once** (each use
+issues a new pair). Scopes are read-only and granular (18: `profile:name`, `profile:email`, `businesses:basic`, `:industry`,
+`:location`, `:legal_entity`, `:tax_election`, `:special_designation`, `:regulatory_status`, `keys:name`, `keys:dates`,
+`keys:apis`, `usage:read`, `webhooks:list`, `:events`, `:dates`, `:active`, `:deliveries`; the older `profile`, `drafts`,
+`businesses`, `teams` are still accepted and expand conservatively). An app sees only businesses the person owns. A scope removed
+from an app stops working at once for existing tokens; one added later needs the person's approval. An access token can reach
 only the same short read-only list an API key can, limited to the scopes the person approved; it can never manage the account,
 keys, teams, webhooks or apps, and never `/admin`. A person sees the apps they let in (`GET /oauth/authorizations`) and can take
 any away; deleting an app ends all its tokens. Discovery: `/.well-known/oauth-authorization-server`.

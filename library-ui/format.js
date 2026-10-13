@@ -109,6 +109,12 @@ export function periodShort(start, end) {
   return `${part(first, !sameYear)} - ${part(last, true)}`;
 }
 
+/** A day for a sentence: "Nov 1, 2026" (UTC, like every billing date). */
+export function dayText(iso) {
+  const d = new Date(iso);
+  return Number.isNaN(d.getTime()) ? '' : d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', timeZone: 'UTC' });
+}
+
 /** One redirect address per line (or comma) -> a clean list; blank lines dropped, duplicates removed. */
 export function parseLines(text) {
   return [...new Set(String(text || '').split(/[\n,]+/).map((s) => s.trim()).filter(Boolean))];

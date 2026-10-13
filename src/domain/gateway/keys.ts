@@ -511,6 +511,8 @@ export interface KeyBucketInfo {
   factor: number | null;
   /** True when the key exists and is not revoked: its calls are then limited by its own bucket and its owner's plan. */
   known?: boolean;
+  /** What to tell a caller whose key went over its per-minute bucket: the plan's (or the administrator's) limit in words. */
+  minuteRefusal?: string;
 }
 
 /**
@@ -525,8 +527,8 @@ export async function keyBucketInfo(plaintext: string, perMinuteOfAnAddress: num
   if (hit && now - hit.at < FACTOR_TTL_MS) return hit.info;
   let info: KeyBucketInfo;
   try {
-    const { rows } = await pool.query<{ rate_limit_per_minute: number | null; plan_limit: number | null; revoked: boolean }>(
-      `SELECT k.rate_limit_per_minute, p.total_per_minute AS plan_limit, k.revoked_at IS NOT NULL AS revoked
+    const { rows } = await pool.query<{ rate_limit_per_minute: number | null; plan_limit: number | null; plan_name: string | null; revoked: boolean }>(
+      `SELECT k.rate_limit_per_minute, p.total_per_minute AS plan_limit, p.name AS plan_name, k.revoked_at IS NOT NULL AS revoked
          FROM gateway_api_keys k
          LEFT JOIN subscriptions s ON s.subject_type = 'user' AND s.subject_id = k.owner_user_id AND s.status <> 'canceled'
          -- No (active) subscription means the Free plan. Without the fallback a Free key's bucket was the standard 60 a
@@ -539,6 +541,9 @@ export async function keyBucketInfo(plaintext: string, perMinuteOfAnAddress: num
     const r = rows[0];
     // Precedence: an administrator's limit for the key, then the plan's, then the standard one.
     info = { factor: r?.rate_limit_per_minute ? r.rate_limit_per_minute / perMinuteOfAnAddress : r?.plan_limit ? r.plan_limit / perMinuteOfAnAddress : null, known: Boolean(r && !r.revoked) };
+    // The same wording the plan check uses (billing/allowance.ts), rather than a bare "Rate limit exceeded (per-minute)."
+    if (r?.rate_limit_per_minute) info.minuteRefusal = `This key is limited to ${r.rate_limit_per_minute} calls a minute. Try again in a minute.`;
+    else if (r?.plan_limit) info.minuteRefusal = `Your ${r.plan_name ?? 'current'} plan allows ${r.plan_limit} calls a minute across all APIs. Try again in a minute.`;
   } catch {
     info = { factor: null };
   }

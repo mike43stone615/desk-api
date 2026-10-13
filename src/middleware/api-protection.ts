@@ -257,7 +257,8 @@ export function registerApiProtection(app: FastifyInstance) {
       const bucket = `key:${createHash('sha256').update(presentedKey).digest('hex')}`;
       const keyResult = await redisCheck(bucket, factor);
       if (!keyResult.allowed) {
-        return tooManyRequests(request, reply, keyResult.reason, keyResult.resetAt, scaled(config.rateLimitPerMinute, factor));
+        const reason = keyResult.reason === 'Rate limit exceeded (per-minute).' && info.minuteRefusal ? info.minuteRefusal : keyResult.reason;
+        return tooManyRequests(request, reply, reason, keyResult.resetAt, scaled(config.rateLimitPerMinute, factor));
       }
       if (info.known === true) realKey = { limit: scaled(config.rateLimitPerMinute, factor), remaining: keyResult.remaining, resetAt: keyResult.resetAt };
     }

@@ -28,7 +28,8 @@ import { deleteExpiredPendingLogins } from '../domain/auth/twoFactor';
 import { revokeExpiredKeys } from '../domain/gateway/expiry';
 import { config } from '../config';
 import { deleteOldDeliveries, processDueDeliveries } from '../domain/webhooks/webhooks';
-import { generateInvoices } from '../domain/billing/plans';
+import { applyDueScheduledChanges, generateInvoices } from '../domain/billing/plans';
+import { forgetKeyRateFactors } from '../domain/gateway/keys';
 import { pruneMinuteUsage } from '../domain/billing/allowance';
 import { processOutbox } from '../domain/email/outbox';
 import { checkMailKeyIfChanged } from '../domain/email/key-check';
@@ -75,6 +76,13 @@ export function startCleanupCron(log: FastifyBaseLogger): void {
   // Per-minute plan counters are only needed for the current minute; keep a day of them, delete the rest.
   cron.schedule('50 4 * * *', () => {
     pruneMinuteUsage().catch((err) => log.error({ err }, 'api usage prune failed'));
+  });
+  // Downgrades waiting for the new month take effect just after midnight on the 1st (each at its own moment, so it does not
+  // matter if this runs late); the invoice run for last month follows at 04:20.
+  cron.schedule('5 0 1 * *', () => {
+    applyDueScheduledChanges()
+      .then((done) => { if (done.length) { forgetKeyRateFactors(); log.info({ event: 'plan_changes_applied', count: done.length }, 'scheduled plan changes applied'); } })
+      .catch((err) => log.error({ err }, 'scheduled plan changes failed'));
   });
   cron.schedule('20 4 1 * *', () => {
     generateInvoices().catch((err) => log.error({ err }, 'invoice run failed'));

@@ -5,7 +5,7 @@ import {
   registerRoute, api, esc, icon, spinnerBtn, friendlyError, reportHandledException, currentEpoch, navigate,
 } from '../app.js';
 import { tabsHtml } from '../tabs.js';
-import { formatMoney, periodText, periodShort, usageShare } from '../format.js';
+import { dayText, formatMoney, periodText, periodShort, usageShare } from '../format.js';
 
 const num = (n) => Number(n).toLocaleString('en-US');
 const INVOICE_PAGE = 10;
@@ -68,9 +68,12 @@ registerRoute('/developer/billing', async (app) => {
     const u = s.usage;
     const cheaper = p.monthlyPriceCents < s.sub.plan.monthlyPriceCents;
     // The three states are the same pill; only the color says which one it is.
+    const waiting = s.sub.scheduledChange;
     const action = current
       ? '<span class="plan-pill active">Active</span>'
-      : `<button type="button" class="plan-pill ${cheaper ? 'downgrade' : 'upgrade'}" data-upgrade="${esc(p.id)}">${cheaper ? 'Downgrade' : 'Upgrade'}</button>`;
+      : waiting && waiting.planId === p.id
+        ? `<span class="plan-pill downgrade" title="Your plan changes to ${esc(p.name)} on ${esc(dayText(waiting.effectiveAt))}">From ${esc(dayText(waiting.effectiveAt))}</span>`
+        : `<button type="button" class="plan-pill ${cheaper ? 'downgrade' : 'upgrade'}" data-upgrade="${esc(p.id)}">${cheaper ? 'Downgrade' : 'Upgrade'}</button>`;
     const perMinute = (k) => (k === 'total' ? p.totalPerMinute : p.servicePerMinute);
     const perMonth = (k) => (k === 'total' ? p.totalPerMonth : p.servicePerMonth);
     return `
@@ -78,6 +81,7 @@ registerRoute('/developer/billing', async (app) => {
         <div class="plan-row plan-head-row">
           <div class="plan-head"><h3>${esc(p.name)}</h3>${action}</div>
           ${current ? `<div class="plan-period">Current period: ${esc(periodShort(s.sub.periodStart, s.sub.periodEnd))}</div>` : ''}
+          ${current && waiting ? `<div class="plan-period">Changes to ${esc(waiting.planName)} on ${esc(dayText(waiting.effectiveAt))}</div>` : ''}
         </div>
         <div class="plan-row">
           <div class="plan-price">${esc(formatMoney(p.monthlyPriceCents))}<span> / month</span></div>
@@ -169,6 +173,8 @@ registerRoute('/developer/billing', async (app) => {
       ${s.invoicesHasMore ? `<div class="load-more-row"><button type="button" class="btn" id="load-more-invoices" ${s.isLoadingMore ? 'disabled' : ''}>${s.isLoadingMore ? spinnerBtn(true, '', { dark: true }) : 'Load more'}</button></div>` : ''}`;
   }
 
+  const nextMonthStart = () => { const n = new Date(); return new Date(Date.UTC(n.getUTCFullYear(), n.getUTCMonth() + 1, 1)).toISOString(); };
+
   function upgradeModalHtml() {
     const p = s.plans.find((x) => x.id === s.upgradeTo);
     if (!p) return '';
@@ -176,7 +182,10 @@ registerRoute('/developer/billing', async (app) => {
       <div class="modal-backdrop" id="upgrade-backdrop">
         <div class="modal" role="dialog" aria-modal="true" aria-labelledby="upgrade-title">
           <h2 id="upgrade-title">Switch to ${esc(p.name)}</h2>
-          <p class="modal-text">${esc(p.name)} is ${esc(formatMoney(p.monthlyPriceCents))} a month. Online payment is coming soon; you will be able to change your plan here once it is ready.</p>
+          <p class="modal-text">${esc(p.name)} is ${esc(formatMoney(p.monthlyPriceCents))} a month. ${p.monthlyPriceCents < s.sub.plan.monthlyPriceCents
+            ? `A downgrade starts on the 1st of next month (${esc(dayText(nextMonthStart()))}): you keep ${esc(s.sub.plan.name)} and everything it includes until then.`
+            : `An upgrade starts at once. This month you pay for each plan only for the days you were on it.`}</p>
+          <p class="modal-text">Online payment is coming soon; you will be able to change your plan here once it is ready.</p>
           <div class="modal-actions"><button type="button" class="btn" id="upgrade-close">Close</button></div>
         </div>
       </div>`;

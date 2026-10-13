@@ -73,15 +73,62 @@ describe.skipIf(!hasDb)('E2E: plans, invoices and webhooks', () => {
     forgetKeyRateFactors();
     expect((await keyBucketInfo('deskgw_plan_limit_probe', 120))).toMatchObject({ known: true, factor: 1000 / 120 });
     // back to Free: the key is sized by the Free plan's 100 calls a minute in all (not the standard 60 for every API together)
-    await call('POST', `/v1/admin/billing/user/${u.id}/plan`, adminUser as { headers: Record<string, string> }, { planId: 'free' });
+    await call('POST', `/v1/admin/billing/user/${u.id}/plan`, adminUser as { headers: Record<string, string> }, { planId: 'free', when: 'now' });
     forgetKeyRateFactors();
     expect((await keyBucketInfo('deskgw_plan_limit_probe', 120)).factor).toBe(100 / 120);
+    expect((await keyBucketInfo('deskgw_plan_limit_probe', 120)).minuteRefusal).toBe('Your Free plan allows 100 calls a minute across all APIs. Try again in a minute.');
+  });
+
+  it('plan changes: a downgrade waits for the 1st, an upgrade starts at once, and each plan is billed for its own days', async () => {
+    const { changePlan, applyDueScheduledChanges } = await import('../../domain/billing/plans');
+    const u = await mkUser('schedule');
+    // Pro since the start of last month
+    const last = new Date(Date.UTC(new Date().getUTCFullYear(), new Date().getUTCMonth() - 1, 1));
+    const lastKey = last.toISOString().slice(0, 7);
+    const thisStart = new Date(Date.UTC(last.getUTCFullYear(), last.getUTCMonth() + 1, 1));
+    await pool.query(`INSERT INTO subscriptions (id, subject_type, subject_id, plan_id, status, period_start, period_end, created_at) VALUES ($1,'user',$2,'developer','active',$3,$3,$4)`, [rid(), u.id, ts(), last.toISOString()]);
+
+    // asking for Free schedules it for the 1st of next month; Pro (and its limits) stays until then
+    const down = await changePlan('user', u.id, 'free');
+    expect(down.scheduled).toBe(true);
+    expect(down.subscription.plan.id).toBe('developer');
+    expect(down.subscription.scheduledChange).toMatchObject({ planId: 'free', planName: 'Free' });
+    expect(Date.parse(down.effectiveAt)).toBe(Date.UTC(new Date().getUTCFullYear(), new Date().getUTCMonth() + 1, 1));
+    // asking for the current plan again cancels the waiting change
+    expect((await changePlan('user', u.id, 'developer')).subscription.scheduledChange).toBeNull();
+
+    // a downgrade that was due at the start of this month: applied at that moment, so last month is all Pro
+    await changePlan('user', u.id, 'free');
+    await pool.query(`UPDATE subscriptions SET scheduled_for = $2 WHERE subject_id = $1 AND status <> 'canceled'`, [u.id, thisStart.toISOString()]);
+    const applied = await applyDueScheduledChanges();
+    expect(applied.map((a) => a.subjectId)).toContain(u.id);
+    expect((await subscriptionFor('user', u.id)).plan.id).toBe('free');
+    const ended = (await pool.query(`SELECT canceled_at FROM subscriptions WHERE subject_id = $1 AND status = 'canceled'`, [u.id])).rows[0];
+    expect(Date.parse(ended.canceled_at)).toBe(thisStart.getTime());
+    await generateInvoices(lastKey);
+    const lastInvoice = (await invoicesFor('user', u.id)).invoices.find((i) => i.periodStart.startsWith(lastKey))!;
+    expect(lastInvoice.lines).toEqual([{ description: 'Pro plan, one month', quantity: 1, unitCents: 1500, totalCents: 1500 }]);
+
+    // an upgrade starts at once; this month is charged only from that moment
+    const up = await changePlan('user', u.id, 'business');
+    expect(up.scheduled).toBe(false);
+    expect((await subscriptionFor('user', u.id)).plan.id).toBe('business');
+    const thisKey = thisStart.toISOString().slice(0, 7);
+    await generateInvoices(thisKey);
+    const now = (await invoicesFor('user', u.id)).invoices.find((i) => i.periodStart.startsWith(thisKey))!;
+    const monthMs = Date.UTC(thisStart.getUTCFullYear(), thisStart.getUTCMonth() + 1, 1) - thisStart.getTime();
+    const started = Date.parse((await pool.query(`SELECT created_at FROM subscriptions WHERE subject_id = $1 AND status <> 'canceled'`, [u.id])).rows[0].created_at);
+    const expected = Math.round((5000 * (thisStart.getTime() + monthMs - started)) / monthMs);
+    expect(now.lines).toHaveLength(1);
+    expect(now.lines[0].description).toMatch(/^Business plan, .* of \d+ days\)$/);
+    expect(now.lines[0].totalCents).toBe(expected);
   });
 
   it('meters analyses exactly and produces one invoice per month with the plan fee and the overage', async () => {
     const u = await mkUser('billed');
-    await pool.query(`INSERT INTO subscriptions (id, subject_type, subject_id, plan_id, status, period_start, period_end) VALUES ($1,'user',$2,'developer','active',$3,$3)`, [rid(), u.id, ts()]);
     const month = new Date().toISOString().slice(0, 7);
+    // on Pro for the whole month (a plan begun part-way through is charged for its part only; see the next test)
+    await pool.query(`INSERT INTO subscriptions (id, subject_type, subject_id, plan_id, status, period_start, period_end, created_at) VALUES ($1,'user',$2,'developer','active',$3,$3,$4)`, [rid(), u.id, ts(), `${month}-01T00:00:00Z`]);
     await pool.query(`INSERT INTO usage_meter (subject_type, subject_id, month, metric, quantity) VALUES ('user',$1,$2,'market_analyses',3010)`, [u.id, month]);
     meterAnalysis('user', u.id);
     // 3,010 Registry API calls this month: 10 beyond the Pro plan's 3,000 for one API (and within its 5,000 in total)

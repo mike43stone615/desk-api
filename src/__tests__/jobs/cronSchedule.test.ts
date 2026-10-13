@@ -27,7 +27,7 @@ describe('background jobs', () => {
     startCleanupCron(log);
     const atStart = scheduled.map((s) => s.expression);
     // webhooks every 10 s, mail every minute, the sweep, nightly clean-up, delivery clean-up, usage prune, invoices, mail-key check
-    for (const expr of ['*/10 * * * * *', '* * * * *', '*/5 * * * *', '0 2 * * *', '31 3 * * *', '50 4 * * *', '20 4 1 * *', '43 * * * *']) {
+    for (const expr of ['*/10 * * * * *', '* * * * *', '*/5 * * * *', '0 2 * * *', '31 3 * * *', '50 4 * * *', '5 0 1 * *', '20 4 1 * *', '43 * * * *']) {
       expect(atStart, expr).toContain(expr);
     }
     expect(atStart.filter((e) => e === '*/10 * * * * *')).toHaveLength(1);
