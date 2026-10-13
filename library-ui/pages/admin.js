@@ -187,9 +187,13 @@ registerRoute('/developer/admin', async (app) => {
     const key = cellKey(change.table, change.id, change.column);
     s.savingCellKeys.add(key); s.isSaving = true; s.errorMessage = null; render();
     try {
-      await api(`/admin/tables/${change.table}/rows/${change.id}`, { method: 'PATCH', body: { values: { [change.column]: value } } });
+      const saved = await api(`/admin/tables/${change.table}/rows/${change.id}`, { method: 'PATCH', body: { values: { [change.column]: value } } });
       if (s.rows && s.rows.table === change.table) {
-        s.rows = { ...s.rows, rows: s.rows.rows.map((r) => (String(r[s.rows.primaryKey]) === change.id ? { ...r, [change.column]: value } : r)) };
+        // The saved row as the server stored it (the value as typed for the column, and a new row key when a key column changed).
+        const next = saved && saved.row ? saved.row : null;
+        s.rows = { ...s.rows, rows: s.rows.rows.map((r) => (String(r[s.rows.primaryKey]) === change.id ? (next || { ...r, [change.column]: value }) : r)) };
+        // Undo and redo hold this same change: they must find the row under its new key.
+        if (next && next[s.rows.primaryKey] != null) change.id = String(next[s.rows.primaryKey]);
       }
     } catch (err) {
       reportHandledException(err, 'saveCell');

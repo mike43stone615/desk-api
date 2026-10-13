@@ -27,6 +27,21 @@ sandbox works unchanged with a live key: every endpoint a live key can call has 
   admins) their own. **Nothing is charged**: to collect money, connect a payment provider that turns an `open` invoice into a
   payment and marks it `paid`; the counting and the invoices already exist.
 
+**Usage counts in the admin tables.** `usage_meter` (market analyses per month: what the plan's included analyses count) and
+`api_usage` (calls per API per minute and per month: what the plan's call limits count) are on the admin page. Owners can
+edit them, for example to set this month's `market_analyses` back to 0; listed administrators only read them. Edits are
+written to `mutation_audit_log` like any other.
+
+## Administrator tables: who edits what
+
+Listed administrators edit only the columns each table lists in `TABLES` (`src/routes/admin.ts`). Owners edit every column of
+every table except a table's single id column (other rows point at it), on all three APIs: desk-api asks the Registry and
+Market services on an owner's behalf with the header `x-desk-admin-owner`. A table with no single id column (`usage_meter`,
+`api_usage`, four Market cache tables) is answered with `primaryKey: "_rowKey"` and a `_rowKey` on each row, built from its key
+columns, so an edit reaches exactly one row (and a changed key column gives the row a new `_rowKey`). Values are fitted to the
+column's database type, or refused in plain words. Deleting keeps its per-table rules. The static admin key belongs to no
+person and keeps the administrators' rules. Code: `src/domain/adminTableEdits.ts`.
+
 ## Outbound webhooks
 
 `POST /gateway/webhooks` (`url`, `events`) registers an endpoint; the signing secret is shown once. Events (the list the Webhooks page offers,

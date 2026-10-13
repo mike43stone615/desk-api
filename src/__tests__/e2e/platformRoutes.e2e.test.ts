@@ -313,4 +313,71 @@ describe.skipIf(!hasDb)('E2E: status, changelog, billing, GraphQL and webhook re
       await pool.query('DELETE FROM platform_admins WHERE user_id = ANY($1)', [[deputy.id, junior.id]]);
     }
   });
+  it('owners edit every column (usage counts back to 0 included); listed administrators keep the short lists', async () => {
+    const owner = await mkOwner();
+    const helper = await mkUser('own-helper');
+    const subject = await mkUser('own-subject');
+    const month = new Date().toISOString().slice(0, 7);
+    const freeDescription = (await pool.query(`SELECT description FROM plans WHERE id = 'free'`)).rows[0].description;
+    await pool.query(`INSERT INTO usage_meter (subject_type, subject_id, month, metric, quantity) VALUES ('user', $1, $2, 'market_analyses', 5), ('user', $1, '2020-01', 'market_analyses', 9)`, [subject.id, month]);
+    await pool.query(`INSERT INTO api_usage (user_id, service, window_key, calls) VALUES ($1, 'market_validation_api', $2, 140)`, [subject.id, `M${month}`]);
+    expect((await call('POST', '/v1/admin/access', owner, { email: helper.email })).statusCode).toBe(201);
+    const patch = (who: { headers: Record<string, string> }, table: string, id: string, values: Record<string, unknown>) =>
+      app.inject({ method: 'PATCH', url: `/v1/admin/tables/${table}/rows/${id}`, headers: { ...who.headers, 'cf-connecting-ip': '203.0.113.9' }, payload: { values } });
+    const rowsOf = async (who: { headers: Record<string, string> }, table: string, column: string, value: string) =>
+      (await app.inject({ method: 'GET', url: `/v1/admin/tables/${table}/rows?filters=${encodeURIComponent(JSON.stringify({ [column]: value }))}`, headers: { ...who.headers, 'cf-connecting-ip': '203.0.113.9' } })).json();
+    try {
+      // what each one is offered
+      const meter = await rowsOf(owner, 'desk.usage_meter', 'subject_id', subject.id);
+      expect(meter.primaryKey).toBe('_rowKey');
+      expect(meter.editableColumns).toContain('quantity');
+      expect(meter.rows).toHaveLength(2);
+      expect((await rowsOf(helper, 'desk.usage_meter', 'subject_id', subject.id)).editableColumns).toEqual([]);
+      const thisMonth = meter.rows.find((r: { month: string }) => r.month === month);
+
+      // an administrator cannot reset usage; an owner can, and only the one row changes
+      expect((await patch(helper, 'desk.usage_meter', thisMonth._rowKey, { quantity: 0 })).statusCode).toBe(400);
+      const reset = await patch(owner, 'desk.usage_meter', thisMonth._rowKey, { quantity: '0' });
+      expect(reset.statusCode, reset.body).toBe(200);
+      expect(reset.json().row).toMatchObject({ quantity: 0, month, _rowKey: thisMonth._rowKey });
+      const after = (await pool.query(`SELECT month, quantity FROM usage_meter WHERE subject_id = $1 ORDER BY month`, [subject.id])).rows;
+      expect(after).toEqual([{ month: '2020-01', quantity: 9 }, { month, quantity: 0 }]);
+      expect((await pool.query(`SELECT COUNT(*)::int n FROM mutation_audit_log WHERE user_email = $1 AND entity_type = 'usage_meter'`, [owner.email.toLowerCase()])).rows[0].n).toBeGreaterThanOrEqual(1);
+
+      // the plan check reads the same row: the person is back to 0 analyses this month
+      const { analysesInMonth } = await import('../../domain/billing/plans');
+      expect(await analysesInMonth('user', subject.id)).toBe(0);
+
+      // the per-API call counter too
+      const calls = await rowsOf(owner, 'desk.api_usage', 'user_id', subject.id);
+      const callsReset = await patch(owner, 'desk.api_usage', calls.rows[0]._rowKey, { calls: 0 });
+      expect(callsReset.statusCode, callsReset.body).toBe(200);
+      expect((await pool.query(`SELECT calls FROM api_usage WHERE user_id = $1`, [subject.id])).rows[0].calls).toBe(0);
+
+      // a key column can change; the answer carries the row's new key
+      const moved = await patch(owner, 'desk.usage_meter', thisMonth._rowKey, { month: '2019-12' });
+      expect(moved.statusCode, moved.body).toBe(200);
+      expect(moved.json().row._rowKey).not.toBe(thisMonth._rowKey);
+      expect((await patch(owner, 'desk.usage_meter', thisMonth._rowKey, { quantity: 1 })).statusCode).toBe(404); // the old key finds nothing
+
+      // values are checked against the column's type and the table's rules, in plain words
+      const bad = await patch(owner, 'desk.usage_meter', moved.json().row._rowKey, { quantity: 'lots' });
+      expect(bad.statusCode).toBe(400);
+      expect(bad.json().detail).toBe('quantity needs a whole number.');
+      expect((await patch(owner, 'desk.usage_meter', moved.json().row._rowKey, { subject_type: 'robot' })).statusCode).toBe(400); // CHECK rule
+      expect((await patch(owner, 'desk.usage_meter', 'not-a-key', { quantity: 0 })).statusCode).toBe(404);
+
+      // owners edit columns outside the old lists elsewhere too, but never a single id column
+      const created = await app.inject({ method: 'PATCH', url: `/v1/admin/tables/desk.users/rows/${subject.id}`, headers: { ...owner.headers, 'cf-connecting-ip': '203.0.113.9' }, payload: { values: { created_at: '2020-02-02T00:00:00Z' } } });
+      expect(created.statusCode, created.body).toBe(200);
+      expect((await app.inject({ method: 'PATCH', url: `/v1/admin/tables/desk.users/rows/${subject.id}`, headers: { ...owner.headers, 'cf-connecting-ip': '203.0.113.9' }, payload: { values: { id: 'x' } } })).statusCode).toBe(400);
+      const flag = await app.inject({ method: 'PATCH', url: '/v1/admin/tables/desk.plans/rows/free', headers: { ...owner.headers, 'cf-connecting-ip': '203.0.113.9' }, payload: { values: { description: 'Free plan' } } });
+      expect(flag.statusCode, flag.body).toBe(200);
+    } finally {
+      await pool.query('DELETE FROM usage_meter WHERE subject_id = $1', [subject.id]);
+      await pool.query('DELETE FROM api_usage WHERE user_id = $1', [subject.id]);
+      await pool.query('DELETE FROM platform_admins WHERE user_id = $1', [helper.id]);
+      await pool.query(`UPDATE plans SET description = $1 WHERE id = 'free'`, [freeDescription]);
+    }
+  });
 });

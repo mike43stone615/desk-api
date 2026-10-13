@@ -30,6 +30,8 @@ import { config } from '../config';
 import { logMutation, requestIp, requestUserAgent } from '../modules/audit/mutation-audit';
 import { timingSafeEqualString } from '../utils/timing-safe-compare';
 import { emailField } from '../validators/auth';
+import { accessFor } from '../domain/admins';
+import { ROW_KEY, columnTypes, coerceToColumn, encodeRowKey, rowWhere } from '../domain/adminTableEdits';
 
 type AdminSource = 'desk' | 'registry' | 'market' | 'compliance';
 
@@ -251,9 +253,21 @@ const TABLES = {
     options: { status: ['draft', 'open', 'paid', 'void'] },
     deletable: false, // a financial record: mark it void instead
   },
+  // No single id column: a row is the combination below (see adminTableEdits.ts). Owners can edit it (for example to set
+  // this month's market_analyses back to 0); administrators only read it.
   usage_meter: {
     primaryKey: 'subject_id',
+    keyColumns: ['subject_type', 'subject_id', 'month', 'metric'],
     columns: ['subject_type', 'subject_id', 'month', 'metric', 'quantity'],
+    editable: [],
+    secret: [],
+    deletable: false,
+  },
+  // Calls each person made to each API, per minute ('m2026-10-13T15:05') and per month ('M2026-10'): what the plan limits count.
+  api_usage: {
+    primaryKey: 'user_id',
+    keyColumns: ['user_id', 'window_key', 'service'],
+    columns: ['user_id', 'service', 'window_key', 'calls'],
     editable: [],
     secret: [],
     deletable: false,
@@ -321,6 +335,8 @@ type TableName = keyof typeof TABLES;
 
 type AdminTableConfig = {
   primaryKey: string;
+  /** For a table with no single id column: the columns that together pick one row (its rows then carry ROW_KEY). */
+  keyColumns?: readonly string[];
   columns: readonly string[];
   editable: readonly string[];
   secret: readonly string[];
@@ -407,12 +423,6 @@ function parseSort(
   return { column, direction };
 }
 
-function normalizeValue(value: unknown): unknown {
-  if (value === null || value === undefined) return null;
-  if (typeof value === 'number' || typeof value === 'boolean') return value;
-  return String(value);
-}
-
 function maskSecrets(
   row: Record<string, unknown>,
   table: AdminTableConfig,
@@ -493,6 +503,27 @@ function columnOptionsFor(table: AdminTableConfig): Record<string, readonly stri
   return table.options ?? {};
 }
 
+/** True for a signed-in owner. The static administrator key belongs to no person, so it keeps the administrators' rules. */
+async function callerIsOwner(request: FastifyRequest): Promise<boolean> {
+  const user = request.currentUser;
+  return !!user && (await accessFor(user)).isOwner;
+}
+
+/** Administrators edit the listed columns; an owner edits every column except a single id column (other rows point at it). */
+function editableFor(table: AdminTableConfig, owner: boolean): readonly string[] {
+  if (!owner) return table.editable;
+  return table.keyColumns ? table.columns : table.columns.filter((c) => c !== table.primaryKey);
+}
+
+/** The column the page uses to tell rows apart. */
+function rowIdColumn(table: AdminTableConfig): string {
+  return table.keyColumns ? ROW_KEY : table.primaryKey;
+}
+
+function withRowKey(row: Record<string, unknown>, table: AdminTableConfig): Record<string, unknown> {
+  return table.keyColumns ? { ...row, [ROW_KEY]: encodeRowKey(row, table.keyColumns) } : row;
+}
+
 function tableKey(source: AdminSource, rawName: string): string {
   return `${source}.${rawName}`;
 }
@@ -513,11 +544,15 @@ function parseLocalTableName(raw: string): TableName {
   throw new HttpError(404, 'Table not found.', 'table_not_found');
 }
 
+/** Sent to the Registry and Market services when an owner is asking: they then offer every column for editing too. */
+const OWNER_HEADER = 'x-desk-admin-owner';
+
 async function proxyUpstreamJson<T = unknown>(
   source: Exclude<AdminSource, 'desk'>,
   path: string,
   method: 'GET' | 'PATCH' | 'DELETE' = 'GET',
   body?: unknown,
+  ownerEmail?: string | null,
 ): Promise<T> {
   const baseUrl = source === 'registry' ? config.registryApiUrl : source === 'market' ? config.marketApiUrl : config.complianceOsUrl;
   const apiKey = source === 'registry' ? config.registryApiAdminKey : source === 'market' ? config.marketApiAdminKey : config.complianceOsApiKey;
@@ -526,7 +561,7 @@ async function proxyUpstreamJson<T = unknown>(
 
   const response = await fetch(`${baseUrl.replace(/\/$/, '')}${path}`, {
     method,
-    headers: { 'Content-Type': 'application/json', 'x-api-key': apiKey },
+    headers: { 'Content-Type': 'application/json', 'x-api-key': apiKey, ...(ownerEmail ? { [OWNER_HEADER]: ownerEmail } : {}) },
     body:
       body === undefined || method === 'GET' || method === 'DELETE'
         ? undefined
@@ -548,12 +583,16 @@ async function proxyUpstreamJson<T = unknown>(
 // clean picture when a sibling service is actually down or misconfigured.
 async function listUpstreamTables(
   source: Exclude<AdminSource, 'desk'>,
+  ownerEmail: string | null,
 ): Promise<{ tables: UpstreamTableSummary[] } | { error: string }> {
   let upstream: { tables?: UpstreamTableSummary[] };
   try {
     upstream = await proxyUpstreamJson<{ tables?: UpstreamTableSummary[] }>(
       source,
       '/admin/tables',
+      'GET',
+      undefined,
+      ownerEmail,
     );
   } catch (err) {
     return { error: err instanceof HttpError ? err.message : `${source} admin table list request failed.` };
@@ -577,6 +616,7 @@ async function proxyUpstreamRows(
   filters?: string,
   sortColumn?: string,
   sortDirection?: string,
+  ownerEmail?: string | null,
 ): Promise<UpstreamRows> {
   const query = new URLSearchParams({ limit, offset });
   if (filters) query.set('filters', filters);
@@ -585,6 +625,9 @@ async function proxyUpstreamRows(
   return proxyUpstreamJson<UpstreamRows>(
     source,
     `/admin/tables/${encodeURIComponent(table)}/rows?${query.toString()}`,
+    'GET',
+    undefined,
+    ownerEmail,
   );
 }
 
@@ -594,12 +637,14 @@ async function proxyUpstreamMutation(
   table: string,
   id: string,
   body?: unknown,
+  ownerEmail?: string | null,
 ): Promise<unknown> {
   return proxyUpstreamJson(
     source,
     `/admin/tables/${encodeURIComponent(table)}/rows/${encodeURIComponent(id)}`,
     method,
     body,
+    ownerEmail,
   );
 }
 
@@ -628,11 +673,13 @@ export async function guard(request: FastifyRequest, reply: FastifyReply): Promi
 
 export async function adminTablesHandler(request: FastifyRequest, reply: FastifyReply) {
   await guard(request, reply);
+  const owner = await callerIsOwner(request);
+  const ownerEmail = owner ? request.currentUser!.email : null;
   // compliance-os is retired (Desk Oracle serves its data and has no table browser), so it is no longer asked: it only ever
   // answered "Not Found". Its table keys still parse, so an old link fails with the upstream's own answer.
   const [registryResult, marketResult] = await Promise.all([
-    listUpstreamTables('registry'),
-    listUpstreamTables('market'),
+    listUpstreamTables('registry', ownerEmail),
+    listUpstreamTables('market', ownerEmail),
   ]);
   const sourceErrors: Record<string, string> = {};
   if ('error' in registryResult) sourceErrors.registry = registryResult.error;
@@ -643,9 +690,9 @@ export async function adminTablesHandler(request: FastifyRequest, reply: Fastify
       source: 'desk' as const,
       name: tableKey('desk', name),
       rawName: name,
-      primaryKey: table.primaryKey,
+      primaryKey: rowIdColumn(table),
       columns: table.columns,
-      editableColumns: table.editable,
+      editableColumns: editableFor(table, owner),
       secretColumns: table.secret,
       columnOptions: columnOptionsFor(table),
       deletable: table.deletable === true,
@@ -660,6 +707,7 @@ export async function adminTablesHandler(request: FastifyRequest, reply: Fastify
 
 export async function adminTableRowsHandler(request: FastifyRequest, reply: FastifyReply) {
   await guard(request, reply);
+  const owner = await callerIsOwner(request);
   const { table: rawTable } = request.params as { table: string };
   const parsed = parseTableKey(rawTable);
   const query = request.query as {
@@ -679,6 +727,7 @@ export async function adminTableRowsHandler(request: FastifyRequest, reply: Fast
       query.filters,
       query.sortColumn,
       query.sortDirection,
+      owner ? request.currentUser!.email : null,
     );
     return reply.send({
       ...rows,
@@ -710,12 +759,12 @@ export async function adminTableRowsHandler(request: FastifyRequest, reply: Fast
     source: 'desk',
     table: tableKey('desk', tableName),
     rawName: tableName,
-    primaryKey: table.primaryKey,
+    primaryKey: rowIdColumn(table),
     columns: table.columns,
-    editableColumns: table.editable,
+    editableColumns: editableFor(table, owner),
     secretColumns: table.secret,
     columnOptions: columnOptionsFor(table),
-    rows: rowsResult.rows.map((row) => maskSecrets(row, table)),
+    rows: rowsResult.rows.map((row) => withRowKey(maskSecrets(row, table), table)),
     totalRows: Number(countResult.rows[0]?.count ?? 0),
     deletable: table.deletable === true,
   });
@@ -723,59 +772,63 @@ export async function adminTableRowsHandler(request: FastifyRequest, reply: Fast
 
 export async function adminTableUpdateRowHandler(request: FastifyRequest, reply: FastifyReply) {
   await guard(request, reply);
+  const owner = await callerIsOwner(request);
   const { table: rawTable, id } = request.params as { table: string; id: string };
   const parsed = parseTableKey(rawTable);
   const body = request.body as { values?: Record<string, unknown> };
 
   if (parsed.source !== 'desk') {
-    const data = await proxyUpstreamMutation(parsed.source, 'PATCH', parsed.rawName, id, body);
+    const data = await proxyUpstreamMutation(parsed.source, 'PATCH', parsed.rawName, id, body, owner ? request.currentUser!.email : null);
     return reply.send(data);
   }
 
   const tableName = parseLocalTableName(parsed.rawName);
   const table: AdminTableConfig = TABLES[tableName];
+  const editable = editableFor(table, owner);
   const values = body.values ?? {};
-  const entries = Object.entries(values).filter(([column]) => table.editable.includes(column));
+  const entries = Object.entries(values).filter(([column]) => editable.includes(column));
+  if (entries.length === 0) throw new HttpError(400, 'No editable fields were provided.');
+  // The table's own rules first (choices, e-mail, industry, number ranges), then the column's database type.
+  const types = await columnTypes(pool, tableName);
   const validatedEntries = entries.map(
-    ([column, value]) => [column, validateEditableValue(tableName, column, value)] as const,
+    ([column, value]) => [column, coerceToColumn(column, validateEditableValue(tableName, column, value), types.get(column))] as const,
   );
-  if (validatedEntries.length === 0) throw new HttpError(400, 'No editable fields were provided.');
 
   const columns = table.columns.map(quoteIdentifier).join(', ');
+  const where = rowWhere(id, table.primaryKey, table.keyColumns, quoteIdentifier);
   const beforeResult = await pool.query<Record<string, unknown>>(
-    `SELECT ${columns} FROM ${quoteIdentifier(tableName)} WHERE ${quoteIdentifier(table.primaryKey)} = $1`,
-    [id],
+    `SELECT ${columns} FROM ${quoteIdentifier(tableName)} WHERE ${where.sql}`,
+    where.params,
   );
   const before = beforeResult.rows[0] ?? null;
+  if (!before) throw new HttpError(404, 'Row not found.', 'row_not_found');
 
   // Changing a user's email through the table editor used to leave email_confirmed_at untouched, so the row kept
   // showing "confirmed" for an address nobody actually confirmed -- reset it in the same UPDATE whenever the email
-  // is genuinely changing (not just resaved to its current value).
-  const finalEntries = [...validatedEntries];
+  // is genuinely changing (not just resaved to its current value), unless the same edit sets it.
+  const finalEntries: Array<readonly [string, unknown]> = [...validatedEntries];
   if (tableName === 'users') {
     const emailEntry = finalEntries.find(([column]) => column === 'email');
-    if (emailEntry && before && emailEntry[1] !== before.email) finalEntries.push(['email_confirmed_at', null]);
+    if (emailEntry && emailEntry[1] !== before.email && !finalEntries.some(([column]) => column === 'email_confirmed_at')) {
+      finalEntries.push(['email_confirmed_at', null]);
+    }
   }
 
   const assignments = finalEntries
     .map(([column], index) => `${quoteIdentifier(column)} = $${index + 1}`)
     .join(', ');
-  const params = finalEntries.map(([, value]) => normalizeValue(value));
-  params.push(id);
+  const target = rowWhere(id, table.primaryKey, table.keyColumns, quoteIdentifier, finalEntries.length + 1);
+  let row: Record<string, unknown> | undefined;
   try {
-    await pool.query(
-      `UPDATE ${quoteIdentifier(tableName)} SET ${assignments} WHERE ${quoteIdentifier(table.primaryKey)} = $${params.length}`,
-      params,
+    // RETURNING: an owner may change a key column, after which the old key no longer finds the row.
+    const result = await pool.query<Record<string, unknown>>(
+      `UPDATE ${quoteIdentifier(tableName)} SET ${assignments} WHERE ${target.sql} RETURNING ${columns}`,
+      [...finalEntries.map(([, value]) => value), ...target.params],
     );
+    row = result.rows[0];
   } catch (err) {
     throw friendlyDbError(err) ?? err;
   }
-
-  const rowResult = await pool.query<Record<string, unknown>>(
-    `SELECT ${columns} FROM ${quoteIdentifier(tableName)} WHERE ${quoteIdentifier(table.primaryKey)} = $1`,
-    [id],
-  );
-  const row = rowResult.rows[0];
   if (!row) throw new HttpError(404, 'Row not found.', 'row_not_found');
 
   logMutation({
@@ -783,14 +836,14 @@ export async function adminTableUpdateRowHandler(request: FastifyRequest, reply:
     userEmail: request.currentUser?.email ?? 'admin-api-key',
     action: 'admin_table.update',
     entityType: tableName,
-    entityId: id,
+    entityId: table.keyColumns ? (table.keyColumns.map((c) => String(before[c])).join(' / ')).slice(0, 200) : id,
     before,
     after: row,
     ipAddress: requestIp(request),
     userAgent: requestUserAgent(request),
   });
 
-  return reply.send({ row: maskSecrets(row, table) });
+  return reply.send({ row: withRowKey(maskSecrets(row, table), table) });
 }
 
 export async function adminTableDeleteRowHandler(request: FastifyRequest, reply: FastifyReply) {
@@ -799,7 +852,7 @@ export async function adminTableDeleteRowHandler(request: FastifyRequest, reply:
   const parsed = parseTableKey(rawTable);
 
   if (parsed.source !== 'desk') {
-    await proxyUpstreamMutation(parsed.source, 'DELETE', parsed.rawName, id);
+    await proxyUpstreamMutation(parsed.source, 'DELETE', parsed.rawName, id, undefined, (await callerIsOwner(request)) ? request.currentUser!.email : null);
     return reply.send({ ok: true });
   }
 
@@ -808,9 +861,10 @@ export async function adminTableDeleteRowHandler(request: FastifyRequest, reply:
   if (table.deletable !== true) throw new HttpError(403, 'Deletes are disabled for this table.', 'delete_disabled');
 
   const columns = table.columns.map(quoteIdentifier).join(', ');
+  const where = rowWhere(id, table.primaryKey, table.keyColumns, quoteIdentifier);
   const beforeResult = await pool.query<Record<string, unknown>>(
-    `SELECT ${columns} FROM ${quoteIdentifier(tableName)} WHERE ${quoteIdentifier(table.primaryKey)} = $1`,
-    [id],
+    `SELECT ${columns} FROM ${quoteIdentifier(tableName)} WHERE ${where.sql}`,
+    where.params,
   );
   const before = beforeResult.rows[0] ?? null;
 
@@ -818,10 +872,7 @@ export async function adminTableDeleteRowHandler(request: FastifyRequest, reply:
   if (tableName === 'users' && before) await gatewayApiKeys.revokeAllForOwner(id);
 
   try {
-    await pool.query(
-      `DELETE FROM ${quoteIdentifier(tableName)} WHERE ${quoteIdentifier(table.primaryKey)} = $1`,
-      [id],
-    );
+    await pool.query(`DELETE FROM ${quoteIdentifier(tableName)} WHERE ${where.sql}`, where.params);
   } catch (err) {
     throw friendlyDbError(err) ?? err;
   }

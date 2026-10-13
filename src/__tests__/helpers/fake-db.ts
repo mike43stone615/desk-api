@@ -268,6 +268,8 @@ export function createFakeDb() {
       }
       return { rows: [], rowCount: row ? 1 : 0 };
     }
+    // Column types for the admin table editor: unknown here, so values are written as given.
+    if (s.startsWith('SELECT column_name, data_type, is_nullable FROM information_schema.columns')) return { rows: [], rowCount: 0 };
     if (s.startsWith('UPDATE "users" SET')) {
       // Admin table update — values already validated by caller. Parses
       // `"column" = $N` assignment pairs out of the SQL text so the fake
@@ -281,7 +283,7 @@ export function createFakeDb() {
           row[column] = p[Number(index) - 1];
         }
       }
-      return { rows: [], rowCount: row ? 1 : 0 };
+      return { rows: row && s.includes(' RETURNING ') ? [{ ...row }] : [], rowCount: row ? 1 : 0 };
     }
 
     // ── sessions ───────────────────────────────────────────────────────────
