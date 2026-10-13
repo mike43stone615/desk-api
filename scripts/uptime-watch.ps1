@@ -29,8 +29,15 @@ foreach ($f in @($StateFile, $LogFile)) { $d = Split-Path $f -Parent; if ($d -an
 
 function Write-Log([string]$message) {
   Add-Content -Path $LogFile -Value ("{0} {1}" -f (Get-Date).ToString('yyyy-MM-dd HH:mm:ss'), $message) -Encoding utf8
-  # Keep the log small: once it passes ~1 MB, keep only the newest 3000 lines.
-  if ((Get-Item $LogFile).Length -gt 1MB) { Get-Content $LogFile -Tail 3000 | Set-Content $LogFile -Encoding utf8 }
+  # Keep the log small: once it passes ~1 MB, keep only the newest 1500 lines (~0.9 MB at today's line length, so it
+  # drops back under the limit instead of being trimmed again on every write).
+  # The tail is read into memory BEFORE writing: piping Get-Content straight into Set-Content on the same file fails with
+  # "being used by another process", and with ErrorActionPreference=Stop that killed every run that raised an alert
+  # (before it saved its state, so the same alert repeated every 2 minutes) once the log passed 1 MB (found October 2026).
+  # Trimming must never stop the watch, so a failure here is ignored and tried again next time.
+  try {
+    if ((Get-Item $LogFile).Length -gt 1MB) { $keep = @(Get-Content $LogFile -Tail 1500); Set-Content -Path $LogFile -Value $keep -Encoding utf8 }
+  } catch { }
 }
 
 function Show-Toast([string]$title, [string]$message) {
