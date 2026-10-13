@@ -154,11 +154,18 @@ describe.skipIf(!hasDb)('E2E: plans, invoices and webhooks', () => {
   });
 
   it('plan call limits: calls are counted per person, Free stops at a monthly limit, a paid plan bills past it, per-minute limits refuse', async () => {
+    // The minute counters are keyed by the clock minute: start well clear of a minute's end, or the minute row this test
+    // fills can roll over before it reads it back (it used to fail now and then for exactly that reason).
+    const intoMinute = Date.now() % 60_000;
+    if (intoMinute > 45_000) await new Promise((r) => setTimeout(r, 60_000 - intoMinute + 200));
     const u = await mkUser('limits');
     await enforceCallAllowance(u.id, 'registry_api'); // nothing used yet
-    recordCall(u.id, 'registry_api');
-    await new Promise((r) => setTimeout(r, 150));
-    const first = await callCounts(u.id);
+    recordCall(u.id, 'registry_api'); // not awaited by design (a call never waits for its own counting): wait until it lands
+    let first = await callCounts(u.id);
+    for (let i = 0; i < 40 && first.month.total === 0; i++) {
+      await new Promise((r) => setTimeout(r, 50));
+      first = await callCounts(u.id);
+    }
     expect(first.minute).toMatchObject({ registry_api: 1, total: 1 });
     expect(first.month).toMatchObject({ registry_api: 1, total: 1 });
     // Free: the Registry API's 300 a month are used up; the other APIs still answer

@@ -48,7 +48,8 @@ beforeAll(async () => {
   authHeaders = { authorization: `Bearer ${token}` };
 });
 
-describe('POST /functions/v1/analyze-business-setup fallback classification', () => {
+// These run dozens of inputs through the classifier each; on a busy machine they took just over the 5-second default.
+describe('POST /functions/v1/analyze-business-setup fallback classification', { timeout: 30_000 }, () => {
   const industries = [
     'Consulting / Professional Services',
     'Coffee Shop / Cafe',
