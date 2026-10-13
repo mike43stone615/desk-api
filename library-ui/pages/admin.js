@@ -371,7 +371,7 @@ registerRoute('/developer/admin', async (app) => {
     app.innerHTML = `
       <div class="page">
         <div class="page-head-row">
-          <div class="head-text"><h1>API Library</h1><p>Administration: view and edit the data behind each API.</p></div>
+          <div class="head-text"><h1>API Library</h1><p>View and edit the data behind each API.</p></div>
         </div>
         ${tabsHtml('/developer/admin')}
         <div class="admin-source-row">
