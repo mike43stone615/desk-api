@@ -169,7 +169,8 @@ function Invoke-UrlCheck($check) {
   return $null
 }
 
-# Data freshness: every listed item's timestamp field must be newer than maxAgeHours.
+# Data freshness: every listed item's timestamp field must be newer than maxAgeHours, or than its own limit in
+# maxAgeHoursFor (e.g. Florida publishes quarterly but Virginia is loaded monthly, so one limit cannot fit both).
 function Invoke-FreshnessCheck($check) {
   $page = Get-Page $check
   if ($page.error) { return $page.error }
@@ -182,7 +183,8 @@ function Invoke-FreshnessCheck($check) {
     $stamp = $items.$name.($check.field)
     if (-not $stamp) { $stale += "$name (never)"; continue }
     $age = ((Get-Date).ToUniversalTime() - ([datetime]$stamp).ToUniversalTime()).TotalHours
-    if ($age -gt [double]$check.maxAgeHours) { $stale += ("{0} ({1:N0} days old)" -f $name, ($age / 24)) }
+    $limit = if ($check.maxAgeHoursFor -and $check.maxAgeHoursFor.$name) { [double]$check.maxAgeHoursFor.$name } else { [double]$check.maxAgeHours }
+    if ($age -gt $limit) { $stale += ("{0} ({1:N0} days old, limit {2:N0})" -f $name, ($age / 24), ($limit / 24)) }
   }
   # A sync that finishes but loaded only part of the file has a fresh timestamp and a shrunken count: `minCounts` catches that.
   if ($check.minCounts) {
@@ -191,7 +193,7 @@ function Invoke-FreshnessCheck($check) {
       if ($null -ne $count -and [double]$count -lt [double]$prop.Value) { $stale += ("{0} has only {1:N0} records (expected at least {2:N0})" -f $prop.Name, $count, $prop.Value) }
     }
   }
-  if ($stale.Count -gt 0) { return ('problem with the imported data (stale for over {0:N0} days, or too few records): {1}' -f ([double]$check.maxAgeHours / 24), ($stale -join ', ')) }
+  if ($stale.Count -gt 0) { return ('problem with the imported data (too old, or too few records): {0}' -f ($stale -join ', ')) }
   return $null
 }
 

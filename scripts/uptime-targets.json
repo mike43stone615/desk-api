@@ -208,7 +208,7 @@
     },
     {
       "name": "registry-data-fresh",
-      "what": "the Florida and Virginia business-record imports (weekly sync; a whole month without new data means the sync or its source has stopped)",
+      "what": "the Florida and Virginia business-record imports (Florida: quarterly file, re-downloaded by the weekly task after 75 days, so 90 days means that broke; Virginia: loaded by hand monthly with sync-virginia.ps1 in the home folder, so 45 days is the reminder)",
       "kind": "freshness",
       "url": "http://localhost:3456/functions/v1/registry-sync-status",
       "headers": {
@@ -226,7 +226,11 @@
         "FL": 11000000,
         "VA": 1900000
       },
-      "everyMinutes": 720
+      "everyMinutes": 720,
+      "maxAgeHoursFor": {
+        "FL": 2160,
+        "VA": 1080
+      }
     },
     {
       "name": "reference-percentiles-fresh",
