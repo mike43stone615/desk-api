@@ -48,7 +48,10 @@ export const CALLER_RULES: Record<string, { ip: Limit; email?: Limit }> = {
 /** "METHOD /pattern" (without /v1) -> limit per signed-in account. */
 export const USER_RULES: Record<string, Limit> = {
   'POST /graphql': perHour('graphql', 1200, 'GraphQL requests'),
-  'POST /gateway/api-keys': perHour('key-create', 10, 'API keys created'),
+  // The plan already caps how many keys someone HAS (Free 10, Pro 25, Business 100, with a clear message); this only stops
+  // create-and-revoke churn. At 10 an hour it fired before the plan's own cap (Free's 11th key said "try again in 60
+  // minutes") and a Business customer needed 10 hours to make the keys their plan includes (found 2026-10-13).
+  'POST /gateway/api-keys': perHour('key-create', 100, 'API keys created'),
   'POST /gateway/api-keys/:id/services': perHour('key-service-add', 20, 'APIs added to keys'),
   'DELETE /gateway/api-keys/:id/services/:service': perHour('key-service-remove', 20, 'APIs removed from keys'),
   'DELETE /gateway/api-keys/:id': perHour('key-revoke', 30, 'API keys revoked'),

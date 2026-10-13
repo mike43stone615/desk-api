@@ -66,7 +66,9 @@ export async function authorizeInfoHandler(request: FastifyRequest, reply: Fasti
 }
 
 const DecisionSchema = z.object({
-  clientId: z.string().min(1).max(100), redirectUri: z.string().min(1).max(500), scope: z.string().min(1).max(200), state: z.string().max(500).optional(),
+  // scope: room for every scope there is (all 18 an app can register come to 314 characters; the limit was 200, so an app
+  // asking for all of its readables could not be approved; found by a live test 2026-10-13).
+  clientId: z.string().min(1).max(100), redirectUri: z.string().min(1).max(500), scope: z.string().min(1).max(1000), state: z.string().max(500).optional(),
   codeChallenge: z.string().max(100), codeChallengeMethod: z.string().max(10), responseType: z.string().max(20), approve: z.boolean(),
 });
 

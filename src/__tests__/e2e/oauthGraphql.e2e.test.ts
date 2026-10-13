@@ -142,6 +142,29 @@ describe.skipIf(!hasDb)('E2E: OAuth and GraphQL', () => {
     expect((await call('POST', `/v1/oauth/clients/${pub.client.id}/rotate-secret`, dev.headers, {})).statusCode).toBe(400);
   });
 
+  it('an app can be approved for every readable at once, and a removed redirect address stops working even for a code issued to it', async () => {
+    // Found by a live test 2026-10-13: the consent step took at most 200 characters of scope (all 18 app scopes are 314), and
+    // a code issued to an address could still be exchanged after the owner removed that address.
+    const dev = await mkUser('allscopes-dev');
+    const person = await mkUser('allscopes-person');
+    const all = ['profile:name', 'profile:email', 'businesses:basic', 'businesses:industry', 'businesses:location', 'businesses:legal_entity', 'businesses:tax_election', 'businesses:special_designation', 'businesses:regulatory_status', 'keys:name', 'keys:dates', 'keys:apis', 'usage:read', 'webhooks:list', 'webhooks:events', 'webhooks:dates', 'webhooks:active', 'webhooks:deliveries'];
+    const { client, clientSecret } = await registerApp(dev, all);
+    const v = verifierFor();
+    const code = await authorize(person, client.id, all.join(' '), v);
+    const tokens = await tokenCall({ grant_type: 'authorization_code', client_id: client.id, client_secret: clientSecret!, code, redirect_uri: REDIRECT, code_verifier: v });
+    expect(tokens.statusCode, tokens.body).toBe(200);
+    expect(tokens.json().scope.split(' ')).toHaveLength(18);
+
+    const second = 'https://app.example.org/second';
+    await call('PUT', `/v1/oauth/clients/${client.id}/redirect-uris`, dev.headers, { redirectUris: [REDIRECT, second] });
+    const res = await call('POST', '/v1/oauth/authorize/decision', person.headers, { clientId: client.id, redirectUri: second, scope: 'profile:name', codeChallenge: challengeOf(v), codeChallengeMethod: 'S256', responseType: 'code', approve: true });
+    const pending = new URL(res.json().redirectTo).searchParams.get('code')!;
+    await call('PUT', `/v1/oauth/clients/${client.id}/redirect-uris`, dev.headers, { redirectUris: [REDIRECT] });
+    const late = await tokenCall({ grant_type: 'authorization_code', client_id: client.id, client_secret: clientSecret!, code: pending, redirect_uri: second, code_verifier: v });
+    expect(late.statusCode).toBe(400);
+    expect(late.json().error).toBe('invalid_grant');
+  });
+
   it('runs the whole flow: approve, exchange (PKCE), call the API within the scopes, refuse the rest', async () => {
     const dev = await mkUser('dev2');
     const person = await mkUser('person');

@@ -210,6 +210,8 @@ export async function exchangeCode(input: { clientId: string; clientSecret?: str
   );
   const c = rows[0];
   if (!c || c.client_id !== client.id || Date.parse(c.expires_at) < Date.now() || c.redirect_uri !== input.redirectUri) throw new OAuthError('invalid_grant', 'The code is wrong, expired or already used.');
+  // An address removed from the app stops working at once, including for a code issued to it just before (2026-10-13).
+  if (!client.redirectUris.includes(c.redirect_uri)) throw new OAuthError('invalid_grant', 'That redirect address is no longer registered for this app.');
   if (!input.codeVerifier || !safeEqualHex(Buffer.from(pkceChallenge(input.codeVerifier), 'base64url').toString('hex'), Buffer.from(c.code_challenge, 'base64url').toString('hex'))) throw new OAuthError('invalid_grant', 'The code verifier does not match.');
   return issueTokens(client, c.user_id, c.scopes);
 }

@@ -13,7 +13,7 @@ vi.mock('../../infrastructure/email/resend', async () => (await import('../helpe
 import { pool } from '../../db';
 import { buildApp } from '../../app';
 import { config } from '../../config';
-import { hit, setRouteLimitsEnabledForTests, type Limit } from '../../middleware/route-limits';
+import { hit, setRouteLimitsEnabledForTests, USER_RULES, type Limit } from '../../middleware/route-limits';
 import type { FastifyInstance } from 'fastify';
 
 const fakeDb = pool as unknown as ReturnType<typeof createFakeDb>;
@@ -117,7 +117,7 @@ describe('caller limits on the email and token routes', () => {
 });
 
 describe('account limits once a caller is signed in', () => {
-  it('the eleventh key in an hour is refused for that account only', async () => {
+  it('the eleventh key on Free is refused by the plan, with the plan\'s reason, not by the hourly throttle', async () => {
     const alice = seedUser();
     const bob = seedUser();
     for (let i = 0; i < 10; i++) {
@@ -125,10 +125,14 @@ describe('account limits once a caller is signed in', () => {
       expect(r.statusCode, `key ${i}`).toBe(201);
     }
     const eleventh = await app.inject({ method: 'POST', url: '/gateway/api-keys', headers: alice.headers, payload: { label: 'k11', services: ['desk_api'] } });
-    expect(eleventh.statusCode).toBe(429);
-    expect(Number(eleventh.headers['retry-after'])).toBeGreaterThan(0);
-    expect(JSON.parse(eleventh.body).detail).toMatch(/API keys created/);
+    expect(eleventh.statusCode).toBe(409);
+    expect(JSON.parse(eleventh.body).detail).toMatch(/at most 10 active keys/);
     expect((await app.inject({ method: 'POST', url: '/gateway/api-keys', headers: bob.headers, payload: { label: 'b', services: ['desk_api'] } })).statusCode).toBe(201);
+  });
+
+  it('the hourly key-creation throttle leaves room for the largest plan (Business: 100 keys)', () => {
+    // At 10 an hour it fired before the plan's own cap, and a Business customer needed 10 hours for the keys they pay for.
+    expect(USER_RULES['POST /gateway/api-keys']).toMatchObject({ max: 100, windowMs: 60 * 60 * 1000 });
   });
 
   it('routes without a rule are untouched (listing keys, drafts)', async () => {
