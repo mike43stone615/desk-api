@@ -120,8 +120,12 @@ registerRoute('/developer/admin', async (app) => {
     if (!rows) return false;
     return rows.serverHasMore !== null && rows.serverHasMore !== undefined ? rows.serverHasMore : rows.rows.length < rows.totalRows;
   }
-  /** "1,234 rows", or "about 4,312,000 rows" when the total is the database's estimate. */
-  function totalText(t) { return `${t.totalIsEstimate ? 'about ' : ''}${Number(t.totalRows).toLocaleString('en-US')} rows`; }
+  /** "1,234 rows"; "about 14,876,297 rows" for a large table's estimate; "10,000+ rows" for a filter's capped count. */
+  function totalText(t) {
+    const n = Number(t.totalRows).toLocaleString('en-US');
+    if (!t.totalIsEstimate) return `${n} rows`;
+    return Object.keys(s.filters).length ? `${n}+ rows` : `about ${n} rows`;
+  }
   function initializeHiddenColumns(rows) {
     if (!rows) return;
     if (!(rows.table in s.hiddenColumnsByTable)) {
