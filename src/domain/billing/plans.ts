@@ -311,7 +311,8 @@ export function invoiceLinesForMonth(segments: PlanSegment[], monthStartMs: numb
     }
     const cents = Math.round((seg.plan.monthlyPriceCents * (seg.to - seg.from)) / monthMs);
     if (cents <= 0) continue;
-    const days = Math.max(1, Math.round((seg.to - seg.from) / 86_400_000));
+    // To a tenth of a day: two halves of a 31-day month read "15.5 of 31 days" each (whole days rounded both up to 16).
+    const days = Math.max(0.1, Math.round((seg.to - seg.from) / 8_640_000) / 10);
     lines.push({
       description: `${seg.plan.name} plan, ${dayLabel(seg.from)} to ${dayLabel(seg.to - 1)} (${days} of ${monthDays} days)`,
       quantity: 1, unitCents: cents, totalCents: cents,

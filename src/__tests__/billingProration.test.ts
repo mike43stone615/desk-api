@@ -43,7 +43,7 @@ describe('invoiceLinesForMonth', () => {
   it('Pro to Business mid-month: each plan for its own days, adding up to the right total', () => {
     const mid = at('2026-10-16T12:00:00Z');
     const lines = invoiceLinesForMonth([{ plan: PRO, from: OCT, to: mid }, { plan: BIZ, from: mid, to: NOV }], OCT, NOV, 0);
-    expect(lines.map((l) => l.description)).toEqual(['Pro plan, Oct 1 to Oct 16 (16 of 31 days)', 'Business plan, Oct 16 to Oct 31 (16 of 31 days)']);
+    expect(lines.map((l) => l.description)).toEqual(['Pro plan, Oct 1 to Oct 16 (15.5 of 31 days)', 'Business plan, Oct 16 to Oct 31 (15.5 of 31 days)']);
     expect(lines.map((l) => l.totalCents)).toEqual([750, 2500]); // exactly half a month each
   });
 

@@ -120,7 +120,7 @@ describe.skipIf(!hasDb)('E2E: plans, invoices and webhooks', () => {
     const started = Date.parse((await pool.query(`SELECT created_at FROM subscriptions WHERE subject_id = $1 AND status <> 'canceled'`, [u.id])).rows[0].created_at);
     const expected = Math.round((5000 * (thisStart.getTime() + monthMs - started)) / monthMs);
     expect(now.lines).toHaveLength(1);
-    expect(now.lines[0].description).toMatch(/^Business plan, .* of \d+ days\)$/);
+    expect(now.lines[0].description).toMatch(/^Business plan, .* \([\d.]+ of \d+ days\)$/);
     expect(now.lines[0].totalCents).toBe(expected);
   });
 
