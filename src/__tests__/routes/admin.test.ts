@@ -230,4 +230,30 @@ describe('Registry and Market tables: the owner signal is sent only for an owner
       Object.assign(config, { registryApiUrl: saved.a, registryApiAdminKey: saved.b, marketApiUrl: saved.c, marketApiAdminKey: saved.d });
     }
   });
+
+  it('a delete is sent with no JSON content type (an empty JSON body was refused), and the backend reason comes back', async () => {
+    const { config } = await import('../../config');
+    const saved = { a: config.registryApiUrl, b: config.registryApiAdminKey };
+    const calls: Array<{ method?: string; headers?: Record<string, string>; body?: unknown }> = [];
+    vi.stubGlobal('fetch', vi.fn(async (_url: string, init?: { method?: string; headers?: Record<string, string>; body?: unknown }) => {
+      calls.push(init ?? {});
+      return init?.method === 'DELETE' && String(_url).endsWith('/rows/gone')
+        ? new Response(JSON.stringify({ statusCode: 404, message: 'Row not found.' }), { status: 404 })
+        : new Response(JSON.stringify({ ok: true }), { status: 200 });
+    }));
+    Object.assign(config, { registryApiUrl: 'http://registry.test', registryApiAdminKey: 'k' });
+    try {
+      const ok = await app.inject({ method: 'DELETE', url: '/admin/tables/registry.business_name_registry_sync_runs/rows/7', headers: adminHeaders });
+      expect(ok.statusCode).toBe(200);
+      expect(calls[0].method).toBe('DELETE');
+      expect(calls[0].body).toBeUndefined();
+      expect(Object.keys(calls[0].headers ?? {}).map((h) => h.toLowerCase())).not.toContain('content-type');
+      const gone = await app.inject({ method: 'DELETE', url: '/admin/tables/registry.business_name_registry_sync_runs/rows/gone', headers: adminHeaders });
+      expect(gone.statusCode).toBe(404);
+      expect(gone.json().detail).toBe('Row not found.');
+    } finally {
+      vi.unstubAllGlobals();
+      Object.assign(config, { registryApiUrl: saved.a, registryApiAdminKey: saved.b });
+    }
+  });
 });

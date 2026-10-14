@@ -572,20 +572,24 @@ async function proxyUpstreamJson<T = unknown>(
   if (!baseUrl) throw new HttpError(503, `${source} service is not configured.`);
   if (!apiKey) throw new HttpError(503, `${source} admin key is not configured.`);
 
+  const sendsBody = body !== undefined && method !== 'GET' && method !== 'DELETE';
   const response = await fetch(`${baseUrl.replace(/\/$/, '')}${path}`, {
     method,
-    headers: { 'Content-Type': 'application/json', 'x-api-key': apiKey, ...(ownerEmail ? { [OWNER_HEADER]: ownerEmail } : {}) },
-    body:
-      body === undefined || method === 'GET' || method === 'DELETE'
-        ? undefined
-        : JSON.stringify(body),
+    // "Content-Type: application/json" only with a body: a DELETE that said JSON but sent nothing was refused (400) by the
+    // backend's own server before the delete ran (found 2026-10-14, the first time a delete was allowed through).
+    headers: { ...(sendsBody ? { 'Content-Type': 'application/json' } : {}), 'x-api-key': apiKey, ...(ownerEmail ? { [OWNER_HEADER]: ownerEmail } : {}) },
+    body: sendsBody ? JSON.stringify(body) : undefined,
   });
   const text = await response.text();
-  const data = text.trim()
-    ? (JSON.parse(text) as T & { error?: string })
-    : ({} as T & { error?: string });
+  let data: T & { error?: string; detail?: string; message?: string };
+  try {
+    data = text.trim() ? JSON.parse(text) : ({} as typeof data);
+  } catch {
+    data = {} as typeof data;
+  }
+  // The backend's own words (its errors say `error`, `detail` or `message`), not a generic failure.
   if (!response.ok)
-    throw new HttpError(response.status, data.error ?? `${source} admin request failed.`);
+    throw new HttpError(response.status, data.error ?? data.detail ?? data.message ?? `${source} admin request failed.`);
   return data as T;
 }
 
