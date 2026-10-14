@@ -7,6 +7,7 @@ vi.mock('../../db', async () => {
   return { pool: createFakeDb() };
 });
 vi.mock('../../middleware/redis-client', () => ({ getRedis: () => null, connectRedis: vi.fn() }));
+vi.mock('../../domain/webhooks/webhooks', async (orig) => ({ ...(await orig<typeof import('../../domain/webhooks/webhooks')>()), emitWebhookEvent: vi.fn() }));
 vi.mock('../../infrastructure/email/resend', async () => (await import('../helpers/email-capture')).emailModuleMock());
 
 import { buildApp } from '../../app';
@@ -95,6 +96,11 @@ describe('when a key stops working because of time', () => {
     expect(keyRows().get(a.id)!.revoked_at).toBeFalsy();
     expect(keyRows().get(b.id)!.revoked_at).toBeTruthy();
     expect(keyRows().get(c.id)!.revoked_at).toBeTruthy();
+    // each automatic revoke tells the owner's webhooks why, like a revoke by hand
+    const { emitWebhookEvent } = await import('../../domain/webhooks/webhooks');
+    const sent = vi.mocked(emitWebhookEvent).mock.calls.filter((c) => c[1] === 'key.revoked').map((c) => c[2]);
+    expect(sent).toEqual(expect.arrayContaining([{ keyId: b.id, reason: 'expired' }, { keyId: c.id, reason: 'idle' }]));
+    expect(sent.some((d) => (d as { keyId: string }).keyId === a.id)).toBe(false);
   });
 });
 

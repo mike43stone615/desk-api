@@ -3,6 +3,7 @@
 import type { FastifyBaseLogger } from 'fastify';
 import { pool } from '../../db';
 import { gatewayApiKeys, keyTimeProblem } from './keys';
+import { emitWebhookEvent } from '../webhooks/webhooks';
 
 export async function revokeExpiredKeys(log: FastifyBaseLogger): Promise<number> {
   const { rows } = await pool.query<{ id: string; owner_user_id: string; created_at: string; last_used_at: string | null; expires_at: string | null }>(
@@ -16,6 +17,9 @@ export async function revokeExpiredKeys(log: FastifyBaseLogger): Promise<number>
       await gatewayApiKeys.revoke(key.owner_user_id, key.id);
       revoked++;
       log.info({ event: 'gateway_key_expired', keyId: key.id, reason: problem }, 'revoked an expired or idle API key');
+      // The same event a revoke by hand sends, with why: until 2026-10-14 a key revoked here sent nothing (found by a
+      // production test of the 180-day rule), so a developer listening for key.revoked never heard about these.
+      emitWebhookEvent({ userId: key.owner_user_id }, 'key.revoked', { keyId: key.id, reason: problem });
     } catch (err) {
       log.warn({ err, keyId: key.id }, 'could not revoke an expired API key; will retry tomorrow');
     }
