@@ -27,6 +27,9 @@ sandbox works unchanged with a live key: every endpoint a live key can call has 
   on Nov 1, 2026", and choosing the current plan again cancels the change. An administrator can force a downgrade at once with
   `"when": "now"`. Scheduled changes are applied by a job at 00:05 UTC on the 1st, and also the moment the subscription is next
   read after the due time, so a late job never leaves anyone on the old plan.
+  The `plan.changed` webhook goes out twice for a downgrade: when it is scheduled (`"scheduled": true`, `effectiveAt` = the
+  1st) and when it takes effect (`"scheduled": false`, `effectiveAt` = that moment). It is applied exactly once even when
+  many requests read the subscription at that moment.
 - On the 1st of each month a **draft invoice** is made for every paid subscription: the monthly fee, plus analyses beyond the
   included number at the plan's overage price. **Proration:** when the plan changed during the month, each plan is charged
   only for its own share of the month to the second (e.g. Free to Pro on Oct 28 = 4 of 31 days of Pro = $1.94); extra calls

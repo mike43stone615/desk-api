@@ -126,10 +126,26 @@ async function planById(planId: string): Promise<Plan> {
  * Switches at once: the current subscription ends now (canceled_at) and the new one starts now, so the month's invoice
  * charges each for its own part of the month. The old subscription is closed, not edited, so history stays.
  */
-async function switchNow(subjectType: SubjectType, subjectId: string, planId: string, at = new Date()): Promise<void> {
+/**
+ * Ends the current subscription and starts the new plan at `at`. With `claimScheduled` (a subscription id), it only does so
+ * if that subscription still has its waiting change, locked first: a scheduled change is applied by whichever request
+ * reads the subscription first on the 1st, and two at once used to apply it twice (two active subscriptions: a
+ * Business -> Pro downgrade would then bill Pro twice). Returns false when another request got there first.
+ */
+async function switchNow(subjectType: SubjectType, subjectId: string, planId: string, at = new Date(), claimScheduled?: string): Promise<boolean> {
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
+    if (claimScheduled) {
+      const claim = await client.query(
+        `SELECT id FROM subscriptions WHERE id = $1 AND status <> 'canceled' AND scheduled_plan_id IS NOT NULL FOR UPDATE`,
+        [claimScheduled],
+      );
+      if (claim.rowCount === 0) {
+        await client.query('ROLLBACK');
+        return false;
+      }
+    }
     await client.query(
       `UPDATE subscriptions SET status = 'canceled', canceled_at = $3, scheduled_plan_id = NULL, scheduled_for = NULL
         WHERE subject_type = $1 AND subject_id = $2 AND status <> 'canceled'`,
@@ -143,6 +159,7 @@ async function switchNow(subjectType: SubjectType, subjectId: string, planId: st
       );
     }
     await client.query('COMMIT');
+    return true;
   } catch (err) {
     await client.query('ROLLBACK').catch(() => {});
     throw err;
@@ -194,8 +211,8 @@ export async function changePlan(subjectType: SubjectType, subjectId: string, pl
  * Returns the subjects changed (for their webhook and the key limiter).
  */
 export async function applyDueScheduledChanges(now = new Date(), only?: { subjectType: SubjectType; subjectId: string }): Promise<Array<{ subjectType: SubjectType; subjectId: string; planId: string }>> {
-  const { rows } = await pool.query<{ subject_type: SubjectType; subject_id: string; scheduled_plan_id: string; scheduled_for: string }>(
-    `SELECT subject_type, subject_id, scheduled_plan_id, scheduled_for FROM subscriptions
+  const { rows } = await pool.query<{ id: string; subject_type: SubjectType; subject_id: string; scheduled_plan_id: string; scheduled_for: string }>(
+    `SELECT id, subject_type, subject_id, scheduled_plan_id, scheduled_for FROM subscriptions
       WHERE status <> 'canceled' AND scheduled_plan_id IS NOT NULL AND scheduled_for IS NOT NULL
         ${only ? 'AND subject_type = $1 AND subject_id = $2' : ''}`,
     only ? [only.subjectType, only.subjectId] : [],
@@ -204,9 +221,10 @@ export async function applyDueScheduledChanges(now = new Date(), only?: { subjec
   for (const r of rows) {
     const at = new Date(r.scheduled_for);
     if (Number.isNaN(at.getTime()) || at.getTime() > now.getTime()) continue;
-    await switchNow(r.subject_type, r.subject_id, r.scheduled_plan_id, at);
+    if (!(await switchNow(r.subject_type, r.subject_id, r.scheduled_plan_id, at, r.id))) continue; // applied by another request
     done.push({ subjectType: r.subject_type, subjectId: r.subject_id, planId: r.scheduled_plan_id });
-    if (r.subject_type === 'user') emitWebhookEvent({ userId: r.subject_id }, 'plan.changed', { subjectType: r.subject_type, subjectId: r.subject_id, plan: r.scheduled_plan_id, scheduled: true });
+    // "scheduled: false" = this change is now in effect (the notice sent when it was scheduled said "scheduled: true").
+    if (r.subject_type === 'user') emitWebhookEvent({ userId: r.subject_id }, 'plan.changed', { subjectType: r.subject_type, subjectId: r.subject_id, plan: r.scheduled_plan_id, scheduled: false, effectiveAt: at.toISOString() });
   }
   return done;
 }

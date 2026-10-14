@@ -124,6 +124,18 @@ describe.skipIf(!hasDb)('E2E: plans, invoices and webhooks', () => {
     expect(now.lines[0].totalCents).toBe(expected);
   });
 
+  it('a due downgrade applied by several requests at once is applied once (one active subscription, one webhook)', async () => {
+    const { changePlan, applyDueScheduledChanges } = await import('../../domain/billing/plans');
+    const u = await mkUser('race');
+    await pool.query(`INSERT INTO subscriptions (id, subject_type, subject_id, plan_id, status, period_start, period_end, created_at) VALUES ($1,'user',$2,'business','active',$3,$3,$4)`, [rid(), u.id, ts(), '2026-01-01T00:00:00Z']);
+    expect((await changePlan('user', u.id, 'developer')).scheduled).toBe(true);
+    await pool.query(`UPDATE subscriptions SET scheduled_for = $2 WHERE subject_id = $1 AND status <> 'canceled'`, [u.id, new Date(Date.now() - 1000).toISOString()]);
+    const runs = await Promise.all(Array.from({ length: 5 }, () => applyDueScheduledChanges(new Date(), { subjectType: 'user', subjectId: u.id })));
+    expect(runs.flat().filter((a) => a.subjectId === u.id)).toHaveLength(1);
+    const active = (await pool.query(`SELECT plan_id FROM subscriptions WHERE subject_id = $1 AND status <> 'canceled'`, [u.id])).rows;
+    expect(active).toEqual([{ plan_id: 'developer' }]);
+  });
+
   it('meters analyses exactly and produces one invoice per month with the plan fee and the overage', async () => {
     const u = await mkUser('billed');
     const month = new Date().toISOString().slice(0, 7);
