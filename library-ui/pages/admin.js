@@ -112,9 +112,16 @@ registerRoute('/developer/admin', async (app) => {
       primaryKey: data.primaryKey || 'id', columns: data.columns || [], editableColumns: data.editableColumns || [],
       secretColumns: data.secretColumns || [], columnOptions: data.columnOptions || {},
       rows: data.rows || [], totalRows: Number(data.totalRows) || 0, deletable: data.deletable === true,
+      // Very large tables (millions of rows) give an estimated total, and say themselves whether more rows follow.
+      totalIsEstimate: data.totalIsEstimate === true, serverHasMore: typeof data.hasMore === 'boolean' ? data.hasMore : null,
     };
   }
-  function hasMore(rows) { return rows ? rows.rows.length < rows.totalRows : false; }
+  function hasMore(rows) {
+    if (!rows) return false;
+    return rows.serverHasMore !== null && rows.serverHasMore !== undefined ? rows.serverHasMore : rows.rows.length < rows.totalRows;
+  }
+  /** "1,234 rows", or "about 4,312,000 rows" when the total is the database's estimate. */
+  function totalText(t) { return `${t.totalIsEstimate ? 'about ' : ''}${Number(t.totalRows).toLocaleString('en-US')} rows`; }
   function initializeHiddenColumns(rows) {
     if (!rows) return;
     if (!(rows.table in s.hiddenColumnsByTable)) {
@@ -149,7 +156,7 @@ registerRoute('/developer/admin', async (app) => {
     try {
       const nextRows = await fetchRows(s.selectedTable, { limit: ROWS_PAGE_SIZE, filters: s.filters, sort: s.sort });
       s.rows = nextRows; s.hasMoreRows = hasMore(nextRows); s.errorMessage = null;
-      if (announce) toast(`Up to date · ${nextRows.totalRows} rows`);
+      if (announce) toast(`Up to date · ${totalText(nextRows)}`);
     } catch (err) {
       reportHandledException(err, 'refreshRows');
       s.errorMessage = friendlyError(err, 'We could not refresh that table.');
@@ -162,8 +169,8 @@ registerRoute('/developer/admin', async (app) => {
     s.isLoadingMoreRows = true; render();
     try {
       const next = await fetchRows(s.selectedTable, { limit: ROWS_PAGE_SIZE, offset: s.rows.rows.length, filters: s.filters, sort: s.sort });
-      s.rows = { ...s.rows, rows: [...s.rows.rows, ...next.rows], totalRows: next.totalRows };
-      s.hasMoreRows = s.rows.rows.length < next.totalRows;
+      s.rows = { ...s.rows, rows: [...s.rows.rows, ...next.rows], totalRows: next.totalRows, totalIsEstimate: next.totalIsEstimate, serverHasMore: next.serverHasMore };
+      s.hasMoreRows = hasMore(s.rows);
     } catch (err) {
       reportHandledException(err, 'loadMoreRows');
       s.errorMessage = friendlyError(err, 'We could not load more rows.');
@@ -505,7 +512,7 @@ registerRoute('/developer/admin', async (app) => {
             <div class="filter-chips" style="flex:1;">
               ${filterCount
                 ? Object.entries(s.filters).map(([k, v]) => `<button type="button" class="chip selected" data-remove-filter="${esc(k)}" aria-label="Remove ${esc(titleize(k))} filter">${esc(titleize(k))}: ${esc(v)} <span class="x" aria-hidden="true">✕</span></button>`).join('') + `<button type="button" class="btn-link" id="clear-filters-btn">Clear filters</button>`
-                : `<span class="hint">${esc(titleize(table.rawName))} · ${table.totalRows} rows</span>`}
+                : `<span class="hint">${esc(titleize(table.rawName))} · ${esc(totalText(table))}</span>`}
             </div>
             <div class="column-menu">
               <button type="button" class="admin-icon-btn" id="column-menu-btn" title="Show or hide columns">${icon('view_column_outlined')} Columns</button>
@@ -521,7 +528,7 @@ registerRoute('/developer/admin', async (app) => {
         </div>
         ${bodyHtml}
         <div class="admin-footer">
-          <span>${table.totalRows > 0 ? `${table.rows.length} of ${table.totalRows} rows loaded` : `${table.rows.length} rows loaded`}</span>
+          <span>${table.totalRows > 0 ? `${table.rows.length.toLocaleString('en-US')} of ${esc(totalText(table))} loaded` : `${table.rows.length} rows loaded`}</span>
           <div style="flex:1;"></div>
           ${s.isLoadingMoreRows ? spinnerBtn(true, '', { dark: true }) : s.hasMoreRows ? `<button type="button" class="btn-link" id="load-more-btn">Load more ▾</button>` : ''}
         </div>
