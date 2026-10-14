@@ -522,6 +522,12 @@ function editableFor(table: AdminTableConfig, owner: boolean): readonly string[]
   return table.keyColumns ? table.columns : table.columns.filter((c) => c !== table.primaryKey);
 }
 
+/** Owners delete rows of every table except the read-only audit tables; administrators only where the table allows it. */
+function deletableFor(table: AdminTableConfig, owner: boolean): boolean {
+  if (table.readOnly) return false;
+  return owner || table.deletable === true;
+}
+
 /** The column the page uses to tell rows apart. */
 function rowIdColumn(table: AdminTableConfig): string {
   return table.keyColumns ? ROW_KEY : table.primaryKey;
@@ -702,7 +708,7 @@ export async function adminTablesHandler(request: FastifyRequest, reply: Fastify
       editableColumns: editableFor(table, owner),
       secretColumns: table.secret,
       columnOptions: columnOptionsFor(table),
-      deletable: table.deletable === true,
+      deletable: deletableFor(table, owner),
     })),
     ...('tables' in registryResult ? registryResult.tables : []),
     ...('tables' in marketResult ? marketResult.tables : []),
@@ -773,7 +779,7 @@ export async function adminTableRowsHandler(request: FastifyRequest, reply: Fast
     columnOptions: columnOptionsFor(table),
     rows: rowsResult.rows.map((row) => withRowKey(maskSecrets(row, table), table)),
     totalRows: Number(countResult.rows[0]?.count ?? 0),
-    deletable: table.deletable === true,
+    deletable: deletableFor(table, owner),
   });
 }
 
@@ -865,7 +871,7 @@ export async function adminTableDeleteRowHandler(request: FastifyRequest, reply:
 
   const tableName = parseLocalTableName(parsed.rawName);
   const table: AdminTableConfig = TABLES[tableName];
-  if (table.deletable !== true) throw new HttpError(403, 'Deletes are disabled for this table.', 'delete_disabled');
+  if (!deletableFor(table, await callerIsOwner(request))) throw new HttpError(403, 'Deletes are disabled for this table.', 'delete_disabled');
 
   const columns = table.columns.map(quoteIdentifier).join(', ');
   const where = rowWhere(id, table.primaryKey, table.keyColumns, quoteIdentifier);

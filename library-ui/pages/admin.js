@@ -72,9 +72,11 @@ registerRoute('/developer/admin', async (app) => {
     undoStack: [], redoStack: [], savingCellKeys: new Set(),
     filters: {}, sort: null, hiddenColumnsByTable: {},
     hasMoreRows: false, isLoadingMoreRows: false, isRefreshingRows: false,
-    selectedRow: null, columnMenuOpen: false, editingCell: null, confirmDeleteRow: null,
+    selectedRowId: null, columnMenuOpen: false, editingCell: null, confirmDeleteRow: null,
+    activeFilter: null, // the column filter being typed in: it keeps the keyboard while the rows update under it
   };
   let filterDebounce = null;
+  let rendering = false; // a redraw replaces the filter boxes; their blur then is not the person leaving them
 
   async function loadTables() {
     s.isLoading = true; s.errorMessage = null; render();
@@ -92,7 +94,6 @@ registerRoute('/developer/admin', async (app) => {
       s.filters = {}; s.sort = null;
       initializeHiddenColumns(nextRows);
       s.hasMoreRows = hasMore(nextRows);
-      s.undoStack = []; s.redoStack = [];
     } catch (err) {
       reportHandledException(err, 'loadTables');
       s.errorMessage = friendlyError(err, 'We could not load the data tables.');
@@ -129,7 +130,8 @@ registerRoute('/developer/admin', async (app) => {
   }
   async function selectTable(table) {
     s.selectedTable = table; s.isLoading = true; s.errorMessage = null; s.gridScrollLeft = 0;
-    s.filters = {}; s.sort = null; s.undoStack = []; s.redoStack = []; s.selectedRow = null;
+    // Undo and redo keep the person's own edits across tables: each change remembers its table and row.
+    s.filters = {}; s.sort = null; s.selectedRowId = null; s.editingCell = null; s.activeFilter = null;
     render();
     try {
       const nextRows = await fetchRows(table, { limit: ROWS_PAGE_SIZE });
@@ -141,12 +143,13 @@ registerRoute('/developer/admin', async (app) => {
       s.isLoading = false; render();
     }
   }
-  async function refreshRows() {
+  async function refreshRows({ announce = false } = {}) {
     if (!s.selectedTable) return;
     s.isRefreshingRows = true; render();
     try {
       const nextRows = await fetchRows(s.selectedTable, { limit: ROWS_PAGE_SIZE, filters: s.filters, sort: s.sort });
-      s.rows = nextRows; s.hasMoreRows = hasMore(nextRows);
+      s.rows = nextRows; s.hasMoreRows = hasMore(nextRows); s.errorMessage = null;
+      if (announce) toast(`Up to date · ${nextRows.totalRows} rows`);
     } catch (err) {
       reportHandledException(err, 'refreshRows');
       s.errorMessage = friendlyError(err, 'We could not refresh that table.');
@@ -175,6 +178,14 @@ registerRoute('/developer/admin', async (app) => {
     if (filterDebounce) clearTimeout(filterDebounce);
     filterDebounce = setTimeout(refreshRows, ADMIN_FILTER_DEBOUNCE_MS);
   }
+  /** Enter: the filter is done. The rows update at once and the box lets go of the keyboard. */
+  function finishFilter(column, value) {
+    if (filterDebounce) clearTimeout(filterDebounce);
+    const trimmed = value.trim();
+    if (trimmed) s.filters[column] = trimmed; else delete s.filters[column];
+    s.activeFilter = null;
+    refreshRows();
+  }
   function clearFilters() { if (!Object.keys(s.filters).length) return; s.filters = {}; refreshRows(); }
   function removeFilter(column) { if (!(column in s.filters)) return; delete s.filters[column]; refreshRows(); }
   function handleSortChanged(column) {
@@ -193,7 +204,11 @@ registerRoute('/developer/admin', async (app) => {
         const next = saved && saved.row ? saved.row : null;
         s.rows = { ...s.rows, rows: s.rows.rows.map((r) => (String(r[s.rows.primaryKey]) === change.id ? (next || { ...r, [change.column]: value }) : r)) };
         // Undo and redo hold this same change: they must find the row under its new key.
-        if (next && next[s.rows.primaryKey] != null) change.id = String(next[s.rows.primaryKey]);
+        if (next && next[s.rows.primaryKey] != null) {
+          const newId = String(next[s.rows.primaryKey]);
+          if (s.selectedRowId === change.id) s.selectedRowId = newId; // the open expanded row follows its new key
+          change.id = newId;
+        }
       }
     } catch (err) {
       reportHandledException(err, 'saveCell');
@@ -230,17 +245,22 @@ registerRoute('/developer/admin', async (app) => {
     s.undoStack.push(change); s.redoStack = [];
     render();
   }
+  const changeLabel = (c) => `${titleize(c.table)} · ${titleize(c.column)}`;
   async function undo() {
     if (!s.undoStack.length || s.isSaving) return;
     const change = s.undoStack.pop();
     await applyChange(change, false);
-    if (!s.errorMessage) { s.redoStack.push(change); render(); }
+    if (s.errorMessage) { s.undoStack.push(change); render(); return; } // still there to try again
+    s.redoStack.push(change); render();
+    toast(`Undone: ${changeLabel(change)}`);
   }
   async function redo() {
     if (!s.redoStack.length || s.isSaving) return;
     const change = s.redoStack.pop();
     await applyChange(change, true);
-    if (!s.errorMessage) { s.undoStack.push(change); render(); }
+    if (s.errorMessage) { s.redoStack.push(change); render(); return; }
+    s.undoStack.push(change); render();
+    toast(`Redone: ${changeLabel(change)}`);
   }
   function deleteRow(row) {
     if (!s.rows || !s.rows.deletable) return;
@@ -250,11 +270,16 @@ registerRoute('/developer/admin', async (app) => {
   async function confirmDeleteRow() {
     const row = s.confirmDeleteRow;
     if (!s.rows || !row) return;
-    const id = row[s.rows.primaryKey];
-    s.confirmDeleteRow = null;
+    const id = String(row[s.rows.primaryKey]);
+    const table = s.rows.table;
+    s.confirmDeleteRow = null; render();
     try {
-      await api(`/admin/tables/${s.rows.table}/rows/${id}`, { method: 'DELETE' });
-      s.undoStack = []; s.redoStack = [];
+      await api(`/admin/tables/${table}/rows/${encodeURIComponent(id)}`, { method: 'DELETE' });
+      // Only this row's edits leave the history: they cannot be undone on a row that no longer exists.
+      const other = (c) => !(c.table === table && c.id === id);
+      s.undoStack = s.undoStack.filter(other); s.redoStack = s.redoStack.filter(other);
+      if (s.selectedRowId === id) s.selectedRowId = null;
+      toast('Row deleted.');
       await refreshRows();
     } catch (err) {
       reportHandledException(err, 'deleteRow');
@@ -372,6 +397,7 @@ registerRoute('/developer/admin', async (app) => {
     const sourceLabels = { desk: 'Desk API', registry: 'Business Name Registry API', market: 'Market Validation API', compliance: 'Compliance (retired)' };
     const sourceTables = s.tables.filter((t) => t.source === s.selectedSource);
 
+    rendering = true;
     app.innerHTML = `
       <div class="page">
         <div class="page-head-row">
@@ -380,7 +406,7 @@ registerRoute('/developer/admin', async (app) => {
         ${tabsHtml('/developer/admin')}
         <div class="admin-source-row">
           <div class="source-tabs" aria-label="API">${sources.map((src) => `<button type="button" data-source="${esc(src)}" class="${src === s.selectedSource ? 'active' : ''}">${esc(sourceLabels[src] || src)}</button>`).join('')}</div>
-          <button type="button" class="btn btn-sm admin-access-btn" id="open-access-btn">${icon('group')} Who has access</button>
+          <button type="button" class="admin-icon-btn admin-access-btn" id="open-access-btn" title="Who has access" aria-label="Who has access">${icon('group')}</button>
         </div>
         ${s.tables.length ? `<div class="table-tabs">${sourceTables.map((t) => `<button type="button" data-table="${esc(t.name)}" class="${t.name === s.selectedTable ? 'active' : ''}">${esc(titleize(t.rawName || t.name))}</button>`).join('')}</div>` : ''}
         ${s.sourceErrors ? Object.entries(s.sourceErrors).map(([src, msg]) => `<p class="hint" style="color:var(--warning);">${esc(sourceLabels[src] || src)} could not be reached: ${esc(msg)}</p>`).join('') : ''}
@@ -394,7 +420,7 @@ registerRoute('/developer/admin', async (app) => {
         <div class="modal-backdrop" id="delete-row-modal-backdrop">
           <div class="modal">
             <h2>Delete row</h2>
-            <p>Delete ${esc(titleize(s.rows.table))}.${esc(s.confirmDeleteRow[s.rows.primaryKey])}?</p>
+            <p>Delete this row from ${esc(titleize(s.rows.rawName || s.rows.table))}? This cannot be undone.</p>
             <div style="display:flex;justify-content:flex-end;gap:var(--sp-sm);margin-top:var(--sp-xl);">
               <button type="button" class="btn" id="cancel-delete-row-btn">Cancel</button>
               <button type="button" class="btn btn-danger" id="confirm-delete-row-btn">Delete</button>
@@ -403,7 +429,7 @@ registerRoute('/developer/admin', async (app) => {
         </div>
       ` : ''}
     `;
-    wire();
+    try { wire(); } finally { rendering = false; }
   }
 
   // The grid is the normal page width and the page itself scrolls up and down (no second scrollbar inside it). The column headers
@@ -456,7 +482,7 @@ registerRoute('/developer/admin', async (app) => {
                       <button type="button" class="admin-icon-btn" data-view-row="${esc(id)}" title="View row details" aria-label="View row details">${icon('open_in_full')}</button>
                       <button type="button" class="admin-icon-btn" data-delete-row="${esc(id)}" title="${table.deletable ? 'Delete row' : 'Delete unavailable'}" aria-label="${table.deletable ? 'Delete row' : 'Delete unavailable'}" ${table.deletable ? '' : 'disabled'}>${icon('delete_outline')}</button>
                     </td>
-                    ${visibleColumns.map((col) => cellHtml(table, row, col, id)).join('')}
+                    ${visibleColumns.map((col) => `<td style="min-width:${columnWidth(col)}px;">${valueHtml(table, row, col, id, 'grid')}</td>`).join('')}
                   </tr>
                 `;
               }).join('')}
@@ -472,9 +498,9 @@ registerRoute('/developer/admin', async (app) => {
         <div class="admin-grid-sticky">
           <div class="admin-grid-toolbar">
             <div class="admin-history-btns">
-              <button type="button" class="admin-icon-btn" id="undo-btn" title="Undo" aria-label="Undo" ${s.isSaving || !s.undoStack.length ? 'disabled' : ''}>${icon('undo')}</button>
-              <button type="button" class="admin-icon-btn" id="redo-btn" title="Redo" aria-label="Redo" ${s.isSaving || !s.redoStack.length ? 'disabled' : ''}>${icon('redo')}</button>
-              <button type="button" class="admin-icon-btn" id="refresh-tables-btn" title="Refresh tables" aria-label="Refresh tables" ${s.isLoading || s.isSaving ? 'disabled' : ''}>${icon('refresh')}</button>
+              <button type="button" class="admin-icon-btn" id="undo-btn" title="Undo your last edit (Ctrl+Z)" aria-label="Undo" ${s.isSaving || !s.undoStack.length ? 'disabled' : ''}>${icon('undo')}</button>
+              <button type="button" class="admin-icon-btn" id="redo-btn" title="Redo (Ctrl+Shift+Z)" aria-label="Redo" ${s.isSaving || !s.redoStack.length ? 'disabled' : ''}>${icon('redo')}</button>
+              <button type="button" class="admin-icon-btn" id="refresh-tables-btn" title="Refresh rows" aria-label="Refresh rows" ${s.isLoading || s.isSaving || s.isRefreshingRows ? 'disabled' : ''}>${s.isRefreshingRows ? spinnerBtn(true, '', { dark: true }) : icon('refresh')}</button>
             </div>
             <div class="filter-chips" style="flex:1;">
               ${filterCount
@@ -499,61 +525,61 @@ registerRoute('/developer/admin', async (app) => {
           <div style="flex:1;"></div>
           ${s.isLoadingMoreRows ? spinnerBtn(true, '', { dark: true }) : s.hasMoreRows ? `<button type="button" class="btn-link" id="load-more-btn">Load more ▾</button>` : ''}
         </div>
-        ${s.selectedRow ? rowDetailHtml(table, s.selectedRow) : ''}
+        ${selectedRow() ? rowDetailHtml(table, selectedRow()) : ''}
       </div>
     `;
   }
 
-  function cellHtml(table, row, col, rowId) {
+  // The same editing in both places: the grid and the expanded row. `where` keeps their edit boxes apart.
+  function valueHtml(table, row, col, rowId, where) {
     const value = row[col];
     const editable = table.editableColumns.includes(col);
     const secret = table.secretColumns.includes(col);
     const saving = s.savingCellKeys.has(cellKey(table.table, rowId, col));
     const options = table.columnOptions[col];
-    // Must match the `${id}::${col}` format the click handler stores in s.editingCell.
-    const editKey = `${rowId}::${col}`;
+    const key = `${where}::${rowId}::${col}`; // must match what the click handlers store in s.editingCell
     if (editable && !secret && !saving && options) {
-      // If the stored value isn't one of the known options, show it as the
-      // placeholder label instead of a generic "Select" so it isn't lost
-      // from view — matches the Flutter grid's DropdownButtonFormField hint.
+      // A stored value that is not one of the known options is shown as the placeholder instead of a generic "Select".
       const hasMatch = value !== null && value !== undefined && options.includes(String(value));
       const placeholderLabel = value === null || value === undefined ? 'Select' : String(value);
-      return `<td style="min-width:${columnWidth(col)}px;">
-        <select class="admin-cell-input" data-select-cell="${esc(rowId)}::${esc(col)}">
+      return `<select class="admin-cell-input" data-select-cell="${esc(key)}">
           <option value="" ${hasMatch ? '' : 'selected'}>${esc(placeholderLabel)}</option>
           ${options.map((o) => `<option value="${esc(o)}" ${String(value) === o ? 'selected' : ''}>${esc(o)}</option>`).join('')}
-        </select>
-      </td>`;
+        </select>`;
     }
-    if (s.editingCell === editKey) {
-      return `<td style="min-width:${columnWidth(col)}px;">
-        <textarea class="admin-cell-input" rows="1" data-edit-input="${esc(rowId)}::${esc(col)}">${esc(displayValue(value))}</textarea>
-      </td>`;
+    if (s.editingCell === key) {
+      return `<textarea class="admin-cell-input" rows="${where === 'panel' ? 3 : 1}" data-edit-input="${esc(key)}">${esc(displayValue(value))}</textarea>`;
     }
     if (!secret && typeof value === 'boolean') {
       const canEdit = editable && !saving;
-      return `<td style="min-width:${columnWidth(col)}px;"><span class="bool-pill ${value ? 't' : 'f'}" ${canEdit ? `data-toggle-bool="${esc(rowId)}::${esc(col)}" style="cursor:pointer;"` : ''}>${value}</span>${saving ? ' ⏳' : ''}</td>`;
+      return `<span class="bool-pill ${value ? 't' : 'f'}" ${canEdit ? `data-toggle-bool="${esc(key)}" style="cursor:pointer;"` : ''}>${value}</span>${saving ? ' ⏳' : ''}`;
     }
     const canEdit = editable && !secret && !saving;
     const display = secret ? '[hidden]' : displayValue(value);
-    return `<td style="min-width:${columnWidth(col)}px;">
-      <span class="admin-cell-value ${canEdit ? 'editable' : ''} ${value === null ? 'null-value' : ''} ${secret ? 'secret' : ''}" ${canEdit ? `data-start-edit="${esc(rowId)}::${esc(col)}"` : ''}>${esc(display)}</span>${saving ? ' ⏳' : ''}
-    </td>`;
+    return `<span class="admin-cell-value ${canEdit ? 'editable' : ''} ${value === null ? 'null-value' : ''} ${secret ? 'secret' : ''}" ${canEdit ? `data-start-edit="${esc(key)}"` : ''} ${where === 'panel' ? 'style="white-space:pre-wrap;"' : ''}>${esc(display)}</span>${saving ? ' ⏳' : ''}`;
   }
+  /** The expanded row, looked up fresh so it shows each edit as soon as it is saved. */
+  function selectedRow() {
+    if (!s.selectedRowId || !s.rows) return null;
+    return s.rows.rows.find((r) => String(r[s.rows.primaryKey]) === s.selectedRowId) || null;
+  }
+  /** "grid::<row id>::<column>" -> the row and column (a row id never contains "::"). */
+  function parseKey(key) {
+    const first = key.indexOf('::'); const last = key.lastIndexOf('::');
+    return { where: key.slice(0, first), id: key.slice(first + 2, last), col: key.slice(last + 2) };
+  }
+  function rowById(id) { return s.rows ? s.rows.rows.find((r) => String(r[s.rows.primaryKey]) === id) : null; }
 
   function rowDetailHtml(table, row) {
+    const id = String(row[table.primaryKey]);
     return `
       <div class="row-detail-panel">
         <div class="rd-head">
-          <div style="flex:1;font-weight:700;">${esc(titleize(table.rawName))} · ${esc(String(row[table.primaryKey]))}</div>
+          <div style="flex:1;font-weight:700;">${esc(titleize(table.rawName))}</div>
           <button type="button" class="admin-icon-btn" id="close-detail-btn" title="Close" aria-label="Close">${icon('close')}</button>
         </div>
         <div class="rd-body">
-          ${table.columns.map((col) => {
-            const secret = table.secretColumns.includes(col);
-            const value = row[col];
-            return `<div class="rd-field"><label>${esc(titleize(col))}</label>${secret ? '<div class="hint">[hidden]</div>' : typeof value === 'boolean' ? `<span class="bool-pill ${value ? 't' : 'f'}">${value}</span>` : `<div style="white-space:pre-wrap;font-size:.85rem;">${esc(displayValue(value))}</div>`}</div>`;
-          }).join('')}
+          ${table.columns.map((col) => `<div class="rd-field"><label>${esc(titleize(col))}</label><div style="font-size:.85rem;">${valueHtml(table, row, col, id, 'panel')}</div></div>`).join('')}
         </div>
       </div>
     `;
@@ -579,12 +605,21 @@ registerRoute('/developer/admin', async (app) => {
     const confirmBackdrop = document.getElementById('confirm-access-backdrop'); if (confirmBackdrop) confirmBackdrop.addEventListener('click', (e) => { if (e.target === confirmBackdrop && !s.isAccessBusy) { s.confirmAccess = null; render(); } });
     const undoBtn = document.getElementById('undo-btn'); if (undoBtn) undoBtn.addEventListener('click', undo);
     const redoBtn = document.getElementById('redo-btn'); if (redoBtn) redoBtn.addEventListener('click', redo);
-    const refreshBtn = document.getElementById('refresh-tables-btn'); if (refreshBtn) refreshBtn.addEventListener('click', loadTables);
+    const refreshBtn = document.getElementById('refresh-tables-btn'); if (refreshBtn) refreshBtn.addEventListener('click', () => (s.selectedTable ? refreshRows({ announce: true }) : loadTables()));
     app.querySelectorAll('[data-source]').forEach((btn) => btn.addEventListener('click', () => selectSource(btn.dataset.source)));
     app.querySelectorAll('[data-table]').forEach((btn) => btn.addEventListener('click', () => selectTable(btn.dataset.table)));
     app.querySelectorAll('[data-sort]').forEach((th) => th.addEventListener('click', (e) => { if (e.target.closest('input')) return; handleSortChanged(th.dataset.sort); }));
     app.querySelectorAll('[data-filter]').forEach((input) => {
-      input.addEventListener('input', (e) => handleFilterChanged(input.dataset.filter, e.target.value));
+      input.addEventListener('input', (e) => {
+        s.activeFilter = { column: input.dataset.filter, value: e.target.value, start: e.target.selectionStart, end: e.target.selectionEnd };
+        handleFilterChanged(input.dataset.filter, e.target.value);
+      });
+      input.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') { e.preventDefault(); finishFilter(input.dataset.filter, input.value); input.blur(); }
+        else if (e.key === 'Escape') { e.preventDefault(); s.activeFilter = null; input.blur(); }
+      });
+      input.addEventListener('focus', () => { if (!rendering) s.activeFilter = { column: input.dataset.filter, value: input.value, start: input.selectionStart, end: input.selectionEnd }; });
+      input.addEventListener('blur', () => { if (!rendering && s.activeFilter && s.activeFilter.column === input.dataset.filter) s.activeFilter = null; });
       // Typing in a column filter must not also sort the column (the header cell is the sort button). Done here, not
       // as an inline click attribute, because the page's Content-Security-Policy forbids inline handlers.
       input.addEventListener('click', (e) => e.stopPropagation());
@@ -598,12 +633,8 @@ registerRoute('/developer/admin', async (app) => {
       if (e.target.checked) hidden.delete(col); else hidden.add(col);
       s.hiddenColumnsByTable[s.rows.table] = hidden; render();
     }));
-    app.querySelectorAll('[data-view-row]').forEach((btn) => btn.addEventListener('click', () => {
-      const id = btn.dataset.viewRow;
-      s.selectedRow = s.rows.rows.find((r) => String(r[s.rows.primaryKey]) === id) || null;
-      render();
-    }));
-    const closeDetail = document.getElementById('close-detail-btn'); if (closeDetail) closeDetail.addEventListener('click', () => { s.selectedRow = null; render(); });
+    app.querySelectorAll('[data-view-row]').forEach((btn) => btn.addEventListener('click', () => { s.selectedRowId = btn.dataset.viewRow; s.editingCell = null; render(); }));
+    const closeDetail = document.getElementById('close-detail-btn'); if (closeDetail) closeDetail.addEventListener('click', () => { s.selectedRowId = null; s.editingCell = null; render(); });
     app.querySelectorAll('[data-delete-row]').forEach((btn) => btn.addEventListener('click', () => {
       const id = btn.dataset.deleteRow;
       const row = s.rows.rows.find((r) => String(r[s.rows.primaryKey]) === id);
@@ -631,12 +662,12 @@ registerRoute('/developer/admin', async (app) => {
     app.querySelectorAll('[data-start-edit]').forEach((el) => el.addEventListener('click', () => { s.editingCell = el.dataset.startEdit; render(); }));
     app.querySelectorAll('[data-edit-input]').forEach((ta) => {
       const commit = () => {
-        const [id, col] = ta.dataset.editInput.split('::');
-        const row = s.rows.rows.find((r) => String(r[s.rows.primaryKey]) === id);
+        const { id, col } = parseKey(ta.dataset.editInput);
+        const row = rowById(id);
         if (row) editCell(row, col, ta.value); else { s.editingCell = null; render(); }
       };
       let cancelled = false;
-      ta.addEventListener('blur', () => { if (!cancelled) commit(); });
+      ta.addEventListener('blur', () => { if (!cancelled && !rendering) commit(); });
       ta.addEventListener('keydown', (e) => {
         if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); ta.blur(); }
         else if (e.key === 'Escape') { e.preventDefault(); cancelled = true; s.editingCell = null; render(); } // leave without saving
@@ -646,15 +677,24 @@ registerRoute('/developer/admin', async (app) => {
     const openEditor = app.querySelector('[data-edit-input]');
     if (openEditor) { openEditor.focus(); openEditor.select(); }
     app.querySelectorAll('[data-toggle-bool]').forEach((el) => el.addEventListener('click', () => {
-      const [id, col] = el.dataset.toggleBool.split('::');
-      const row = s.rows.rows.find((r) => String(r[s.rows.primaryKey]) === id);
+      const { id, col } = parseKey(el.dataset.toggleBool);
+      const row = rowById(id);
       if (row) toggleBool(row, col);
     }));
     app.querySelectorAll('[data-select-cell]').forEach((sel) => sel.addEventListener('change', (e) => {
-      const [id, col] = sel.dataset.selectCell.split('::');
-      const row = s.rows.rows.find((r) => String(r[s.rows.primaryKey]) === id);
+      const { id, col } = parseKey(sel.dataset.selectCell);
+      const row = rowById(id);
       if (row && e.target.value) editCell(row, col, e.target.value);
     }));
+    // The filter being typed in keeps the keyboard (and the cursor where it was) when the rows update under it.
+    if (s.activeFilter && !openEditor) {
+      const box = [...app.querySelectorAll('[data-filter]')].find((i) => i.dataset.filter === s.activeFilter.column);
+      if (box) {
+        box.focus({ preventScroll: true });
+        const end = box.value.length;
+        try { box.setSelectionRange(Math.min(s.activeFilter.start ?? end, end), Math.min(s.activeFilter.end ?? end, end)); } catch { /* not a text box */ }
+      }
+    }
   }
 
   // Ask first: someone who is not an administrator sees a plain refusal, never the tables (the server refuses them anyway).
@@ -686,8 +726,18 @@ registerRoute('/developer/admin', async (app) => {
     const gridScroll = app.querySelector('.admin-grid-scroll'); const hScroll = app.querySelector('.admin-hscroll');
     if (gridScroll && hScroll) hScroll.hidden = gridScroll.scrollWidth <= gridScroll.clientWidth + 1;
   };
+  const onKeyDown = (e) => {
+    if (!isCurrent()) { document.removeEventListener('keydown', onKeyDown); return; }
+    if (!(e.ctrlKey || e.metaKey) || e.altKey) return;
+    const t = e.target;
+    if (t && (t.closest?.('input, textarea, select, [contenteditable="true"]'))) return; // the box's own undo
+    const k = e.key.toLowerCase();
+    if (k === 'z' && !e.shiftKey) { e.preventDefault(); undo(); }
+    else if ((k === 'z' && e.shiftKey) || k === 'y') { e.preventDefault(); redo(); }
+  };
   window.addEventListener('scroll', onWindowScroll, { passive: true });
   window.addEventListener('resize', onWindowResize);
+  document.addEventListener('keydown', onKeyDown);
   render();
   await loadTables();
 });

@@ -120,7 +120,7 @@ describe('PATCH /admin/tables/desk.users/rows/:id writes a mutation_audit_log en
 
 describe('owners edit every column; listed administrators keep the per-table lists', () => {
   const tablesFor = async (headers: Record<string, string>) =>
-    (await app.inject({ method: 'GET', url: '/admin/tables', headers })).json().tables as Array<{ name: string; primaryKey: string; editableColumns: string[] }>;
+    (await app.inject({ method: 'GET', url: '/admin/tables', headers })).json().tables as Array<{ name: string; primaryKey: string; editableColumns: string[]; deletable: boolean }>;
 
   it('an owner is offered every column except a single id column, and the usage tables by their row key', async () => {
     const tables = await tablesFor(adminHeaders); // admin@example.com is on ADMIN_EMAILS: an owner
@@ -136,6 +136,28 @@ describe('owners edit every column; listed administrators keep the per-table lis
     for (const t of tables.filter((x) => x.name.startsWith('desk.') && !audit.includes(x.name))) expect(t.editableColumns.length, t.name).toBeGreaterThan(0);
     // the audit record stays read-only, even for an owner
     for (const name of audit) expect(tables.find((t) => t.name === name)!.editableColumns, name).toEqual([]);
+  });
+
+  it('an owner can delete rows of every table but the audit tables; a listed administrator only where the table allows', async () => {
+    const tables = await tablesFor(adminHeaders);
+    for (const t of tables.filter((x) => x.name.startsWith('desk.'))) {
+      expect(t.deletable, t.name).toBe(!['desk.mutation_audit_log', 'desk.security_events'].includes(t.name));
+    }
+    const refused = await app.inject({ method: 'DELETE', url: '/admin/tables/desk.security_events/rows/any-row', headers: adminHeaders });
+    expect(refused.statusCode).toBe(403);
+    const now = new Date().toISOString();
+    fakeDb.users.set('helper-2', { id: 'helper-2', email: 'helper2@example.com', password_hash: 'x', first_name: 'H', last_name: 'L', email_confirmed_at: now, created_at: now, updated_at: now });
+    fakeDb.seedSession('helper2-token', { id: 'helper2-session', user_id: 'helper-2', token: 'helper2-token', expires_at: new Date(Date.now() + 3_600_000).toISOString(), created_at: now });
+    fakeDb.platformAdmins.add('helper-2');
+    try {
+      const helper = { authorization: 'Bearer helper2-token' };
+      const list = await tablesFor(helper);
+      expect(list.find((t) => t.name === 'desk.plans')!.deletable).toBe(false);
+      expect(list.find((t) => t.name === 'desk.users')!.deletable).toBe(true);
+      expect((await app.inject({ method: 'DELETE', url: '/admin/tables/desk.plans/rows/free', headers: helper })).statusCode).toBe(403);
+    } finally {
+      fakeDb.platformAdmins.delete('helper-2');
+    }
   });
 
   it('an owner cannot edit the audit tables', async () => {
