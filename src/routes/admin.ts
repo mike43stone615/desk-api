@@ -239,8 +239,9 @@ const TABLES = {
   },
   subscriptions: {
     primaryKey: 'id',
-    columns: ['id', 'subject_type', 'subject_id', 'plan_id', 'status', 'period_start', 'period_end', 'provider', 'provider_ref', 'created_at'],
-    editable: ['plan_id', 'status', 'period_start', 'period_end', 'provider', 'provider_ref'],
+    // canceled_at and the waiting change (migration 0035): a downgrade waits here until the 1st; clearing both fields cancels it.
+    columns: ['id', 'subject_type', 'subject_id', 'plan_id', 'status', 'period_start', 'period_end', 'provider', 'provider_ref', 'created_at', 'canceled_at', 'scheduled_plan_id', 'scheduled_for'],
+    editable: ['plan_id', 'status', 'period_start', 'period_end', 'provider', 'provider_ref', 'scheduled_plan_id', 'scheduled_for'],
     secret: [],
     options: { status: ['active', 'past_due', 'canceled'] },
     deletable: true, // the person or team goes back to the Free plan
