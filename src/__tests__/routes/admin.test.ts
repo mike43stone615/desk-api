@@ -120,12 +120,12 @@ describe('PATCH /admin/tables/desk.users/rows/:id writes a mutation_audit_log en
 
 describe('owners edit every column; listed administrators keep the per-table lists', () => {
   const tablesFor = async (headers: Record<string, string>) =>
-    (await app.inject({ method: 'GET', url: '/admin/tables', headers })).json().tables as Array<{ name: string; primaryKey: string; editableColumns: string[]; deletable: boolean }>;
+    (await app.inject({ method: 'GET', url: '/admin/tables', headers })).json().tables as Array<{ name: string; primaryKey: string; columns: string[]; editableColumns: string[]; deletable: boolean }>;
 
   it('an owner is offered every column except a single id column, and the usage tables by their row key', async () => {
     const tables = await tablesFor(adminHeaders); // admin@example.com is on ADMIN_EMAILS: an owner
     const users = tables.find((t) => t.name === 'desk.users')!;
-    expect(users.editableColumns).toEqual(expect.arrayContaining(['email', 'first_name', 'email_confirmed_at', 'created_at', 'updated_at']));
+    expect(users.editableColumns).toEqual(['email', 'first_name', 'last_name']); // what the system fills in stays locked, owners too
     expect(users.editableColumns).not.toContain('id');
     const meter = tables.find((t) => t.name === 'desk.usage_meter')!;
     expect(meter.primaryKey).toBe('_rowKey');
@@ -184,12 +184,25 @@ describe('owners edit every column; listed administrators keep the per-table lis
     }
   });
 
-  it('an owner can edit a column outside the old list, and the edit is audited', async () => {
+  it('locked columns cannot be edited by anyone, owners included; the unlocked ones can, and the edit is audited', async () => {
+    const tables = await tablesFor(adminHeaders);
+    const editable = (name: string) => tables.find((t) => t.name === `desk.${name}`)!.editableColumns;
+    expect(editable('sessions')).toEqual(['expires_at']);
+    expect(editable('email_tokens')).toEqual(['expires_at', 'used_at']);
+    expect(editable('business_setup_drafts')).toEqual(['draft_json']);
+    const locked = await app.inject({ method: 'PATCH', url: '/admin/tables/desk.users/rows/member-1', headers: adminHeaders, payload: { values: { created_at: '2020-01-01T00:00:00Z', email_confirmed_at: null } } });
+    expect(locked.statusCode).toBe(400);
     const before = fakeDb.mutationAuditLog.length;
-    const res = await app.inject({ method: 'PATCH', url: '/admin/tables/desk.users/rows/member-1', headers: adminHeaders, payload: { values: { created_at: '2020-01-01T00:00:00Z' } } });
+    const res = await app.inject({ method: 'PATCH', url: '/admin/tables/desk.users/rows/member-1', headers: adminHeaders, payload: { values: { first_name: 'Renamed' } } });
     expect(res.statusCode, res.body).toBe(200);
-    expect(res.json().row.created_at).toBe('2020-01-01T00:00:00Z');
+    expect(res.json().row.first_name).toBe('Renamed');
     expect(fakeDb.mutationAuditLog.length).toBe(before + 1);
+  });
+
+  it('the plans table no longer shows descriptions, and businesses no longer show a user id', async () => {
+    const tables = await tablesFor(adminHeaders);
+    expect(tables.find((t) => t.name === 'desk.plans')!.columns).not.toContain('description');
+    expect(tables.find((t) => t.name === 'desk.businesses')!.columns).not.toContain('user_id');
   });
 
   it('an owner still cannot change a row id', async () => {

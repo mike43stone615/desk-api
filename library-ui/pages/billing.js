@@ -101,14 +101,16 @@ registerRoute('/developer/billing', async (app) => {
       </div>`;
   }
 
-  const STATUS_TEXT = { draft: 'Draft', open: 'Unpaid', paid: 'Paid', void: 'Void' };
-  const invoiceTitle = (inv) => `${periodText(inv.periodStart, inv.periodEnd)}: ${inv.planName} Plan ${s.accountName}`;
+  // The title names the period and who it is for, not a plan: one month can hold more than one plan (see its lines).
+  const invoiceTitle = (inv) => `${periodText(inv.periodStart, inv.periodEnd)}: ${s.accountName}`;
+  const invoiceNumber = (inv) => `INV-${String(inv.number).padStart(6, '0')}`;
 
   const invoiceCard = (inv) => `
     <div class="card invoice-card">
       <div class="invoice-main">
         <div>${esc(invoiceTitle(inv))}</div>
-        <div class="biz-sub">${esc(formatMoney(inv.subtotalCents, inv.currency))} · ${esc(STATUS_TEXT[inv.status] || inv.status)}</div>
+        <div class="biz-sub">${esc(invoiceNumber(inv))} · ${esc(formatMoney(inv.subtotalCents, inv.currency))}</div>
+        <ul class="invoice-lines">${inv.lines.map((l) => `<li><span>${esc(l.description)}${l.quantity > 1 ? ` (${esc(num(l.quantity))} × ${esc(formatMoney(l.unitCents, inv.currency))})` : ''}</span><span>${esc(formatMoney(l.totalCents, inv.currency))}</span></li>`).join('')}</ul>
       </div>
       <div class="invoice-actions">
         <button type="button" class="btn btn-sm" data-view-invoice="${esc(inv.id)}" aria-label="View the invoice for ${esc(periodText(inv.periodStart, inv.periodEnd))}">View</button>
@@ -122,13 +124,11 @@ registerRoute('/developer/billing', async (app) => {
       <div class="invoice-doc">
         <div class="invoice-doc-head">
           <div><div class="invoice-doc-kicker">Desk API Library</div><h2 class="invoice-doc-title">Invoice</h2></div>
-          <div class="invoice-doc-status">${esc(STATUS_TEXT[inv.status] || inv.status)}</div>
         </div>
         <dl class="invoice-doc-meta">
           <div><dt>Billed to</dt><dd>${esc(s.accountName)}</dd></div>
           <div><dt>Period</dt><dd>${esc(periodText(inv.periodStart, inv.periodEnd))}</dd></div>
-          <div><dt>Plan</dt><dd>${esc(inv.planName)}</dd></div>
-          <div><dt>Invoice number</dt><dd>${esc(inv.id.replace(/^sample-/, '').slice(0, 8).toUpperCase())}</dd></div>
+          <div><dt>Invoice number</dt><dd>${esc(invoiceNumber(inv))}</dd></div>
         </dl>
         <table class="plain-table invoice-doc-table">
           <thead><tr><th>Description</th><th class="num">Quantity</th><th class="num">Unit price</th><th class="num">Amount</th></tr></thead>

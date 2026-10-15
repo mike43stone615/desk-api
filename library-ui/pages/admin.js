@@ -7,27 +7,29 @@ import { tabsHtml } from '../tabs.js';
 
 const ROWS_PAGE_SIZE = 100;
 
-// Table and column names ("oauth_clients", "api_key_id") as people read them: Title Case, but acronyms stay upper case
-// ("API Key ID"), a few names have their own spelling ("OAuth"), and small words in the middle stay lower case.
+// Table and column names ("oauth_clients", "api_key_id") as people read them, written like the rest of the API Library: only the
+// first word has a capital, acronyms stay upper case ("API key ID") and a few names have their own spelling ("OAuth").
 const ACRONYMS = new Set(['api', 'id', 'ids', 'url', 'urls', 'uri', 'uris', 'ip', 'ips', 'otp', 'mfa', 'sso', 'sms', 'sql', 'json', 'csv', 'pdf', 'html', 'ein', 'ssn', 'llc', 'sba', 'oews', 'naics', 'soc', 'fips', 'bls', 'bea', 'jolts', 'ppi', 'bfs', 'laus', 'ui', 'tls', 'ttl', 'uuid']);
 const SPELLINGS = { oauth: 'OAuth', graphql: 'GraphQL', webhooks: 'Webhooks' };
-const SMALL_WORDS = new Set(['a', 'an', 'and', 'as', 'at', 'by', 'for', 'in', 'of', 'on', 'or', 'per', 'the', 'to']);
 function titleize(value) {
   const spaced = value.replace(/\./g, '_').replace(/([a-z0-9])([A-Z])/g, '$1_$2');
   return spaced.split('_').filter(Boolean).map((p, i) => {
     const w = p.toLowerCase();
     if (SPELLINGS[w]) return SPELLINGS[w];
     if (ACRONYMS.has(w)) return w.toUpperCase();
-    if (i > 0 && SMALL_WORDS.has(w)) return w;
-    return w[0].toUpperCase() + w.slice(1);
+    return i === 0 ? w[0].toUpperCase() + w.slice(1) : w;
   }).join(' ');
 }
+/** "1 row", "2 rows". */
+function rowsText(n) { return `${Number(n).toLocaleString('en-US')} ${Number(n) === 1 ? 'row' : 'rows'}`; }
 function cellKey(table, id, column) { return `${table}:${id}:${column}`; }
 function displayValue(value) {
   if (value === null || value === undefined) return 'null';
   if (typeof value === 'object') return JSON.stringify(value, null, 2);
   return String(value);
 }
+// Columns a table starts without (the Columns menu brings them back): the plans' ids are only there for the other tables to point at.
+const HIDDEN_BY_DEFAULT = { plans: ['id'] };
 function isDefaultHiddenColumn(column) {
   const n = column.toLowerCase();
   return ['metadata', 'payload', 'raw', 'json', 'preferences', 'embedding', 'secret'].some((k) => n.includes(k));
@@ -68,7 +70,9 @@ registerRoute('/developer/admin', async (app) => {
     addEmail: '', addError: null, isAdding: false, confirmAccess: null, isAccessBusy: false,
     gridScrollLeft: 0,
     tables: [], rows: null, selectedTable: null, selectedSource: 'desk',
-    errorMessage: null, isLoading: true, isSaving: false,
+    errorMessage: null, // the data could not load: a retry card replaces the grid
+    actionError: null, // an edit, delete, refresh or "load more" failed: said above the grid, which stays
+    isLoading: true, isSaving: false,
     undoStack: [], redoStack: [], savingCellKeys: new Set(),
     filters: {}, sort: null, hiddenColumnsByTable: {},
     hasMoreRows: false, isLoadingMoreRows: false, isRefreshingRows: false,
@@ -79,7 +83,7 @@ registerRoute('/developer/admin', async (app) => {
   let rendering = false; // a redraw replaces the filter boxes; their blur then is not the person leaving them
 
   async function loadTables() {
-    s.isLoading = true; s.errorMessage = null; render();
+    s.isLoading = true; s.errorMessage = null; s.actionError = null; render();
     try {
       const data = await api('/admin/tables');
       const nextTables = data.tables || [];
@@ -123,13 +127,14 @@ registerRoute('/developer/admin', async (app) => {
   /** "1,234 rows"; "about 14,876,297 rows" for a large table's estimate; "10,000+ rows" for a filter's capped count. */
   function totalText(t) {
     const n = Number(t.totalRows).toLocaleString('en-US');
-    if (!t.totalIsEstimate) return `${n} rows`;
+    if (!t.totalIsEstimate) return rowsText(t.totalRows);
     return Object.keys(s.filters).length ? `${n}+ rows` : `about ${n} rows`;
   }
   function initializeHiddenColumns(rows) {
     if (!rows) return;
     if (!(rows.table in s.hiddenColumnsByTable)) {
-      s.hiddenColumnsByTable[rows.table] = new Set(rows.columns.filter(isDefaultHiddenColumn));
+      const named = HIDDEN_BY_DEFAULT[rows.rawName] || [];
+      s.hiddenColumnsByTable[rows.table] = new Set(rows.columns.filter((c) => isDefaultHiddenColumn(c) || named.includes(c)));
     }
   }
 
@@ -140,7 +145,7 @@ registerRoute('/developer/admin', async (app) => {
     await selectTable(table.name);
   }
   async function selectTable(table) {
-    s.selectedTable = table; s.isLoading = true; s.errorMessage = null; s.gridScrollLeft = 0;
+    s.selectedTable = table; s.isLoading = true; s.errorMessage = null; s.actionError = null; s.gridScrollLeft = 0;
     // Undo and redo keep the person's own edits across tables: each change remembers its table and row.
     s.filters = {}; s.sort = null; s.selectedRowId = null; s.editingCell = null; s.activeFilter = null;
     render();
@@ -159,11 +164,11 @@ registerRoute('/developer/admin', async (app) => {
     s.isRefreshingRows = true; render();
     try {
       const nextRows = await fetchRows(s.selectedTable, { limit: ROWS_PAGE_SIZE, filters: s.filters, sort: s.sort });
-      s.rows = nextRows; s.hasMoreRows = hasMore(nextRows); s.errorMessage = null;
+      s.rows = nextRows; s.hasMoreRows = hasMore(nextRows); s.actionError = null;
       if (announce) toast(`Up to date · ${totalText(nextRows)}`);
     } catch (err) {
       reportHandledException(err, 'refreshRows');
-      s.errorMessage = friendlyError(err, 'We could not refresh that table.');
+      s.actionError = friendlyError(err, 'We could not refresh that table.');
     } finally {
       s.isRefreshingRows = false; render();
     }
@@ -177,7 +182,7 @@ registerRoute('/developer/admin', async (app) => {
       s.hasMoreRows = hasMore(s.rows);
     } catch (err) {
       reportHandledException(err, 'loadMoreRows');
-      s.errorMessage = friendlyError(err, 'We could not load more rows.');
+      s.actionError = friendlyError(err, 'We could not load more rows.');
     } finally {
       s.isLoadingMoreRows = false; render();
     }
@@ -207,7 +212,7 @@ registerRoute('/developer/admin', async (app) => {
   async function applyChange(change, useNewValue) {
     const value = useNewValue ? change.newValue : change.oldValue;
     const key = cellKey(change.table, change.id, change.column);
-    s.savingCellKeys.add(key); s.isSaving = true; s.errorMessage = null; render();
+    s.savingCellKeys.add(key); s.isSaving = true; s.actionError = null; render();
     try {
       const saved = await api(`/admin/tables/${change.table}/rows/${change.id}`, { method: 'PATCH', body: { values: { [change.column]: value } } });
       if (s.rows && s.rows.table === change.table) {
@@ -223,7 +228,7 @@ registerRoute('/developer/admin', async (app) => {
       }
     } catch (err) {
       reportHandledException(err, 'saveCell');
-      s.errorMessage = friendlyError(err, 'We could not save that change.');
+      s.actionError = friendlyError(err, 'We could not save that change.');
     } finally {
       s.savingCellKeys.delete(key); s.isSaving = s.savingCellKeys.size > 0; render();
     }
@@ -243,7 +248,7 @@ registerRoute('/developer/admin', async (app) => {
     if (String(oldValue ?? '') === String(normalized ?? '')) { render(); return; }
     const change = { table: s.rows.table, id, column, oldValue, newValue: normalized };
     await applyChange(change, true);
-    if (s.errorMessage) return;
+    if (s.actionError) return;
     s.undoStack.push(change); s.redoStack = [];
     render(); // applyChange() already redrew, before the history above changed
   }
@@ -252,7 +257,7 @@ registerRoute('/developer/admin', async (app) => {
     const id = String(row[s.rows.primaryKey]);
     const change = { table: s.rows.table, id, column, oldValue: row[column], newValue: !row[column] };
     await applyChange(change, true);
-    if (s.errorMessage) return;
+    if (s.actionError) return;
     s.undoStack.push(change); s.redoStack = [];
     render();
   }
@@ -261,7 +266,7 @@ registerRoute('/developer/admin', async (app) => {
     if (!s.undoStack.length || s.isSaving) return;
     const change = s.undoStack.pop();
     await applyChange(change, false);
-    if (s.errorMessage) { s.undoStack.push(change); render(); return; } // still there to try again
+    if (s.actionError) { s.undoStack.push(change); render(); return; } // still there to try again
     s.redoStack.push(change); render();
     toast(`Undone: ${changeLabel(change)}`);
   }
@@ -269,7 +274,7 @@ registerRoute('/developer/admin', async (app) => {
     if (!s.redoStack.length || s.isSaving) return;
     const change = s.redoStack.pop();
     await applyChange(change, true);
-    if (s.errorMessage) { s.redoStack.push(change); render(); return; }
+    if (s.actionError) { s.redoStack.push(change); render(); return; }
     s.undoStack.push(change); render();
     toast(`Redone: ${changeLabel(change)}`);
   }
@@ -283,7 +288,7 @@ registerRoute('/developer/admin', async (app) => {
     if (!s.rows || !row) return;
     const id = String(row[s.rows.primaryKey]);
     const table = s.rows.table;
-    s.confirmDeleteRow = null; render();
+    s.confirmDeleteRow = null; s.actionError = null; render();
     try {
       await api(`/admin/tables/${table}/rows/${encodeURIComponent(id)}`, { method: 'DELETE' });
       // Only this row's edits leave the history: they cannot be undone on a row that no longer exists.
@@ -294,7 +299,7 @@ registerRoute('/developer/admin', async (app) => {
       await refreshRows();
     } catch (err) {
       reportHandledException(err, 'deleteRow');
-      s.errorMessage = friendlyError(err, 'We could not delete that row.');
+      s.actionError = friendlyError(err, 'We could not delete that row.');
       render();
     }
   }
@@ -379,8 +384,9 @@ registerRoute('/developer/admin', async (app) => {
     return `
       <div class="modal-backdrop" id="access-backdrop">
         <div class="modal" role="dialog" aria-modal="true" aria-labelledby="access-title">
-          <div class="access-modal-head"><h2 id="access-title">Who has access</h2><button type="button" class="admin-icon-btn" id="close-access-btn" title="Close" aria-label="Close">${icon('close')}</button></div>
+          <h2 id="access-title">Who has access</h2>
           ${body}
+          <div class="modal-actions"><button type="button" class="btn" id="close-access-btn">Close</button></div>
         </div>
       </div>`;
   }
@@ -421,7 +427,8 @@ registerRoute('/developer/admin', async (app) => {
         </div>
         ${s.tables.length ? `<div class="table-tabs">${sourceTables.map((t) => `<button type="button" data-table="${esc(t.name)}" class="${t.name === s.selectedTable ? 'active' : ''}">${esc(titleize(t.rawName || t.name))}</button>`).join('')}</div>` : ''}
         ${s.sourceErrors ? Object.entries(s.sourceErrors).map(([src, msg]) => `<p class="hint" style="color:var(--warning);">${esc(sourceLabels[src] || src)} could not be reached: ${esc(msg)}</p>`).join('') : ''}
-        ${s.errorMessage ? `<div class="empty-state">${icon('error_outline')}<div style="margin-top:var(--sp-md);">Something went wrong</div><div class="hint">${esc(s.errorMessage)}</div></div>`
+        ${s.actionError ? statusMsg('error', s.actionError, false) : ''}
+        ${s.errorMessage ? `<div class="empty-state">${icon('error_outline')}<div style="margin-top:var(--sp-md);">The data could not load</div><div class="hint">${esc(s.errorMessage)}</div><button type="button" class="btn" id="retry-load-btn" style="margin-top:var(--sp-lg);">${icon('refresh')} Try again</button></div>`
           : s.isLoading ? `<div class="empty-state">${spinnerBtn(true, '', { dark: true })}</div>`
           : gridHtml()}
       </div>
@@ -429,10 +436,10 @@ registerRoute('/developer/admin', async (app) => {
       ${s.confirmAccess ? confirmAccessHtml() : ''}
       ${s.confirmDeleteRow ? `
         <div class="modal-backdrop" id="delete-row-modal-backdrop">
-          <div class="modal">
-            <h2>Delete row</h2>
-            <p>Delete this row from ${esc(titleize(s.rows.rawName || s.rows.table))}? This cannot be undone.</p>
-            <div style="display:flex;justify-content:flex-end;gap:var(--sp-sm);margin-top:var(--sp-xl);">
+          <div class="modal" role="dialog" aria-modal="true" aria-labelledby="delete-row-title">
+            <h2 id="delete-row-title">Delete row</h2>
+            <p class="modal-text">Delete this row from ${esc(titleize(s.rows.rawName || s.rows.table))}? This cannot be undone.</p>
+            <div class="modal-actions">
               <button type="button" class="btn" id="cancel-delete-row-btn">Cancel</button>
               <button type="button" class="btn btn-danger" id="confirm-delete-row-btn">Delete</button>
             </div>
@@ -467,7 +474,7 @@ registerRoute('/developer/admin', async (app) => {
               <th><span class="col-name">Actions</span></th>
               ${visibleColumns.map((col) => `
                 <th data-sort="${esc(col)}">
-                  <span class="col-name">${esc(titleize(col))}${s.sort && s.sort.column === col ? (s.sort.ascending ? ' ▲' : ' ▼') : ''}</span>
+                  <span class="col-name">${esc(titleize(col))}${s.sort && s.sort.column === col ? (s.sort.ascending ? ' ▲' : ' ▼') : ''}${table.editableColumns.includes(col) && !table.secretColumns.includes(col) ? `<span class="col-editable" title="You can edit this column" aria-label="Editable column">${icon('edit')}</span>` : ''}</span>
                   <input class="col-filter" data-filter="${esc(col)}" value="${esc(s.filters[col] || '')}" placeholder="Filter" />
                 </th>
               `).join('')}
@@ -500,7 +507,6 @@ registerRoute('/developer/admin', async (app) => {
             </tbody>
           </table>
         </div>
-        <div class="admin-hscroll" aria-hidden="true"><div style="width:${tableWidth}px;"></div></div>
       `;
     }
 
@@ -531,10 +537,13 @@ registerRoute('/developer/admin', async (app) => {
           ${s.isRefreshingRows ? `<div style="height:2px;background:var(--accent);"></div>` : ''}
         </div>
         ${bodyHtml}
-        <div class="admin-footer">
-          <span>${table.totalRows > 0 ? `${table.rows.length.toLocaleString('en-US')} of ${esc(totalText(table))} loaded` : `${table.rows.length} rows loaded`}</span>
-          <div style="flex:1;"></div>
-          ${s.isLoadingMoreRows ? spinnerBtn(true, '', { dark: true }) : s.hasMoreRows ? `<button type="button" class="btn-link" id="load-more-btn">Load more ▾</button>` : ''}
+        <div class="admin-grid-bottom">
+          ${table.rows.length ? `<div class="admin-hscroll" aria-hidden="true"><div style="width:${tableWidth}px;"></div></div>` : ''}
+          <div class="admin-footer">
+            <span>${table.totalRows > 0 ? `${table.rows.length.toLocaleString('en-US')} of ${esc(totalText(table))} loaded` : `${rowsText(table.rows.length)} loaded`}</span>
+            <div style="flex:1;"></div>
+            ${s.isLoadingMoreRows ? spinnerBtn(true, '', { dark: true }) : s.hasMoreRows ? `<button type="button" class="btn-link" id="load-more-btn">Load more ▾</button>` : ''}
+          </div>
         </div>
         ${selectedRow() ? rowDetailHtml(table, selectedRow()) : ''}
       </div>
@@ -603,6 +612,7 @@ registerRoute('/developer/admin', async (app) => {
     const closeAccess = () => { s.accessOpen = false; render(); };
     const closeAccessBtn = document.getElementById('close-access-btn'); if (closeAccessBtn) closeAccessBtn.addEventListener('click', closeAccess);
     const accessBackdrop = document.getElementById('access-backdrop'); if (accessBackdrop) accessBackdrop.addEventListener('click', (e) => { if (e.target === accessBackdrop) closeAccess(); });
+    const retryLoad = document.getElementById('retry-load-btn'); if (retryLoad) retryLoad.addEventListener('click', loadTables);
     const retryAccess = document.getElementById('retry-access-btn'); if (retryAccess) retryAccess.addEventListener('click', loadAccess);
     const addForm = document.getElementById('add-admin-form');
     if (addForm) {

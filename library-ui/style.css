@@ -594,7 +594,9 @@ input[type="password"]::-ms-reveal { display: none; }
 .admin-grid-scroll { overflow-x: auto; max-height: 65vh; overflow-y: auto; }
 table.admin-table { border-collapse: collapse; font-size: .82rem; width: max-content; min-width: 100%; }
 table.admin-table th { position: sticky; top: 0; background: var(--input-bg); text-align: left; padding: var(--sp-sm); border-bottom: 1px solid var(--line); vertical-align: top; z-index: 1; cursor: pointer; }
-table.admin-table th .col-name { font-size: .7rem; text-transform: uppercase; letter-spacing: .03em; color: var(--ink-faint); font-weight: 700; display: block; margin-bottom: var(--sp-2xs); white-space: nowrap; }
+table.admin-table th .col-name { font-size: .76rem; color: var(--ink-faint); font-weight: 700; display: block; margin-bottom: var(--sp-2xs); white-space: normal; overflow-wrap: anywhere; line-height: 1.25; }
+table.admin-table th .col-editable { display: inline-flex; vertical-align: middle; margin-left: var(--sp-xs); color: var(--accent); }
+table.admin-table th .col-editable .material-symbols-outlined, table.admin-table th .col-editable svg { font-size: .9rem; width: .9rem; height: .9rem; }
 table.admin-table th .col-filter { width: 130px; padding: 4px 6px; font-size: .76rem; }
 table.admin-table td { padding: var(--sp-sm); border-bottom: 1px solid var(--line-subtle); vertical-align: top; max-width: 260px; }
 table.admin-table td.admin-actions-cell { white-space: nowrap; }
@@ -602,7 +604,7 @@ table.admin-table td.admin-actions-cell { white-space: nowrap; }
 .admin-cell-value.editable:hover { background: var(--input-bg); outline: 1px solid var(--line); }
 .admin-cell-value.null-value { font-style: italic; color: var(--ink-faint); }
 .admin-cell-value.secret { color: var(--ink-faint); font-style: italic; }
-.admin-cell-input { width: 100%; min-width: 140px; font-size: .82rem; padding: 4px 6px; }
+.admin-cell-input { width: 100%; min-width: 0; max-width: 100%; box-sizing: border-box; resize: vertical; font-size: .82rem; padding: 4px 6px; }
 .bool-pill { display: inline-block; padding: 2px 8px; border-radius: var(--r-pill); font-size: .74rem; font-weight: 700; border: 1px solid; }
 .bool-pill.t { background: var(--success-soft); color: var(--success); border-color: var(--success); }
 .bool-pill.f { background: var(--warning-soft); color: var(--warning); border-color: var(--warning); }
@@ -617,7 +619,7 @@ table.admin-table td.admin-actions-cell { white-space: nowrap; }
 .row-detail-panel .rd-head { display: flex; align-items: center; gap: var(--sp-sm); padding: var(--sp-lg); border-bottom: 1px solid var(--line); }
 .row-detail-panel .rd-body { flex: 1; overflow-y: auto; padding: var(--sp-lg); }
 .row-detail-panel .rd-field { margin-bottom: var(--sp-lg); }
-.row-detail-panel .rd-field label { display: block; font-size: .72rem; text-transform: uppercase; color: var(--ink-faint); font-weight: 700; margin-bottom: 4px; }
+.row-detail-panel .rd-field label { display: block; font-size: .72rem; color: var(--ink-faint); font-weight: 700; margin-bottom: 4px; }
 .column-menu { position: relative; }
 .column-menu-list {
   position: absolute; top: calc(100% + 4px); right: 0; z-index: 20; background: var(--surface-2); border: 1px solid var(--line);
@@ -819,14 +821,15 @@ button.plan-pill.upgrade:hover { background: var(--accent-hover); border-color: 
 
 /* Invoices: each card has the invoice's line, its total and status, and View / Print to PDF buttons. */
 .invoice-card { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-lg); flex-wrap: wrap; }
-.invoice-main { min-width: 0; }
+.invoice-main { min-width: 0; flex: 1; }
+.invoice-lines { list-style: none; margin: var(--sp-xs) 0 0; padding: 0; font-size: .8rem; color: var(--ink-faint); }
+.invoice-lines li { display: flex; justify-content: space-between; gap: var(--sp-md); }
 .invoice-actions { display: flex; gap: var(--sp-sm); flex-wrap: wrap; }
 .invoice-doc-head { display: flex; justify-content: space-between; align-items: flex-start; gap: var(--sp-lg); margin-bottom: var(--sp-lg); }
-.invoice-doc-kicker { font-size: .8rem; font-weight: 700; color: var(--ink-faint); text-transform: uppercase; letter-spacing: .04em; }
+.invoice-doc-kicker { font-size: .8rem; font-weight: 700; color: var(--ink-faint); }
 .invoice-doc-title { margin: var(--sp-xs) 0 0; font-size: 1.5rem; }
-.invoice-doc-status { font-weight: 700; font-size: .85rem; border: 1px solid var(--line); border-radius: var(--r-pill); padding: var(--sp-xs) var(--sp-md); }
 .invoice-doc-meta { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: var(--sp-md) var(--sp-lg); margin: 0 0 var(--sp-lg); }
-.invoice-doc-meta dt { font-size: .75rem; font-weight: 700; color: var(--ink-faint); text-transform: uppercase; letter-spacing: .04em; }
+.invoice-doc-meta dt { font-size: .75rem; font-weight: 700; color: var(--ink-faint); }
 .invoice-doc-meta dd { margin: var(--sp-2xs) 0 0; font-weight: 600; }
 .invoice-doc-table tfoot td { font-weight: 700; border-bottom: none; border-top: 2px solid var(--line-strong); }
 #print-invoice { display: none; }
@@ -855,19 +858,18 @@ button.plan-pill.upgrade:hover { background: var(--accent-hover); border-color: 
 table.admin-table { table-layout: fixed; min-width: 0; }
 table.admin-table td { max-width: none; overflow-wrap: anywhere; }
 table.admin-table th .col-filter { width: 100%; box-sizing: border-box; }
-.admin-hscroll { position: sticky; bottom: 0; z-index: 3; overflow-x: auto; overflow-y: hidden; background: var(--surface); border-top: 1px solid var(--line-subtle); scrollbar-color: var(--line-strong) var(--surface); }
+.admin-hscroll { overflow-x: auto; overflow-y: hidden; background: var(--surface); border-top: 1px solid var(--line-subtle); scrollbar-color: var(--line-strong) var(--surface); }
 .admin-hscroll[hidden] { display: none; }
 .admin-hscroll > div { height: 1px; }
+.admin-grid-bottom { position: sticky; bottom: 0; z-index: 3; background: var(--input-bg); border-radius: 0 0 var(--r-xl) var(--r-xl); }
 .admin-footer { border-radius: 0 0 var(--r-xl) var(--r-xl); }
 .admin-grid-wrap .row-detail-panel { position: fixed; top: var(--topbar-h, 57px); bottom: 0; }
 /* The API buttons share a line with "Who has access", which sits at the far right. */
 .admin-source-row { display: flex; align-items: flex-start; gap: var(--sp-md); }
 .admin-source-row .source-tabs { flex: 1; min-width: 0; }
 .admin-access-btn { flex-shrink: 0; }
-.access-modal-head { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-md); margin-bottom: var(--sp-lg); }
-.access-modal-head h2 { margin: 0; }
 .access-group-title { font-size: .85rem; font-weight: 700; color: var(--ink-soft); margin: var(--sp-lg) 0 var(--sp-sm); }
-.access-modal-head + .access-group-title { margin-top: 0; }
+#access-title + .access-group-title { margin-top: 0; }
 .access-list { display: flex; flex-direction: column; gap: var(--sp-xs); }
 .access-person { display: flex; align-items: center; gap: var(--sp-md); padding: var(--sp-sm) var(--sp-md); border: 1px solid var(--line); border-radius: var(--r-md); }
 .access-person-text { flex: 1; min-width: 0; }

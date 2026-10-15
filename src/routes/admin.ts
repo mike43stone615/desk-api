@@ -163,13 +163,15 @@ const TABLES = {
       'updated_at',
     ],
     editable: ['email', 'first_name', 'last_name'],
+    locked: ['email_confirmed_at', 'created_at', 'updated_at'], // set by the system (changing the email clears email_confirmed_at itself)
     secret: [],
     deletable: true,
   },
   sessions: {
     primaryKey: 'id',
     columns: ['id', 'user_id', 'expires_at', 'created_at'],
-    editable: [],
+    editable: ['expires_at'],
+    locked: ['user_id', 'created_at'],
     secret: [],
     deletable: true,
   },
@@ -177,20 +179,23 @@ const TABLES = {
   email_tokens: {
     primaryKey: 'id',
     columns: ['id', 'purpose', 'user_id', 'expires_at', 'used_at', 'created_at'],
-    editable: [],
+    editable: ['expires_at', 'used_at'],
+    locked: ['purpose', 'user_id', 'created_at'],
     secret: [],
     deletable: true,
   },
   business_setup_drafts: {
     primaryKey: 'id',
     columns: ['id', 'user_id', 'draft_json', 'created_at', 'updated_at'],
-    editable: [],
+    editable: ['draft_json'],
+    locked: ['user_id', 'created_at', 'updated_at'],
     secret: [],
     deletable: true,
   },
   businesses: {
     primaryKey: 'id',
-    columns: ['id', 'user_id', 'name', 'industry', 'business_json', 'created_at', 'updated_at'],
+    // user_id (who created it) is left out: a business is shared by its members (business_memberships), not owned by one user.
+    columns: ['id', 'name', 'industry', 'business_json', 'created_at', 'updated_at'],
     editable: ['name', 'industry'],
     secret: [],
     options: { industry: BUSINESS_INDUSTRIES },
@@ -232,8 +237,8 @@ const TABLES = {
   },
   plans: {
     primaryKey: 'id',
-    columns: ['id', 'name', 'description', 'monthly_price_cents', 'included_analyses', 'overage_cents_per_analysis', 'max_keys', 'max_webhooks', 'max_apps', 'service_per_minute', 'service_per_month', 'total_per_minute', 'total_per_month', 'overage_cents_per_call', 'active', 'sort_order'],
-    editable: ['name', 'description', 'monthly_price_cents', 'included_analyses', 'overage_cents_per_analysis', 'max_keys', 'max_webhooks', 'max_apps', 'service_per_minute', 'service_per_month', 'total_per_minute', 'total_per_month', 'overage_cents_per_call', 'active', 'sort_order'],
+    columns: ['id', 'name', 'monthly_price_cents', 'included_analyses', 'overage_cents_per_analysis', 'max_keys', 'max_webhooks', 'max_apps', 'service_per_minute', 'service_per_month', 'total_per_minute', 'total_per_month', 'overage_cents_per_call', 'active', 'sort_order'],
+    editable: ['name', 'monthly_price_cents', 'included_analyses', 'overage_cents_per_analysis', 'max_keys', 'max_webhooks', 'max_apps', 'service_per_minute', 'service_per_month', 'total_per_minute', 'total_per_month', 'overage_cents_per_call', 'active', 'sort_order'],
     secret: [],
     deletable: false, // switch a plan off (active = false) instead
   },
@@ -343,6 +348,8 @@ type AdminTableConfig = {
   keyColumns?: readonly string[];
   columns: readonly string[];
   editable: readonly string[];
+  /** Never edited by anyone, owners included: filled in by the system or the link to another row. */
+  locked?: readonly string[];
   secret: readonly string[];
   options?: Record<string, readonly string[]>;
   deletable?: boolean;
@@ -515,11 +522,11 @@ async function callerIsOwner(request: FastifyRequest): Promise<boolean> {
   return !!user && (await accessFor(user)).isOwner;
 }
 
-/** Administrators edit the listed columns; an owner edits every column except a single id column (other rows point at it). */
+/** Administrators edit the listed columns; an owner edits every column except a single id column (other rows point at it) and the table's locked columns. */
 function editableFor(table: AdminTableConfig, owner: boolean): readonly string[] {
   if (table.readOnly) return [];
-  if (!owner) return table.editable;
-  return table.keyColumns ? table.columns : table.columns.filter((c) => c !== table.primaryKey);
+  const columns = !owner ? table.editable : table.keyColumns ? table.columns : table.columns.filter((c) => c !== table.primaryKey);
+  return table.locked ? columns.filter((c) => !table.locked!.includes(c)) : columns;
 }
 
 /** Owners delete rows of every table except the read-only audit tables; administrators only where the table allows it. */

@@ -46,7 +46,7 @@ describe('plan call limits', () => {
   it('bills extra calls on an invoice, and never on Free', () => {
     expect(invoiceLines(PRO, 0, tally({ registry_api: 3010, total: 3010 }))).toEqual([
       { description: 'Pro plan, one month', quantity: 1, unitCents: 1500, totalCents: 1500 },
-      { description: "API calls beyond the plan's monthly limits", quantity: 10, unitCents: 5, totalCents: 50 },
+      { description: 'Business Name Registry API calls beyond the 3,000 included', quantity: 10, unitCents: 5, totalCents: 50 },
     ]);
     expect(invoiceLines(FREE, 0, tally({ registry_api: 9000, total: 9000 }))).toEqual([]);
   });
@@ -117,5 +117,17 @@ describe('monthly usage marks (80% and 100%)', () => {
     expect(WEBHOOK_EVENTS).toContain('invoice.available');
     expect(WEBHOOK_EVENTS).not.toContain('usage.cap_reached');
     expect(WEBHOOK_EVENTS).not.toContain('usage.threshold_reached');
+  });
+});
+
+describe('the extra-calls lines of an invoice', () => {
+  it('name each API over its own limit, then the all-APIs remainder, and add up to extraCalls', () => {
+    const t = tally({ desk_api: 3500, registry_api: 2000, market_validation_api: 1000, total: 6500 });
+    const lines = invoiceLines(PRO, 0, t).slice(1);
+    expect(lines.map((l) => [l.description, l.quantity])).toEqual([
+      ['Desk API calls beyond the 3,000 included', 500],
+      ['API calls beyond the 5,000 included across all APIs', 1000],
+    ]);
+    expect(lines.reduce((n, l) => n + l.quantity, 0)).toBe(extraCalls(PRO, t));
   });
 });

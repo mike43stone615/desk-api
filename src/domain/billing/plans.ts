@@ -9,7 +9,9 @@ import { pool } from '../../db';
 import { config } from '../../config';
 import { emitWebhookEvent, usageEvent } from '../webhooks/webhooks';
 import { sendUsageThresholdEmail } from '../../infrastructure/email/resend';
-import { extraCalls, monthTally, percentJustReached, type CallTally } from './allowance';
+import { extraCalls, METERED_SERVICES, monthTally, percentJustReached, type CallTally, type MeteredService } from './allowance';
+
+const SERVICE_NAMES: Record<MeteredService, string> = { desk_api: 'Desk API', registry_api: 'Business Name Registry API', market_validation_api: 'Market Validation API' };
 
 export type SubjectType = 'user' | 'team';
 
@@ -267,8 +269,9 @@ export async function analysesInMonth(subjectType: SubjectType, subjectId: strin
 }
 
 export interface InvoiceLine { description: string; quantity: number; unitCents: number; totalCents: number }
+/** `number` is the running invoice number (1, 2, 3 ...), never reused: shown as INV-000001. */
 export interface Invoice {
-  id: string; subjectType: SubjectType; subjectId: string; planId: string; periodStart: string; periodEnd: string; currency: string;
+  id: string; number: number; subjectType: SubjectType; subjectId: string; planId: string; periodStart: string; periodEnd: string; currency: string;
   lines: InvoiceLine[]; subtotalCents: number; status: 'draft' | 'open' | 'paid' | 'void'; createdAt: string;
   /** The plan's name as it is now (e.g. "Pro"). */
   planName: string;
@@ -282,9 +285,20 @@ export function invoiceLines(plan: Plan, analyses: number, calls?: CallTally): I
   if (extra > 0 && plan.overageCentsPerAnalysis) {
     lines.push({ description: `Uncached market validation analyses beyond the ${plan.includedAnalyses.toLocaleString('en-US')} included`, quantity: extra, unitCents: plan.overageCentsPerAnalysis, totalCents: extra * plan.overageCentsPerAnalysis });
   }
-  const extraApiCalls = calls ? extraCalls(plan, calls) : 0;
-  if (extraApiCalls > 0 && plan.overageCentsPerCall) {
-    lines.push({ description: "API calls beyond the plan's monthly limits", quantity: extraApiCalls, unitCents: plan.overageCentsPerCall, totalCents: extraApiCalls * plan.overageCentsPerCall });
+  // One line per API over its own monthly limit, then (only if the all-APIs limit was passed by more than those add up to)
+  // one line for the rest: together exactly extraCalls(). Each says how many calls were included, so the total can be checked.
+  if (calls && plan.overageCentsPerCall) {
+    let counted = 0;
+    for (const service of METERED_SERVICES) {
+      const over = Math.max(0, calls[service] - plan.servicePerMonth);
+      if (over <= 0) continue;
+      counted += over;
+      lines.push({ description: `${SERVICE_NAMES[service]} calls beyond the ${plan.servicePerMonth.toLocaleString('en-US')} included`, quantity: over, unitCents: plan.overageCentsPerCall, totalCents: over * plan.overageCentsPerCall });
+    }
+    const rest = extraCalls(plan, calls) - counted;
+    if (rest > 0) {
+      lines.push({ description: `API calls beyond the ${plan.totalPerMonth.toLocaleString('en-US')} included across all APIs`, quantity: rest, unitCents: plan.overageCentsPerCall, totalCents: rest * plan.overageCentsPerCall });
+    }
   }
   return lines;
 }
@@ -385,13 +399,13 @@ export async function generateInvoices(month?: string): Promise<number> {
 export async function invoicesFor(subjectType: SubjectType, subjectId: string, page: { limit?: number; offset?: number } = {}): Promise<{ invoices: Invoice[]; hasMore: boolean }> {
   const limit = Math.min(Math.max(page.limit ?? 10, 1), 50);
   const offset = Math.max(page.offset ?? 0, 0);
-  const { rows } = await pool.query<{ id: string; plan_id: string; period_start: string; period_end: string; currency: string; lines: string; subtotal_cents: number; status: Invoice['status']; created_at: string; plan_name: string | null }>(
-    `SELECT i.id, i.plan_id, i.period_start, i.period_end, i.currency, i.lines, i.subtotal_cents, i.status, i.created_at, p.name AS plan_name
+  const { rows } = await pool.query<{ id: string; number: string; plan_id: string; period_start: string; period_end: string; currency: string; lines: string; subtotal_cents: number; status: Invoice['status']; created_at: string; plan_name: string | null }>(
+    `SELECT i.id, i.number, i.plan_id, i.period_start, i.period_end, i.currency, i.lines, i.subtotal_cents, i.status, i.created_at, p.name AS plan_name
        FROM invoices i LEFT JOIN plans p ON p.id = i.plan_id
       WHERE i.subject_type = $1 AND i.subject_id = $2 ORDER BY i.period_start DESC, i.id LIMIT $3 OFFSET $4`,
     [subjectType, subjectId, limit + 1, offset],
   );
-  const invoices = rows.slice(0, limit).map((r) => ({ id: r.id, subjectType, subjectId, planId: r.plan_id, periodStart: r.period_start, periodEnd: r.period_end, currency: r.currency, lines: JSON.parse(r.lines) as InvoiceLine[], subtotalCents: r.subtotal_cents, status: r.status, createdAt: r.created_at, planName: r.plan_name ?? r.plan_id }));
+  const invoices = rows.slice(0, limit).map((r) => ({ id: r.id, number: Number(r.number), subjectType, subjectId, planId: r.plan_id, periodStart: r.period_start, periodEnd: r.period_end, currency: r.currency, lines: JSON.parse(r.lines) as InvoiceLine[], subtotalCents: r.subtotal_cents, status: r.status, createdAt: r.created_at, planName: r.plan_name ?? r.plan_id }));
   return { invoices, hasMore: rows.length > limit };
 }
 
