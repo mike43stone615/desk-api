@@ -253,8 +253,9 @@ const TABLES = {
   },
   invoices: {
     primaryKey: 'id',
-    columns: ['id', 'subject_type', 'subject_id', 'plan_id', 'period_start', 'period_end', 'currency', 'lines', 'subtotal_cents', 'status', 'created_at'],
+    columns: ['id', 'number', 'subject_type', 'subject_id', 'plan_id', 'period_start', 'period_end', 'currency', 'lines', 'subtotal_cents', 'status', 'created_at'],
     editable: ['status'],
+    locked: ['number'], // the running invoice number (migration 0036) is never changed, so two documents never share one
     secret: [],
     options: { status: ['draft', 'open', 'paid', 'void'] },
     deletable: false, // a financial record: mark it void instead
