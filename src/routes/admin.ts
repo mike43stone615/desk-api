@@ -144,10 +144,9 @@ const BUSINESS_INDUSTRIES = [
   'Laundromat / Dry Cleaning',
 ] as const;
 
-const TEAM_ROLES = ['owner', 'admin', 'developer', 'viewer'] as const;
 // Same 4 roles as the DB CHECK constraint (migrations/0004_business_memberships.sql) and validators/setup.ts's
 // BusinessMemberRole -- kept as a literal here rather than imported since this file's TABLES config is deliberately
-// self-contained (see TEAM_ROLES above, which does the same for team_members).
+// self-contained.
 const BUSINESS_MEMBERSHIP_ROLES = ['owner', 'admin', 'member', 'accountant'] as const;
 
 const TABLES = {
@@ -219,22 +218,7 @@ const TABLES = {
     options: { role: BUSINESS_MEMBERSHIP_ROLES },
     deletable: true,
   },
-  // ── the platform tables (teams, plans and billing, webhooks, apps, status page, audit) ──
-  teams: {
-    primaryKey: 'id',
-    columns: ['id', 'name', 'created_by_user_id', 'rate_limit_per_minute', 'created_at'],
-    editable: ['name', 'rate_limit_per_minute'],
-    secret: [],
-    deletable: false, // deleting a team also ends its keys at the backends; use the Teams page
-  },
-  team_members: {
-    primaryKey: 'id',
-    columns: ['id', 'team_id', 'user_id', 'role', 'invited_by_user_id', 'accepted_at', 'created_at'],
-    editable: ['role', 'accepted_at'],
-    secret: [],
-    options: { role: TEAM_ROLES },
-    deletable: true,
-  },
+  // ── the platform tables (plans and billing, webhooks, apps, status page, audit) ──
   plans: {
     primaryKey: 'id',
     columns: ['id', 'name', 'monthly_price_cents', 'included_analyses', 'overage_cents_per_analysis', 'max_keys', 'max_webhooks', 'max_apps', 'service_per_minute', 'service_per_month', 'total_per_minute', 'total_per_month', 'overage_cents_per_call', 'active', 'sort_order'],
@@ -249,13 +233,12 @@ const TABLES = {
     editable: ['plan_id', 'status', 'period_start', 'period_end', 'provider', 'provider_ref', 'scheduled_plan_id', 'scheduled_for'],
     secret: [],
     options: { status: ['active', 'past_due', 'canceled'] },
-    deletable: true, // the person or team goes back to the Free plan
+    deletable: true, // the person goes back to the Free plan
   },
   invoices: {
     primaryKey: 'id',
     columns: ['id', 'number', 'subject_type', 'subject_id', 'plan_id', 'period_start', 'period_end', 'currency', 'lines', 'subtotal_cents', 'status', 'created_at'],
-    editable: ['status'],
-    locked: ['number'], // the running invoice number (migration 0036) is never changed, so two documents never share one
+    editable: ['status'], // owners may also change the number (migration 0036): the database refuses a number another invoice has
     secret: [],
     options: { status: ['draft', 'open', 'paid', 'void'] },
     deletable: false, // a financial record: mark it void instead
@@ -296,7 +279,7 @@ const TABLES = {
   },
   webhook_endpoints: {
     primaryKey: 'id',
-    columns: ['id', 'owner_user_id', 'team_id', 'url', 'events', 'active', 'consecutive_failures', 'disabled_reason', 'created_at'],
+    columns: ['id', 'owner_user_id', 'url', 'events', 'active', 'consecutive_failures', 'disabled_reason', 'created_at'],
     editable: ['active', 'consecutive_failures', 'disabled_reason'],
     secret: [],
     deletable: true,
@@ -317,7 +300,7 @@ const TABLES = {
   },
   gateway_api_keys: {
     primaryKey: 'id',
-    columns: ['id', 'owner_user_id', 'label', 'key_prefix', 'team_id', 'sandbox', 'rate_limit_per_minute', 'created_at', 'last_used_at', 'expires_at', 'revoked_at'],
+    columns: ['id', 'owner_user_id', 'label', 'key_prefix', 'sandbox', 'rate_limit_per_minute', 'created_at', 'last_used_at', 'expires_at', 'revoked_at'],
     editable: ['label', 'rate_limit_per_minute', 'expires_at'],
     secret: [],
     deletable: false, // revoke a key from the API Keys page or the key tools, so its backend keys are ended too
@@ -494,11 +477,11 @@ export function validateEditableValue(
 
 /** Columns edited as whole numbers, booleans, and which of the numbers may be left empty (NULL). */
 const INTEGER_COLUMNS = new Set([
-  'teams.rate_limit_per_minute', 'plans.monthly_price_cents', 'plans.included_analyses', 'plans.overage_cents_per_analysis',
+  'invoices.number', 'plans.monthly_price_cents', 'plans.included_analyses', 'plans.overage_cents_per_analysis',
   'plans.max_keys', 'plans.max_webhooks', 'plans.sort_order', 'plans.max_apps', 'plans.service_per_minute', 'plans.service_per_month',
   'plans.total_per_minute', 'plans.total_per_month', 'plans.overage_cents_per_call', 'webhook_endpoints.consecutive_failures', 'gateway_api_keys.rate_limit_per_minute',
 ]);
-const NULLABLE_INTEGER_COLUMNS = new Set(['teams.rate_limit_per_minute', 'plans.overage_cents_per_analysis', 'plans.overage_cents_per_call', 'gateway_api_keys.rate_limit_per_minute']);
+const NULLABLE_INTEGER_COLUMNS = new Set(['plans.overage_cents_per_analysis', 'plans.overage_cents_per_call', 'gateway_api_keys.rate_limit_per_minute']);
 const BOOLEAN_COLUMNS = new Set(['plans.active', 'webhook_endpoints.active']);
 
 /** A rule the database itself enforces (a limit, a link to another row, a duplicate) becomes a plain 400 rather than a 500. */

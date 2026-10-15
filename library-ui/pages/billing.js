@@ -185,7 +185,7 @@ registerRoute('/developer/billing', async (app) => {
           <p class="modal-text">${esc(p.name)} is ${esc(formatMoney(p.monthlyPriceCents))} a month. ${p.monthlyPriceCents < s.sub.plan.monthlyPriceCents
             ? `A downgrade starts on the 1st of next month (${esc(dayText(nextMonthStart()))}): you keep ${esc(s.sub.plan.name)} and everything it includes until then.`
             : `An upgrade starts at once. This month you pay for each plan only for the days you were on it.`}</p>
-          <p class="modal-text">Online payment is coming soon; you will be able to change your plan here once it is ready.</p>
+          <p class="modal-text">A paid plan needs a payment method on file. Online payment is coming soon; you will be able to add one and change your plan here once it is ready.</p>
           <div class="modal-actions"><button type="button" class="btn" id="upgrade-close">Close</button></div>
         </div>
       </div>`;

@@ -75,6 +75,7 @@ export const ERROR_CODES: Record<string, string> = {
   webhook_forbidden: 'Only a team admin or owner can manage its webhooks.',
   webhook_unavailable: 'Webhook storage is not configured.',
   unknown_plan: 'No such plan.',
+  payment_method_required: 'Add a payment method before switching to a paid plan.',
   invalid_token: 'The OAuth access token is invalid, expired or revoked.',
   oauth_endpoint_not_allowed: 'An app access token cannot call this endpoint.',
   oauth_insufficient_scope: 'The app was not given the scope this endpoint needs.',

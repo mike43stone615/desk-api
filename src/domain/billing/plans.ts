@@ -112,7 +112,7 @@ export async function subscriptionFor(subjectType: SubjectType, subjectId: strin
 }
 
 export class BillingError extends Error {
-  constructor(public readonly code: 'unknown_plan' | 'not_found', message: string) {
+  constructor(public readonly code: 'unknown_plan' | 'not_found' | 'payment_method_required', message: string) {
     super(message);
     this.name = 'BillingError';
   }
@@ -171,7 +171,8 @@ async function switchNow(subjectType: SubjectType, subjectId: string, planId: st
 }
 
 async function assertSubject(subjectType: SubjectType, subjectId: string): Promise<void> {
-  const { rows } = await pool.query(subjectType === 'user' ? `SELECT 1 FROM users WHERE id = $1` : `SELECT 1 FROM teams WHERE id = $1`, [subjectId]);
+  // Teams no longer exist: only a person can hold a plan.
+  const { rows } = subjectType === 'user' ? await pool.query(`SELECT 1 FROM users WHERE id = $1`, [subjectId]) : { rows: [] };
   if (!rows[0]) throw new BillingError('not_found', `No such ${subjectType}.`);
 }
 
@@ -183,17 +184,32 @@ export async function assignPlan(subjectType: SubjectType, subjectId: string, pl
   return subscriptionFor(subjectType, subjectId);
 }
 
+/** True when the person has a payment method on file (migration 0038; added once a payment provider is connected). */
+export async function hasPaymentMethod(userId: string): Promise<boolean> {
+  const { rows } = await pool.query(`SELECT 1 FROM payment_methods WHERE user_id = $1 LIMIT 1`, [userId]);
+  return rows.length > 0;
+}
+
+/** Pure: a paid plan needs a payment method on file; Free never does, and neither does an administrator granting a plan. */
+export function paymentMethodMissing(target: Pick<Plan, 'monthlyPriceCents'>, hasMethod: boolean, byAdministrator: boolean): boolean {
+  return target.monthlyPriceCents > 0 && !hasMethod && !byAdministrator;
+}
+
 /**
  * A plan change the way a customer expects it:
  *   - an upgrade (a dearer plan) starts at once, and this month is charged for each plan's own part of it (prorated);
  *   - a downgrade (a cheaper plan) starts on the 1st of next month: the current plan, and everything it allows, stays
  *     until then. Asking again before then replaces the waiting change; asking for the current plan cancels it.
  * `when: 'now'` makes any change at once (an administrator correcting something).
+ * A change to a paid plan needs a payment method on file, unless `byAdministrator` (granting a plan by hand).
  */
-export async function changePlan(subjectType: SubjectType, subjectId: string, planId: string, when: 'auto' | 'now' = 'auto'): Promise<{ subscription: Subscription; effectiveAt: string; scheduled: boolean }> {
+export async function changePlan(subjectType: SubjectType, subjectId: string, planId: string, when: 'auto' | 'now' = 'auto', byAdministrator = false): Promise<{ subscription: Subscription; effectiveAt: string; scheduled: boolean }> {
   const target = await planById(planId);
   await assertSubject(subjectType, subjectId);
   const current = await subscriptionFor(subjectType, subjectId);
+  if (current.plan.id !== target.id && paymentMethodMissing(target, await hasPaymentMethod(subjectId), byAdministrator)) {
+    throw new BillingError('payment_method_required', 'Add a payment method before switching to a paid plan.');
+  }
   if (current.plan.id === target.id) {
     if (current.id) await pool.query(`UPDATE subscriptions SET scheduled_plan_id = NULL, scheduled_for = NULL WHERE id = $1`, [current.id]);
     return { subscription: await subscriptionFor(subjectType, subjectId), effectiveAt: new Date().toISOString(), scheduled: false };

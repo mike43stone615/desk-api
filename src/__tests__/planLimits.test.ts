@@ -131,3 +131,13 @@ describe('the extra-calls lines of an invoice', () => {
     expect(lines.reduce((n, l) => n + l.quantity, 0)).toBe(extraCalls(PRO, t));
   });
 });
+
+describe('a paid plan needs a payment method on file', () => {
+  it('only a paid plan, only without a method, and never when an administrator grants it', async () => {
+    const { paymentMethodMissing } = await import('../domain/billing/plans');
+    expect(paymentMethodMissing(PRO, false, false)).toBe(true);
+    expect(paymentMethodMissing(PRO, true, false)).toBe(false);
+    expect(paymentMethodMissing(PRO, false, true)).toBe(false);
+    expect(paymentMethodMissing(FREE, false, false)).toBe(false);
+  });
+});

@@ -265,7 +265,7 @@ describe.skipIf(!hasDb)('E2E: status, changelog, billing, GraphQL and webhook re
     const tables = (await call('GET', '/v1/admin/tables', helper)).json().tables as Array<{ name: string; editableColumns: string[] }>;
     const plans = tables.find((t) => t.name === 'desk.plans');
     expect(plans?.editableColumns).toContain('monthly_price_cents');
-    expect(tables.map((t) => t.name)).toEqual(expect.arrayContaining(['desk.users', 'desk.teams', 'desk.subscriptions', 'desk.webhook_endpoints']));
+    expect(tables.map((t) => t.name)).toEqual(expect.arrayContaining(['desk.users', 'desk.subscriptions', 'desk.webhook_endpoints']));
 
     // editing a plan: a good value is saved (and audited), bad ones are refused in plain words
     const patch = (values: Record<string, unknown>) => app.inject({ method: 'PATCH', url: '/v1/admin/tables/desk.plans/rows/developer', headers: { ...helper.headers, 'cf-connecting-ip': '203.0.113.9' }, payload: { values } });

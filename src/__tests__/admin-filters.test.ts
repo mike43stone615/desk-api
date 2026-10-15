@@ -55,7 +55,8 @@ describe('validateEditableValue for the platform tables', () => {
     expect(validateEditableValue('plans' as never, 'monthly_price_cents', '3100')).toBe(3100);
     expect(validateEditableValue('plans' as never, 'max_keys', 25)).toBe(25);
     expect(validateEditableValue('plans' as never, 'overage_cents_per_call', '')).toBeNull();
-    expect(validateEditableValue('teams' as never, 'rate_limit_per_minute', null)).toBeNull();
+    expect(validateEditableValue('invoices' as never, 'number', '12')).toBe(12);
+    bad('invoices' as never, 'number', '');
     bad('plans' as never, 'monthly_price_cents', '');
     bad('plans' as never, 'monthly_price_cents', 'lots');
     bad('plans' as never, 'monthly_price_cents', -1);
@@ -74,7 +75,7 @@ describe('validateEditableValue for the platform tables', () => {
     expect(validateEditableValue('invoices' as never, 'status', 'void')).toBe('void');
     bad('invoices' as never, 'status', 'paid-ish');
     bad('invoices' as never, 'status', '');
-    bad('team_members' as never, 'role', null);
+    bad('subscriptions' as never, 'status', null);
   });
 });
 

@@ -121,14 +121,14 @@ export async function adminAssignPlanHandler(request: FastifyRequest, reply: Fas
   const parsed = AssignPlanSchema.safeParse(request.body ?? {});
   if (!parsed.success) throw validationError(parsed.error);
   try {
-    const { subscription: sub, effectiveAt, scheduled } = await changePlan(type, id, parsed.data.planId, parsed.data.when);
+    const { subscription: sub, effectiveAt, scheduled } = await changePlan(type, id, parsed.data.planId, parsed.data.when, true);
     forgetKeyRateFactors();
     record(request, 'assign_plan', type, id, { planId: parsed.data.planId, when: parsed.data.when, scheduled, effectiveAt });
     // A scheduled downgrade is announced now (with its date) and again when it takes effect (applyDueScheduledChanges).
     emitWebhookEvent({ userId: id }, 'plan.changed', { subjectType: type, subjectId: id, plan: scheduled ? parsed.data.planId : sub.plan.id, scheduled, effectiveAt });
     return reply.send({ subscription: sub, scheduled, effectiveAt });
   } catch (err) {
-    if (err instanceof BillingError) throw new HttpError(err.code === 'not_found' ? 404 : 400, err.message, err.code === 'not_found' ? 'not_found' : 'unknown_plan');
+    if (err instanceof BillingError) throw new HttpError(err.code === 'not_found' ? 404 : err.code === 'payment_method_required' ? 402 : 400, err.message, err.code);
     throw err;
   }
 }
