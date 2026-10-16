@@ -89,16 +89,16 @@ describe.skipIf(!hasDb)('E2E: plans, invoices and webhooks', () => {
     await pool.query(`INSERT INTO subscriptions (id, subject_type, subject_id, plan_id, status, period_start, period_end, created_at) VALUES ($1,'user',$2,'developer','active',$3,$3,$4)`, [rid(), u.id, ts(), last.toISOString()]);
 
     // asking for Free schedules it for the 1st of next month; Pro (and its limits) stays until then
-    const down = await changePlan('user', u.id, 'free');
+    const down = await changePlan('user', u.id, 'free', 'auto', true);
     expect(down.scheduled).toBe(true);
     expect(down.subscription.plan.id).toBe('developer');
     expect(down.subscription.scheduledChange).toMatchObject({ planId: 'free', planName: 'Free' });
     expect(Date.parse(down.effectiveAt)).toBe(Date.UTC(new Date().getUTCFullYear(), new Date().getUTCMonth() + 1, 1));
     // asking for the current plan again cancels the waiting change
-    expect((await changePlan('user', u.id, 'developer')).subscription.scheduledChange).toBeNull();
+    expect((await changePlan('user', u.id, 'developer', 'auto', true)).subscription.scheduledChange).toBeNull();
 
     // a downgrade that was due at the start of this month: applied at that moment, so last month is all Pro
-    await changePlan('user', u.id, 'free');
+    await changePlan('user', u.id, 'free', 'auto', true);
     await pool.query(`UPDATE subscriptions SET scheduled_for = $2 WHERE subject_id = $1 AND status <> 'canceled'`, [u.id, thisStart.toISOString()]);
     const applied = await applyDueScheduledChanges();
     expect(applied.map((a) => a.subjectId)).toContain(u.id);
@@ -110,7 +110,7 @@ describe.skipIf(!hasDb)('E2E: plans, invoices and webhooks', () => {
     expect(lastInvoice.lines).toEqual([{ description: 'Pro plan, one month', quantity: 1, unitCents: 1500, totalCents: 1500 }]);
 
     // an upgrade starts at once; this month is charged only from that moment
-    const up = await changePlan('user', u.id, 'business');
+    const up = await changePlan('user', u.id, 'business', 'auto', true);
     expect(up.scheduled).toBe(false);
     expect((await subscriptionFor('user', u.id)).plan.id).toBe('business');
     const thisKey = thisStart.toISOString().slice(0, 7);
@@ -128,7 +128,7 @@ describe.skipIf(!hasDb)('E2E: plans, invoices and webhooks', () => {
     const { changePlan, applyDueScheduledChanges } = await import('../../domain/billing/plans');
     const u = await mkUser('race');
     await pool.query(`INSERT INTO subscriptions (id, subject_type, subject_id, plan_id, status, period_start, period_end, created_at) VALUES ($1,'user',$2,'business','active',$3,$3,$4)`, [rid(), u.id, ts(), '2026-01-01T00:00:00Z']);
-    expect((await changePlan('user', u.id, 'developer')).scheduled).toBe(true);
+    expect((await changePlan('user', u.id, 'developer', 'auto', true)).scheduled).toBe(true);
     await pool.query(`UPDATE subscriptions SET scheduled_for = $2 WHERE subject_id = $1 AND status <> 'canceled'`, [u.id, new Date(Date.now() - 1000).toISOString()]);
     const runs = await Promise.all(Array.from({ length: 5 }, () => applyDueScheduledChanges(new Date(), { subjectType: 'user', subjectId: u.id })));
     expect(runs.flat().filter((a) => a.subjectId === u.id)).toHaveLength(1);

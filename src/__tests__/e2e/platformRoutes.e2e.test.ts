@@ -378,12 +378,14 @@ describe.skipIf(!hasDb)('E2E: status, changelog, billing, GraphQL and webhook re
       expect((await patch(owner, 'desk.usage_meter', moved.json().row._rowKey, { subject_type: 'robot' })).statusCode).toBe(400); // CHECK rule
       expect((await patch(owner, 'desk.usage_meter', 'not-a-key', { quantity: 0 })).statusCode).toBe(404);
 
-      // owners edit columns outside the old lists elsewhere too, but never a single id column
+      // owners never edit a locked column (filled in by the system) or a single id column
       const created = await app.inject({ method: 'PATCH', url: `/v1/admin/tables/desk.users/rows/${subject.id}`, headers: { ...owner.headers, 'cf-connecting-ip': '203.0.113.9' }, payload: { values: { created_at: '2020-02-02T00:00:00Z' } } });
-      expect(created.statusCode, created.body).toBe(200);
+      expect(created.statusCode, created.body).toBe(400);
       expect((await app.inject({ method: 'PATCH', url: `/v1/admin/tables/desk.users/rows/${subject.id}`, headers: { ...owner.headers, 'cf-connecting-ip': '203.0.113.9' }, payload: { values: { id: 'x' } } })).statusCode).toBe(400);
-      const flag = await app.inject({ method: 'PATCH', url: '/v1/admin/tables/desk.plans/rows/free', headers: { ...owner.headers, 'cf-connecting-ip': '203.0.113.9' }, payload: { values: { description: 'Free plan' } } });
+      const flag = await app.inject({ method: 'PATCH', url: '/v1/admin/tables/desk.plans/rows/free', headers: { ...owner.headers, 'cf-connecting-ip': '203.0.113.9' }, payload: { values: { sort_order: Number((await pool.query(`SELECT sort_order FROM plans WHERE id = 'free'`)).rows[0].sort_order) } } });
       expect(flag.statusCode, flag.body).toBe(200);
+      // the plan description is no longer shown or edited here
+      expect((await app.inject({ method: 'PATCH', url: '/v1/admin/tables/desk.plans/rows/free', headers: { ...owner.headers, 'cf-connecting-ip': '203.0.113.9' }, payload: { values: { description: 'x' } } })).statusCode).toBe(400);
     } finally {
       await pool.query('DELETE FROM usage_meter WHERE subject_id = $1', [subject.id]);
       await pool.query('DELETE FROM api_usage WHERE user_id = $1', [subject.id]);
