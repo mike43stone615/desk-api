@@ -879,6 +879,9 @@ table.admin-table th .col-filter { width: 100%; box-sizing: border-box; }
 .access-invite { display: flex; align-items: stretch; gap: var(--sp-sm); margin-top: var(--sp-xl); }
 .access-invite .field-float { flex: 1; margin: 0; }
 .modal .access-invite-hint { margin-top: var(--sp-sm); }
+/* The invite error sits under the e-mail row like the hint does: a gap above it, and the hint below keeps its own gap. */
+.modal .access-invite + .status-msg { margin: var(--sp-md) 0 0; }
+.modal .access-invite + .status-msg + .access-invite-hint { margin-top: var(--sp-md); }
 @media (max-width: 520px) {
   .admin-source-row { flex-direction: column-reverse; }
   .access-person { flex-wrap: wrap; }
