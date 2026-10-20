@@ -230,6 +230,23 @@ export function sandboxAnswer(service: BrokeredService, method: string, path: st
       if (!str(b.businessIdea) || !str(b.formationState)) return invalid('businessIdea and formationState are required.');
       return { status: 200, body: analysis(b) };
     }
+    if (method === 'GET' && path === '/reference-status') {
+      return {
+        status: 200,
+        body: {
+          ...envelope('reference-status'),
+          fresh: true,
+          maxAgeDays: 90,
+          oldestBreakpointAgeDays: 12,
+          newestBreakpointAgeDays: 12,
+          lastCompletedRunAgeDays: 12,
+          breakpoints: 120,
+          metrics: 24,
+          coarserThanCountyMetrics: [],
+          sandbox: true,
+        },
+      };
+    }
     if (method === 'GET' && path === '/scoring-methodology') {
       return {
         status: 200,

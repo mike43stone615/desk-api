@@ -794,6 +794,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/gateway/market/reference-status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** How current is the data behind every score? (read-only: counts and dates) */
+        get: operations["getGatewayMarketReferenceStatus"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -868,7 +885,6 @@ export interface components {
          *     api_key_required: An x-api-key header is required.
          *     invalid_api_key: The API key is unknown or has been revoked.
          *     api_key_service_not_enabled: The key is not enabled for this API.
-         *     market_analysis_daily_cap: The key has used its uncached market validation analyses for today.
          *     plan_minute_limit: The calls a minute allowed by the plan (for one API, or all together) are used up; try again in a minute.
          *     plan_monthly_limit: The calls this month allowed by the Free plan (for one API, or all together) are used up; upgrade to keep calling.
          *     plan_analysis_limit: The uncached market validation analyses this month included in the Free plan are used up; upgrade to run more.
@@ -888,6 +904,7 @@ export interface components {
          *     webhook_forbidden: Only a team admin or owner can manage its webhooks.
          *     webhook_unavailable: Webhook storage is not configured.
          *     unknown_plan: No such plan.
+         *     payment_method_required: Add a payment method before switching to a paid plan.
          *     invalid_token: The OAuth access token is invalid, expired or revoked.
          *     oauth_endpoint_not_allowed: An app access token cannot call this endpoint.
          *     oauth_insufficient_scope: The app was not given the scope this endpoint needs.
@@ -950,12 +967,15 @@ export interface components {
          *     table_not_found: That table does not exist.
          *     row_not_found: That row does not exist.
          *     delete_disabled: Deleting is not allowed on that table.
+         *     owner_only: Only an owner can add rows to the administrator tables.
+         *     add_disabled: Rows cannot be added to that table by hand: the system makes them itself.
+         *     row_not_saved: The new row was not saved.
          *     invalid_value: A value in an administrator edit is not allowed for that column.
          *     row_in_use: Other records still refer to that row, or the value points at a row that does not exist.
          *     duplicate_value: Another row already has that value.
          * @enum {string}
          */
-        ErrorCode: "bad_request" | "unauthorized" | "forbidden" | "not_found" | "method_not_allowed" | "conflict" | "precondition_failed" | "draft_version_conflict" | "payload_too_large" | "unsupported_media_type" | "unprocessable" | "rate_limited" | "internal_error" | "bad_gateway" | "service_unavailable" | "gateway_timeout" | "client_error" | "server_error" | "validation_error" | "invalid_json" | "invalid_characters" | "invalid_request" | "invalid_signature" | "invalid_id" | "client_closed" | "idempotency_conflict" | "authentication_required" | "session_invalid" | "session_not_found" | "invalid_credentials" | "current_password_incorrect" | "signin_locked" | "email_not_confirmed" | "email_in_use" | "password_reset_required" | "password_too_short" | "password_too_long" | "password_missing_uppercase" | "password_missing_lowercase" | "password_missing_number" | "password_missing_symbol" | "first_name_required" | "last_name_required" | "invalid_or_expired_token" | "origin_not_allowed" | "cross_site_blocked" | "api_key_required" | "invalid_api_key" | "api_key_service_not_enabled" | "market_analysis_daily_cap" | "plan_minute_limit" | "plan_monthly_limit" | "plan_analysis_limit" | "invalid_page" | "api_key_scope_missing" | "api_key_endpoint_not_allowed" | "api_key_limit_reached" | "api_key_service_unavailable" | "api_key_not_found" | "api_key_already_revoked" | "api_key_sandbox_desk_api" | "sandbox_no_sample" | "webhook_invalid_url" | "webhook_limit_reached" | "webhook_delivery_not_found" | "webhook_not_found" | "webhook_forbidden" | "webhook_unavailable" | "unknown_plan" | "invalid_token" | "oauth_endpoint_not_allowed" | "oauth_insufficient_scope" | "oauth_invalid_request" | "oauth_limit_reached" | "oauth_not_found" | "region_read_only" | "team_not_found" | "team_forbidden" | "team_limit_reached" | "team_last_owner" | "admin_required" | "mfa_token_invalid" | "invalid_2fa_code" | "mfa_not_configured" | "mfa_already_enabled" | "mfa_not_set_up" | "mfa_not_enabled" | "mfa_invalid_code" | "mfa_invalid_or_expired" | "admin_owner_required" | "admin_access_no_such_account" | "admin_access_unconfirmed" | "admin_access_already_admin" | "admin_access_is_owner" | "admin_access_not_listed" | "admin_key_ip_not_allowed" | "account_suspended" | "api_key_expired" | "api_key_idle" | "api_key_ip_not_allowed" | "api_key_suspended" | "admin_not_available_for_keys" | "business_not_found" | "draft_not_found" | "draft_limit_reached" | "draft_too_large" | "draft_unreadable" | "business_name_required" | "business_name_too_long" | "industry_too_long" | "insufficient_role" | "owner_role_required" | "last_owner" | "already_member" | "invite_not_found" | "invite_limit_reached" | "membership_not_found" | "unknown_endpoint" | "api_unavailable" | "upstream_unavailable" | "upstream_unreachable" | "upstream_rejected" | "upstream_response_too_large" | "upstream_not_configured" | "upstream_provisioning_failed" | "service_busy" | "too_many_in_flight" | "structure_not_found" | "table_not_found" | "row_not_found" | "delete_disabled" | "invalid_value" | "row_in_use" | "duplicate_value";
+        ErrorCode: "bad_request" | "unauthorized" | "forbidden" | "not_found" | "method_not_allowed" | "conflict" | "precondition_failed" | "draft_version_conflict" | "payload_too_large" | "unsupported_media_type" | "unprocessable" | "rate_limited" | "internal_error" | "bad_gateway" | "service_unavailable" | "gateway_timeout" | "client_error" | "server_error" | "validation_error" | "invalid_json" | "invalid_characters" | "invalid_request" | "invalid_signature" | "invalid_id" | "client_closed" | "idempotency_conflict" | "authentication_required" | "session_invalid" | "session_not_found" | "invalid_credentials" | "current_password_incorrect" | "signin_locked" | "email_not_confirmed" | "email_in_use" | "password_reset_required" | "password_too_short" | "password_too_long" | "password_missing_uppercase" | "password_missing_lowercase" | "password_missing_number" | "password_missing_symbol" | "first_name_required" | "last_name_required" | "invalid_or_expired_token" | "origin_not_allowed" | "cross_site_blocked" | "api_key_required" | "invalid_api_key" | "api_key_service_not_enabled" | "plan_minute_limit" | "plan_monthly_limit" | "plan_analysis_limit" | "invalid_page" | "api_key_scope_missing" | "api_key_endpoint_not_allowed" | "api_key_limit_reached" | "api_key_service_unavailable" | "api_key_not_found" | "api_key_already_revoked" | "api_key_sandbox_desk_api" | "sandbox_no_sample" | "webhook_invalid_url" | "webhook_limit_reached" | "webhook_delivery_not_found" | "webhook_not_found" | "webhook_forbidden" | "webhook_unavailable" | "unknown_plan" | "payment_method_required" | "invalid_token" | "oauth_endpoint_not_allowed" | "oauth_insufficient_scope" | "oauth_invalid_request" | "oauth_limit_reached" | "oauth_not_found" | "region_read_only" | "team_not_found" | "team_forbidden" | "team_limit_reached" | "team_last_owner" | "admin_required" | "mfa_token_invalid" | "invalid_2fa_code" | "mfa_not_configured" | "mfa_already_enabled" | "mfa_not_set_up" | "mfa_not_enabled" | "mfa_invalid_code" | "mfa_invalid_or_expired" | "admin_owner_required" | "admin_access_no_such_account" | "admin_access_unconfirmed" | "admin_access_already_admin" | "admin_access_is_owner" | "admin_access_not_listed" | "admin_key_ip_not_allowed" | "account_suspended" | "api_key_expired" | "api_key_idle" | "api_key_ip_not_allowed" | "api_key_suspended" | "admin_not_available_for_keys" | "business_not_found" | "draft_not_found" | "draft_limit_reached" | "draft_too_large" | "draft_unreadable" | "business_name_required" | "business_name_too_long" | "industry_too_long" | "insufficient_role" | "owner_role_required" | "last_owner" | "already_member" | "invite_not_found" | "invite_limit_reached" | "membership_not_found" | "unknown_endpoint" | "api_unavailable" | "upstream_unavailable" | "upstream_unreachable" | "upstream_rejected" | "upstream_response_too_large" | "upstream_not_configured" | "upstream_provisioning_failed" | "service_busy" | "too_many_in_flight" | "structure_not_found" | "table_not_found" | "row_not_found" | "delete_disabled" | "owner_only" | "add_disabled" | "row_not_saved" | "invalid_value" | "row_in_use" | "duplicate_value";
     };
     responses: never;
     parameters: never;
@@ -6474,6 +6494,96 @@ export interface operations {
                         }[];
                     };
                 };
+            };
+            /** @description The input was not valid (same error body as every other error) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Missing, invalid or revoked key */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description This key is not enabled for this API */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description No such endpoint */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Wrong HTTP method for this endpoint (see the Allow header) */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Too many requests (see Retry-After) */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Something went wrong on our side */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description The upstream API could not be reached or refused the request */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    getGatewayMarketReferenceStatus: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The API's own answer, passed through */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             /** @description The input was not valid (same error body as every other error) */
             400: {

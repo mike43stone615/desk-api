@@ -113,6 +113,8 @@ export class DeskClient {
     /** Score a business idea. Each live analysis counts against your plan; a sandbox key does not. */
     analyze: (r: MarketAnalysisRequest) => this.request<MarketAnalysis>('POST', '/gateway/market/research/analyze', r),
     methodology: () => this.request<Record<string, unknown>>('GET', '/gateway/market/scoring-methodology'),
+    /** How current the data behind every score is: whether it is fresh, how old it is, and which signals use a coarser series. */
+    referenceStatus: () => this.request<Record<string, unknown>>('GET', '/gateway/market/reference-status'),
   };
 
   readonly desk = {

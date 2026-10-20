@@ -87,6 +87,8 @@ const REGISTRY_ROUTES: UpstreamRoute[] = [
 const MARKET_ROUTES: UpstreamRoute[] = [
   { method: 'POST', match: exact('/research/analyze') },
   { method: 'GET', match: exact('/scoring-methodology'), idempotent: true, cacheSeconds: REFERENCE_CACHE_SECONDS },
+  // How current the data behind every score is (counts and dates only), like the Registry API's /sync-status.
+  { method: 'GET', match: exact('/reference-status'), idempotent: true, cacheSeconds: REFERENCE_CACHE_SECONDS },
 ];
 
 const SERVICES: Record<

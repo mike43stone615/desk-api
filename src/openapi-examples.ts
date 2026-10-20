@@ -653,6 +653,24 @@ export const GATEWAY_EXAMPLES: Record<string, { status: number; request: unknown
       "disclaimer": "This is an automated, preliminary estimate only -- not financial, legal, or business advice, and not a guarantee of real-world outcomes. It is built from pub..."
     }
   },
+  "GET /v1/gateway/market/reference-status": {
+    "status": 200,
+    "request": null,
+    "response": {
+      "responseId": "0b7f4a54-5c9e-4f0e-9d5b-6a3f2c1d8e77",
+      "servedAt": "2026-10-20T15:46:25.071Z",
+      "fresh": true,
+      "maxAgeDays": 120,
+      "oldestBreakpointAgeDays": 12,
+      "newestBreakpointAgeDays": 12,
+      "lastCompletedRunAgeDays": 12,
+      "breakpoints": 120,
+      "metrics": 24,
+      "coarserThanCountyMetrics": [
+        "unemployment_trend"
+      ]
+    }
+  },
   "GET /v1/gateway/market/scoring-methodology": {
     "status": 200,
     "request": null,

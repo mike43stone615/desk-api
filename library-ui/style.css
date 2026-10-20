@@ -911,3 +911,7 @@ table.admin-table th .col-filter { width: 100%; box-sizing: border-box; }
 .add-row-choice .reveal-label { margin-top: 0; }
 .add-row-choice .themed-select { display: block; width: fit-content; }
 .add-row-choice .error-text { margin-top: var(--sp-2xs); }
+/* Administration: read-only views of rules held in code and of live state are marked on their button and explained above the grid. */
+.table-tabs .table-kind { margin-left: var(--sp-xs); font-size: .68rem; font-weight: 700; text-transform: uppercase; letter-spacing: .03em; opacity: .75; }
+.admin-view-note { margin: 0 0 var(--sp-md); padding: var(--sp-sm) var(--sp-md); border: 1px solid var(--line); border-radius: var(--r-md); background: var(--input-bg); color: var(--ink-soft); font-size: .85rem; }
+.admin-view-note strong { color: var(--ink); }

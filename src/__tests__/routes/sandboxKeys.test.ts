@@ -108,6 +108,7 @@ describe('sandbox keys', () => {
       ['POST', '/gateway/registry/business-structures/recommend', { ownerCount: 2 }],
       ['POST', '/gateway/market/research/analyze', { businessIdea: 'Coffee shop', formationState: 'FL' }],
       ['GET', '/gateway/market/scoring-methodology'],
+      ['GET', '/gateway/market/reference-status'],
     ];
     for (const [method, url, payload] of calls) {
       const res = await call(key.key, method, url, payload);
@@ -162,6 +163,8 @@ describe('sandbox keys', () => {
     const method = (await call(key.key, 'GET', '/gateway/market/scoring-methodology')).json();
     expect(fields(method)).toEqual([...ENVELOPE, 'overview', 'overallScore', 'redistribution', 'categories'].sort());
     expect(Object.keys(method.categories[0]).sort()).toEqual(['description', 'key', 'label', 'subSignals']);
+    const status = (await call(key.key, 'GET', '/gateway/market/reference-status')).json();
+    expect(fields(status)).toEqual([...ENVELOPE, 'fresh', 'maxAgeDays', 'oldestBreakpointAgeDays', 'newestBreakpointAgeDays', 'lastCompletedRunAgeDays', 'breakpoints', 'metrics', 'coarserThanCountyMetrics'].sort());
   });
 
   it('refuse a call missing a required input, as a live key would', async () => {

@@ -119,6 +119,8 @@ registerRoute('/developer/admin', async (app) => {
       // What "Add row" needs (the server sends these only to an owner, and only for tables that allow adding by hand).
       createColumns: Array.isArray(data.createColumns) ? data.createColumns : null, requiredColumns: data.requiredColumns || [],
       generatedColumns: data.generatedColumns || {}, createOptions: data.createOptions || {},
+      // A read-only view of rules held in code ("rules") or of live state ("live"), with a plain description.
+      kind: data.kind || null, description: data.description || '',
       // Very large tables (millions of rows) give an estimated total, and say themselves whether more rows follow.
       totalIsEstimate: data.totalIsEstimate === true, serverHasMore: typeof data.hasMore === 'boolean' ? data.hasMore : null,
     };
@@ -507,7 +509,8 @@ registerRoute('/developer/admin', async (app) => {
           <div class="source-tabs" aria-label="API">${sources.map((src) => `<button type="button" data-source="${esc(src)}" class="${src === s.selectedSource ? 'active' : ''}">${esc(sourceLabels[src] || src)}</button>`).join('')}</div>
           <button type="button" class="admin-icon-btn admin-access-btn" id="open-access-btn" title="Who has access" aria-label="Who has access">${icon('group')}</button>
         </div>
-        ${s.tables.length ? `<div class="table-tabs">${sourceTables.map((t) => `<button type="button" data-table="${esc(t.name)}" class="${t.name === s.selectedTable ? 'active' : ''}">${esc(titleize(t.rawName || t.name))}</button>`).join('')}</div>` : ''}
+        ${s.tables.length ? `<div class="table-tabs">${sourceTables.map((t) => `<button type="button" data-table="${esc(t.name)}" class="${t.name === s.selectedTable ? 'active' : ''}">${esc(titleize(t.rawName || t.name))}${t.kind ? ` <span class="table-kind">${t.kind === 'live' ? 'live' : 'rules'}</span>` : ''}</button>`).join('')}</div>` : ''}
+        ${s.rows && s.rows.kind ? `<p class="admin-view-note"><strong>${s.rows.kind === 'live' ? 'Live state' : 'Rules held in code'}</strong> · ${esc(s.rows.description)} Read-only: changing a rule takes a code change and a deploy.</p>` : ''}
         ${s.sourceErrors ? Object.entries(s.sourceErrors).map(([src, msg]) => `<p class="hint" style="color:var(--warning);">${esc(sourceLabels[src] || src)} could not be reached: ${esc(msg)}</p>`).join('') : ''}
         ${s.actionError ? statusMsg('error', s.actionError, false) : ''}
         ${s.errorMessage ? `<div class="empty-state">${icon('error_outline')}<div style="margin-top:var(--sp-md);">The data could not load</div><div class="hint">${esc(s.errorMessage)}</div><button type="button" class="btn" id="retry-load-btn" style="margin-top:var(--sp-lg);">${icon('refresh')} Try again</button></div>`

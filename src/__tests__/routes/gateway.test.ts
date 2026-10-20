@@ -519,6 +519,7 @@ describe('proxying to registry-api and market-validation-api', () => {
       ['POST', '/gateway/registry/functions/v1/check-name-trend', 'http://registry.test/functions/v1/check-name-trend'],
       ['POST', '/gateway/registry/name-trend', 'http://registry.test/functions/v1/check-name-trend'],
       ['GET', '/gateway/market/scoring-methodology', 'http://market.test/scoring-methodology'],
+      ['GET', '/gateway/market/reference-status', 'http://market.test/reference-status'],
     ];
     for (const [method, url, upstream] of cases) {
       fetchCalls = [];
@@ -537,7 +538,7 @@ describe('proxying to registry-api and market-validation-api', () => {
       ['post', '/gateway/registry/batch-availability'], ['post', '/gateway/registry/name-trend'],
       ['get', '/gateway/registry/sync-status'], ['get', '/gateway/registry/business-structures'],
       ['get', '/gateway/registry/business-structures/{slug}'], ['post', '/gateway/registry/business-structures/recommend'],
-      ['post', '/gateway/market/research/analyze'], ['get', '/gateway/market/scoring-methodology'],
+      ['post', '/gateway/market/research/analyze'], ['get', '/gateway/market/scoring-methodology'], ['get', '/gateway/market/reference-status'],
     ];
     for (const [method, path] of documented) expect(paths[path]?.[method], `${method} ${path}`).toBeTruthy();
 

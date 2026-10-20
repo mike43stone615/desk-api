@@ -300,7 +300,7 @@ registerRoute('/developer/apps', async (app) => {
 
   function confirmModalHtml(c) {
     const [title, text, action, style] = {
-      client: ['Remove app', `Remove "${esc(c.name)}"? People can no longer sign in with it, and every token it holds stops working immediately. This cannot be undone.`, 'Remove', 'btn-danger'],
+      client: ['Remove app', `Remove "${esc(c.name)}"? Users can no longer sign in with it, and every token it holds stops working immediately. This cannot be undone.`, 'Remove', 'btn-danger'],
       access: ['Take away access', `Take away "${esc(c.name)}"'s access to your account? It stops working immediately.`, 'Take away', 'btn-danger'],
       rotate: ['Rotate secret', `Rotate the client secret for "${esc(c.name)}"? The current secret stops working immediately and a new one is shown once. Your server will need the new one.`, 'Rotate', 'btn-primary'],
     }[c.kind];
