@@ -51,7 +51,7 @@ describe('invoiceLinesForMonth', () => {
     const tally = { desk_api: 3100, registry_api: 0, market_validation_api: 0, total: 3100 };
     const lines = invoiceLinesForMonth([{ plan: PRO, from: OCT, to: at('2026-10-20T00:00:00Z') }, { plan: BIZ, from: at('2026-10-20T00:00:00Z'), to: NOV }], OCT, NOV, 400, tally);
     // Business: 15,000 calls and 350 analyses included -> 50 extra analyses at 15c, no extra calls
-    expect(lines.slice(2)).toEqual([{ description: 'Uncached market validation analyses beyond the 350 included', quantity: 50, unitCents: 15, totalCents: 750 }]);
+    expect(lines.slice(2)).toEqual([{ description: "Uncached market validation analyses beyond the plan's monthly limits", quantity: 50, unitCents: 15, totalCents: 750 }]);
   });
 
   it('a free plan for the whole month gives no lines', () => {

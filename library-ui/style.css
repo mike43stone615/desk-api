@@ -483,12 +483,13 @@ input[type="password"]::-ms-reveal { display: none; }
 
 .modal-backdrop { position: fixed; inset: 0; background: var(--overlay); display: flex; align-items: center; justify-content: center; z-index: 50; }
 .modal { background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-xl); padding: var(--sp-2xl); width: 480px; max-width: 92vw; max-height: 86vh; overflow-y: auto; box-shadow: var(--shadow); }
-.modal h2 { margin-top: 0; font-size: 1.25rem; font-weight: 700; }
+.modal h2 { margin: 0 0 var(--sp-md); font-size: 1.25rem; font-weight: 700; }
+.modal h2 + .field-header { margin-top: 0; }
 /* One body-text and one button-row format for every pop-up (create/rotate key reveal, revoke, rotate, add an API,
    webhooks, apps), so their text size, colour and spacing match exactly. */
 .modal .modal-text { margin: 0; color: var(--ink-faint); font-size: .85rem; font-weight: 500; line-height: 1.5; }
 .modal .modal-text + .modal-text, .modal .modal-text + .reveal-key, .modal .modal-text + .library-list, .modal .modal-text + .deliveries-body,
-.modal .modal-text + .chart-legend, .modal .field-header + .reveal-key { margin-top: var(--sp-lg); }
+.modal .modal-text + .chart-legend { margin-top: var(--sp-lg); }
 .modal-actions { display: flex; justify-content: flex-end; gap: var(--sp-sm); margin-top: var(--sp-xl); }
 
 /* ---- Setup wizard ---- */
@@ -511,8 +512,8 @@ input[type="password"]::-ms-reveal { display: none; }
    label looks the same above every field type (text input, dropdown, custom
    widget), unlike the floating TextFormField labelText used on the auth
    pages. Don't convert this to a floating label. */
-.field-header { margin: var(--sp-lg) 0 var(--sp-sm); }
-.field-header label { display: block; font-weight: 700; font-size: 1.25rem; line-height: 1.25; }
+.field-header { margin: var(--sp-lg) 0 var(--sp-md); }
+.field-header label { display: block; font-weight: 700; font-size: 1.25rem; }
 .field-header .subtext { color: var(--ink-faint); font-size: .875rem; font-weight: 500; margin-top: var(--sp-xs); }
 .wizard-actions { display: flex; justify-content: space-between; margin-top: var(--sp-2xl); padding-top: var(--sp-lg); border-top: 1px solid var(--line); }
 
@@ -773,7 +774,8 @@ table.admin-table td.admin-actions-cell { white-space: nowrap; }
 .field-header-row { display: flex; align-items: center; gap: var(--sp-xs); }
 .field-header-row label { display: inline; }
 #confidential-row { margin-bottom: var(--sp-sm); }
-.scope-group-title { font-size: .9rem; font-weight: 700; color: var(--ink-soft); margin: var(--sp-md) 0 var(--sp-sm); }
+.scope-group-title { font-size: .85rem; font-weight: 700; color: var(--ink-soft); margin: var(--sp-lg) 0 var(--sp-sm); }
+.field-header + .scope-group-title { margin-top: 0; }
 /* A detail of the list above it (e.g. Industry under Business list): indented, and only meaningful with its parent. */
 .library-row.scope-child { margin-left: var(--sp-2xl); width: calc(100% - var(--sp-2xl)); box-sizing: border-box; }
 .library-row > .info-icon { margin-left: auto; align-self: center; }
@@ -822,8 +824,6 @@ button.plan-pill.upgrade:hover { background: var(--accent-hover); border-color: 
 /* Invoices: each card has the invoice's line, its total and status, and View / Print to PDF buttons. */
 .invoice-card { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-lg); flex-wrap: wrap; }
 .invoice-main { min-width: 0; flex: 1; }
-.invoice-lines { list-style: none; margin: var(--sp-xs) 0 0; padding: 0; font-size: .8rem; color: var(--ink-faint); }
-.invoice-lines li { display: flex; justify-content: space-between; gap: var(--sp-md); }
 .invoice-actions { display: flex; gap: var(--sp-sm); flex-wrap: wrap; }
 .invoice-doc-head { display: flex; justify-content: space-between; align-items: flex-start; gap: var(--sp-lg); margin-bottom: var(--sp-lg); }
 .invoice-doc-kicker { font-size: .8rem; font-weight: 700; color: var(--ink-faint); }
@@ -833,6 +833,7 @@ button.plan-pill.upgrade:hover { background: var(--accent-hover); border-color: 
 .invoice-doc-meta dd { margin: var(--sp-2xs) 0 0; font-weight: 600; }
 .invoice-doc-table tfoot td { font-weight: 700; border-bottom: none; border-top: 2px solid var(--line-strong); }
 #print-invoice { display: none; }
+.print-brand { display: flex; align-items: center; gap: var(--sp-sm); font-size: 1.25rem; font-weight: 700; padding-bottom: var(--sp-md); margin-bottom: var(--sp-xl); border-bottom: 1px solid #999999; }
 /* Printing an invoice ("Print to PDF"): only the invoice, black on white. */
 @media print {
   body > *:not(#print-invoice) { display: none !important; }
@@ -878,12 +879,35 @@ table.admin-table th .col-filter { width: 100%; box-sizing: border-box; }
 .access-person-actions { display: flex; gap: var(--sp-xs); flex-shrink: 0; }
 .access-invite { display: flex; align-items: stretch; gap: var(--sp-sm); margin-top: var(--sp-xl); }
 .access-invite .field-float { flex: 1; margin: 0; }
-.modal .access-invite-hint { margin-top: var(--sp-sm); }
-/* The invite error sits under the e-mail row like the hint does: a gap above it, and the hint below keeps its own gap. */
-.modal .access-invite + .status-msg { margin: var(--sp-md) 0 0; }
-.modal .access-invite + .status-msg + .access-invite-hint { margin-top: var(--sp-md); }
+/* The invite error sits right under the e-mail row, in the same style as every other field error in the library. */
+.modal .access-invite + .error-text { margin: var(--sp-2xs) 0 0; }
 @media (max-width: 520px) {
   .admin-source-row { flex-direction: column-reverse; }
   .access-person { flex-wrap: wrap; }
   .access-person-text { flex-basis: 100%; }
 }
+
+/* Themed dropdown (see themeSelects in app.js): a field-shaped button plus a list styled like the profile menu. */
+.themed-select { position: relative; display: inline-block; }
+.themed-select-btn {
+  display: flex; align-items: center; justify-content: space-between; gap: var(--sp-md); min-width: 160px; text-align: left; cursor: pointer;
+  padding: var(--sp-sm) var(--sp-md); border: 1px solid var(--line); border-radius: var(--r-md);
+  font-family: inherit; font-size: 1rem; font-weight: 500; background: var(--input-bg); color: var(--ink);
+}
+.themed-select-btn:hover { border-color: var(--line-strong); }
+.themed-select-btn:focus-visible, .themed-select-btn[aria-expanded="true"] { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+.themed-select-chevron { display: flex; color: var(--ink-faint); }
+.themed-select-list {
+  position: absolute; top: calc(100% + var(--sp-xs)); left: 0; z-index: 30; min-width: 100%; margin: 0; padding: var(--sp-xs) 0; list-style: none;
+  background: var(--input-bg); border: 1px solid var(--line); border-radius: var(--r-lg); box-shadow: var(--shadow); max-height: 260px; overflow-y: auto;
+}
+.themed-select-list[hidden] { display: none; }
+.themed-select-list.up { top: auto; bottom: calc(100% + var(--sp-xs)); }
+.themed-select-list li { padding: var(--sp-sm) var(--sp-md); font-size: .875rem; font-weight: 500; color: var(--ink); cursor: pointer; white-space: nowrap; }
+.themed-select-list li.active { background: var(--surface-2); }
+.themed-select-list li[aria-selected="true"] { color: var(--accent); font-weight: 700; }
+/* Administration: the choice fields in the "Add row" pop-up sit between the floating-label fields with the same gap. */
+.add-row-choice { margin-bottom: var(--sp-lg); }
+.add-row-choice .reveal-label { margin-top: 0; }
+.add-row-choice .themed-select { display: block; width: fit-content; }
+.add-row-choice .error-text { margin-top: var(--sp-2xs); }

@@ -694,6 +694,7 @@ const BASE_SPEC = {
     },
     '/admin/tables/{table}/rows': {
       get: { tags: ['Admin'], summary: 'List rows (supports filters/sort/pagination)', security: [{ SessionToken: [] }], responses: { '200': { description: 'OK' } } },
+      post: { tags: ['Admin'], summary: 'Add a row by hand (owner only, audit-logged): the system fills in IDs, times and the like. Only the tables that list createColumns offer it', security: [{ SessionToken: [] }], responses: { '201': { description: 'Added' }, '400': { description: 'A value is missing or does not fit' }, '403': { description: 'Not an owner, or this table cannot have rows added by hand' } } },
     },
     '/admin/tables/{table}/rows/{id}': {
       patch: { tags: ['Admin'], summary: 'Update editable fields on a row (audit-logged)', security: [{ SessionToken: [] }], responses: { '200': { description: 'OK' } } },

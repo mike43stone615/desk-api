@@ -21,6 +21,7 @@
 // service's admin surface can be checked/scripted the same way as its
 // siblings without a real login; the session + email-allowlist path is
 // unchanged and still works exactly as before.
+import { randomBytes, randomUUID } from 'node:crypto';
 import type { FastifyReply, FastifyRequest } from 'fastify';
 import { HttpError } from '../middleware/http-error';
 import { requireAuth, requireAdmin } from '../middleware/auth';
@@ -31,6 +32,7 @@ import { logMutation, requestIp, requestUserAgent } from '../modules/audit/mutat
 import { timingSafeEqualString } from '../utils/timing-safe-compare';
 import { emailField } from '../validators/auth';
 import { accessFor } from '../domain/admins';
+import { hashPassword } from '../domain/auth/password';
 import { ROW_KEY, columnTypes, coerceToColumn, encodeRowKey, rowWhere } from '../domain/adminTableEdits';
 
 type AdminSource = 'desk' | 'registry' | 'market' | 'compliance';
@@ -341,6 +343,20 @@ type AdminTableConfig = {
   readOnly?: boolean;
 };
 
+/**
+ * Adding a row by hand (owners only; a table without an entry here has no "Add row"). `fields` are what the person fills
+ * in, `required` the ones that cannot be left empty, `generated` what the system fills in itself (shown in the form as a
+ * note, never asked for), and `options` the fixed choices for a field. The tables that are not here are made by the system
+ * itself, because a hand-made row would be broken or unsafe: log-in sessions, e-mail links, API keys, webhooks, apps,
+ * businesses (built by the setup flow) and the audit tables.
+ */
+type CreateSpec = {
+  fields: readonly string[];
+  required: readonly string[];
+  generated: Readonly<Record<string, string>>;
+  options?: Readonly<Record<string, readonly string[]>>;
+};
+
 type UpstreamTableSummary = {
   name: string;
   primaryKey: string;
@@ -359,6 +375,119 @@ type UpstreamRows = UpstreamTableSummary & {
 
 function quoteIdentifier(value: string): string {
   return `"${value.replace(/"/g, '""')}"`;
+}
+
+const CREATE_SUBJECT_TYPES = ['user'] as const;
+const CREATE_STAMP = 'The current time';
+const CREATE_ID = 'A new ID';
+
+const CREATE_SPECS: Partial<Record<TableName, CreateSpec>> = {
+  users: {
+    fields: ['email', 'first_name', 'last_name'],
+    required: ['email'],
+    generated: { id: CREATE_ID, password: 'Not set: the person chooses one with "Forgot password"', created_at: CREATE_STAMP, updated_at: CREATE_STAMP },
+  },
+  business_setup_drafts: {
+    fields: ['user_id', 'draft_json'],
+    required: ['user_id', 'draft_json'],
+    generated: { id: CREATE_ID, created_at: CREATE_STAMP, updated_at: CREATE_STAMP },
+  },
+  business_memberships: {
+    fields: ['business_id', 'user_id', 'role', 'invited_by_user_id', 'invited_at', 'accepted_at'],
+    required: ['business_id', 'user_id'],
+    generated: { id: CREATE_ID, created_at: CREATE_STAMP, updated_at: CREATE_STAMP },
+  },
+  plans: {
+    fields: ['name', 'monthly_price_cents', 'included_analyses', 'overage_cents_per_analysis', 'max_keys', 'max_webhooks', 'max_apps', 'service_per_minute', 'service_per_month', 'total_per_minute', 'total_per_month', 'overage_cents_per_call', 'active', 'sort_order'],
+    required: ['name'],
+    generated: { id: 'Made from the name, for example "Team Plus" becomes team-plus' },
+  },
+  subscriptions: {
+    fields: ['subject_type', 'subject_id', 'plan_id', 'status', 'period_start', 'period_end', 'provider', 'provider_ref'],
+    required: ['subject_type', 'subject_id', 'plan_id', 'period_start', 'period_end'],
+    generated: { id: CREATE_ID, created_at: CREATE_STAMP },
+    options: { subject_type: CREATE_SUBJECT_TYPES },
+  },
+  invoices: {
+    fields: ['subject_type', 'subject_id', 'plan_id', 'period_start', 'period_end', 'currency', 'lines', 'status'],
+    required: ['subject_type', 'subject_id', 'plan_id', 'period_start', 'period_end'],
+    generated: { id: CREATE_ID, number: 'The next invoice number', subtotal_cents: 'Added up from the lines', created_at: CREATE_STAMP },
+    options: { subject_type: CREATE_SUBJECT_TYPES },
+  },
+  usage_meter: {
+    fields: ['subject_type', 'subject_id', 'month', 'metric', 'quantity'],
+    required: ['subject_type', 'subject_id', 'month', 'metric'],
+    generated: {},
+    options: { subject_type: CREATE_SUBJECT_TYPES },
+  },
+  api_usage: {
+    fields: ['user_id', 'service', 'window_key', 'calls'],
+    required: ['user_id', 'service', 'window_key'],
+    generated: {},
+    options: { service: ['desk_api', 'registry_api', 'market_validation_api'] },
+  },
+  incidents: {
+    fields: ['title', 'severity', 'status', 'resolved_at'],
+    required: ['title', 'severity', 'status'],
+    generated: { id: CREATE_ID, started_at: CREATE_STAMP },
+  },
+  incident_updates: {
+    fields: ['incident_id', 'status', 'message'],
+    required: ['incident_id', 'status', 'message'],
+    generated: { id: CREATE_ID, created_at: CREATE_STAMP },
+    options: { status: ['investigating', 'identified', 'monitoring', 'resolved'] },
+  },
+};
+
+/** What the page needs to draw "Add row" for a table: only for an owner, and only where a hand-made row is safe. */
+function createInfoFor(tableName: TableName, owner: boolean) {
+  const table: AdminTableConfig = TABLES[tableName];
+  const spec = CREATE_SPECS[tableName];
+  if (!owner || !spec || table.readOnly) return {};
+  return {
+    createColumns: spec.fields,
+    requiredColumns: spec.required,
+    generatedColumns: spec.generated,
+    createOptions: { ...(table.options ?? {}), ...(spec.options ?? {}) },
+  };
+}
+
+const slugOf = (name: string) => name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'plan';
+
+/** The values the system fills in for a new row, beyond what the person typed. */
+async function generatedValues(tableName: TableName, given: Record<string, unknown>): Promise<Record<string, unknown>> {
+  switch (tableName) {
+    case 'users':
+      // No password is set: the person chooses one with "Forgot password" (the stored hash is of a random value nobody sees).
+      return { id: randomUUID(), password_hash: await hashPassword(randomBytes(32).toString('hex')) };
+    case 'plans': {
+      const base = slugOf(String(given.name ?? ''));
+      for (let n = 1; n < 100; n += 1) {
+        const id = n === 1 ? base : `${base}-${n}`;
+        const taken = await pool.query('SELECT 1 FROM plans WHERE id = $1', [id]);
+        if (taken.rowCount === 0) return { id };
+      }
+      throw new HttpError(409, 'Another plan already has that name.', 'duplicate_value');
+    }
+    case 'invoices': {
+      let subtotal = 0;
+      try {
+        const lines = JSON.parse(String(given.lines ?? '[]')) as Array<{ totalCents?: unknown }>;
+        if (Array.isArray(lines)) subtotal = lines.reduce((sum, l) => sum + (Number.isFinite(Number(l?.totalCents)) ? Number(l.totalCents) : 0), 0);
+      } catch {
+        // the lines are checked as JSON before this runs; anything else adds up to nothing
+      }
+      return { id: randomUUID(), subtotal_cents: Math.round(subtotal) };
+    }
+    case 'business_setup_drafts':
+    case 'business_memberships':
+    case 'subscriptions':
+    case 'incidents':
+    case 'incident_updates':
+      return { id: randomUUID() };
+    default:
+      return {};
+  }
 }
 
 function parseBoundedInt(
@@ -554,7 +683,7 @@ const OWNER_HEADER = 'x-desk-admin-owner';
 async function proxyUpstreamJson<T = unknown>(
   source: Exclude<AdminSource, 'desk'>,
   path: string,
-  method: 'GET' | 'PATCH' | 'DELETE' = 'GET',
+  method: 'GET' | 'POST' | 'PATCH' | 'DELETE' = 'GET',
   body?: unknown,
   ownerEmail?: string | null,
 ): Promise<T> {
@@ -704,6 +833,7 @@ export async function adminTablesHandler(request: FastifyRequest, reply: Fastify
       secretColumns: table.secret,
       columnOptions: columnOptionsFor(table),
       deletable: deletableFor(table, owner),
+      ...createInfoFor(name as TableName, owner),
     })),
     ...('tables' in registryResult ? registryResult.tables : []),
     ...('tables' in marketResult ? marketResult.tables : []),
@@ -775,7 +905,89 @@ export async function adminTableRowsHandler(request: FastifyRequest, reply: Fast
     rows: rowsResult.rows.map((row) => withRowKey(maskSecrets(row, table), table)),
     totalRows: Number(countResult.rows[0]?.count ?? 0),
     deletable: deletableFor(table, owner),
+    ...createInfoFor(tableName, owner),
   });
+}
+
+/** Columns that hold JSON written as text: checked before they are saved, so a typo cannot leave a row nothing can read. */
+const JSON_TEXT_COLUMNS = new Set(['business_setup_drafts.draft_json', 'invoices.lines']);
+
+/** Adds one row by hand. Owners only, and only in the tables listed in CREATE_SPECS; the system fills in IDs, times and the like. */
+export async function adminTableCreateRowHandler(request: FastifyRequest, reply: FastifyReply) {
+  await guard(request, reply);
+  const owner = await callerIsOwner(request);
+  if (!owner) throw new HttpError(403, 'Only an owner can add rows.', 'owner_only');
+  const { table: rawTable } = request.params as { table: string };
+  const parsed = parseTableKey(rawTable);
+  const body = (request.body ?? {}) as { values?: Record<string, unknown> };
+
+  if (parsed.source !== 'desk') {
+    const data = await proxyUpstreamJson(parsed.source, `/admin/tables/${encodeURIComponent(parsed.rawName)}/rows`, 'POST', body, request.currentUser!.email);
+    return reply.status(201).send(data);
+  }
+
+  const tableName = parseLocalTableName(parsed.rawName);
+  const table: AdminTableConfig = TABLES[tableName];
+  const spec = CREATE_SPECS[tableName];
+  if (!spec || table.readOnly) throw new HttpError(403, 'Rows cannot be added to this table by hand.', 'add_disabled');
+
+  const input = body.values ?? {};
+  const options: Record<string, readonly string[]> = { ...(table.options ?? {}), ...(spec.options ?? {}) };
+  const types = await columnTypes(pool, tableName);
+  const given: Record<string, unknown> = {};
+  for (const field of spec.fields) {
+    const raw = input[field];
+    const empty = raw === undefined || raw === null || (typeof raw === 'string' && raw.trim() === '');
+    if (empty) {
+      if (spec.required.includes(field)) throw new HttpError(400, `${field} is required.`, 'invalid_value');
+      continue; // left empty: the column's own default, or no value
+    }
+    const choices = options[field];
+    let value: unknown;
+    if (choices) {
+      if (!choices.includes(String(raw))) throw new HttpError(400, `${field} must be one of: ${choices.join(', ')}.`, 'invalid_value');
+      value = String(raw);
+    } else {
+      value = validateEditableValue(tableName, field, raw);
+    }
+    if (JSON_TEXT_COLUMNS.has(`${tableName}.${field}`)) {
+      try {
+        JSON.parse(String(value));
+      } catch {
+        throw new HttpError(400, `${field} needs valid JSON.`, 'invalid_value');
+      }
+    }
+    given[field] = coerceToColumn(field, value, types.get(field));
+  }
+
+  const all = { ...given, ...(await generatedValues(tableName, given)) };
+  const names = Object.keys(all);
+  const columns = table.columns.map(quoteIdentifier).join(', ');
+  let row: Record<string, unknown> | undefined;
+  try {
+    const result = await pool.query<Record<string, unknown>>(
+      `INSERT INTO ${quoteIdentifier(tableName)} (${names.map(quoteIdentifier).join(', ')}) VALUES (${names.map((_, i) => `$${i + 1}`).join(', ')}) RETURNING ${columns}`,
+      names.map((n) => all[n]),
+    );
+    row = result.rows[0];
+  } catch (err) {
+    throw friendlyDbError(err) ?? err;
+  }
+  if (!row) throw new HttpError(500, 'The row was not saved.', 'row_not_saved');
+
+  logMutation({
+    userId: request.currentUser?.id ?? null,
+    userEmail: request.currentUser?.email ?? 'admin-api-key',
+    action: 'admin_table.create',
+    entityType: tableName,
+    entityId: (table.keyColumns ? table.keyColumns.map((c) => String(row![c])).join(' / ') : String(row[table.primaryKey])).slice(0, 200),
+    before: null,
+    after: row,
+    ipAddress: requestIp(request),
+    userAgent: requestUserAgent(request),
+  });
+
+  return reply.status(201).send({ row: withRowKey(maskSecrets(row, table), table) });
 }
 
 export async function adminTableUpdateRowHandler(request: FastifyRequest, reply: FastifyReply) {

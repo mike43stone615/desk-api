@@ -77,6 +77,7 @@ import {
 import {
   adminTablesHandler,
   adminTableRowsHandler,
+  adminTableCreateRowHandler,
   adminTableUpdateRowHandler,
   adminTableDeleteRowHandler,
 } from './routes/admin';
@@ -569,6 +570,7 @@ async function registerLegacyAndVersionedRoutes(instance: FastifyInstance) {
   instance.post('/admin/access/:userId/promote', small, adminAccessPromoteHandler);
   instance.get('/admin/tables', adminTablesHandler);
   instance.get('/admin/tables/:table/rows', adminTableRowsHandler);
+  instance.post('/admin/tables/:table/rows', adminTableCreateRowHandler);
   instance.patch('/admin/tables/:table/rows/:id', adminTableUpdateRowHandler);
   instance.delete('/admin/tables/:table/rows/:id', adminTableDeleteRowHandler);
 

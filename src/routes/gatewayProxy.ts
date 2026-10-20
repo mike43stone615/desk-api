@@ -14,7 +14,6 @@
 import { analysesInMonth, meterAnalysis, subscriptionFor } from '../domain/billing/plans';
 import { analysisRefusal, enforceCallAllowance, limitError } from '../domain/billing/allowance';
 import type { FastifyReply, FastifyRequest } from 'fastify';
-import { hit, type Limit } from '../middleware/route-limits';
 import { HttpError, problemBody } from '../middleware/http-error';
 import { config } from '../config';
 import { gatewayApiKeys, looksLikeGatewayKey } from '../domain/gateway/keys';
@@ -100,8 +99,6 @@ const SERVICES: Record<
 
 const PASSTHROUGH_HEADERS = ['content-type', 'retry-after', 'x-ratelimit-limit', 'x-ratelimit-remaining', 'x-ratelimit-reset'];
 
-const MARKET_ANALYSIS_DAILY: Limit = { name: 'market-analysis-key-day', max: Number(process.env.MARKET_ANALYSES_PER_KEY_PER_DAY) || 200, windowMs: 24 * 60 * 60 * 1000, what: 'uncached market validation analyses' };
-
 async function forward(service: BrokeredService, request: FastifyRequest, reply: FastifyReply) {
   const presented = request.headers['x-api-key'];
   if (!looksLikeGatewayKey(presented)) throw new HttpError(401, 'An API key is required (x-api-key header).', 'api_key_required');
@@ -152,17 +149,12 @@ async function forward(service: BrokeredService, request: FastifyRequest, reply:
   // The owner's plan limits for this API (per minute, and per month on Free).
   await enforceCallAllowance(verified.ownerUserId, service);
 
-  // A market analysis costs real money upstream (outside data and AI): each key may make a limited number a day, and the
-  // Free plan stops at its included number a month (paid plans are billed for the extra).
+  // A market analysis costs real money upstream (outside data and AI): there is no daily cap; the Free plan stops at its
+  // included number a month (paid plans are billed for the extra).
   if (service === 'market_validation_api' && route.method === 'POST' && upstreamPath === '/research/analyze') {
     const [{ plan }, analysesUsed] = await Promise.all([subscriptionFor('user', verified.ownerUserId), analysesInMonth('user', verified.ownerUserId)]);
     const refusal = analysisRefusal(plan, analysesUsed);
     if (refusal) throw limitError(refusal);
-    const wait = await hit(MARKET_ANALYSIS_DAILY, verified.id);
-    if (wait > 0) {
-      reply.header('Retry-After', String(wait));
-      throw new HttpError(429, `This key has used its ${MARKET_ANALYSIS_DAILY.max} uncached market validation analyses for today. Try again in ${Math.ceil(wait / 3600)} hours, or ask for a higher limit.`, 'market_analysis_daily_cap');
-    }
   }
 
   const cacheKey = route.cacheSeconds && referenceCacheEnabled() ? `${service}:${upstreamPath}${route.forwardQuery && request.url.includes('?') ? request.url.slice(request.url.indexOf('?')) : ''}` : null;

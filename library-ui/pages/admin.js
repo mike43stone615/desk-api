@@ -76,7 +76,7 @@ registerRoute('/developer/admin', async (app) => {
     undoStack: [], redoStack: [], savingCellKeys: new Set(),
     filters: {}, sort: null, hiddenColumnsByTable: {},
     hasMoreRows: false, isLoadingMoreRows: false, isRefreshingRows: false,
-    selectedRowId: null, columnMenuOpen: false, editingCell: null, confirmDeleteRow: null,
+    selectedRowId: null, columnMenuOpen: false, editingCell: null, confirmDeleteRow: null, addRow: null,
     activeFilter: null, // the column filter being typed in: it keeps the keyboard while the rows update under it
   };
   let filterDebounce = null;
@@ -116,6 +116,9 @@ registerRoute('/developer/admin', async (app) => {
       primaryKey: data.primaryKey || 'id', columns: data.columns || [], editableColumns: data.editableColumns || [],
       secretColumns: data.secretColumns || [], columnOptions: data.columnOptions || {},
       rows: data.rows || [], totalRows: Number(data.totalRows) || 0, deletable: data.deletable === true,
+      // What "Add row" needs (the server sends these only to an owner, and only for tables that allow adding by hand).
+      createColumns: Array.isArray(data.createColumns) ? data.createColumns : null, requiredColumns: data.requiredColumns || [],
+      generatedColumns: data.generatedColumns || {}, createOptions: data.createOptions || {},
       // Very large tables (millions of rows) give an estimated total, and say themselves whether more rows follow.
       totalIsEstimate: data.totalIsEstimate === true, serverHasMore: typeof data.hasMore === 'boolean' ? data.hasMore : null,
     };
@@ -304,6 +307,85 @@ registerRoute('/developer/admin', async (app) => {
     }
   }
 
+  // ── adding a row by hand (owners only; the server says which tables allow it and which columns it asks for) ──
+  function openAddRow() {
+    if (!s.rows || !s.rows.createColumns) return;
+    s.addRow = { values: {}, errors: {}, formError: null, isSaving: false };
+    render();
+  }
+  function closeAddRow() { if (s.addRow && s.addRow.isSaving) return; s.addRow = null; render(); }
+  /** How one field is asked for: a list of choices, a number, JSON, or plain text (judged from the table's choices and its rows). */
+  function addFieldKind(table, column) {
+    const choices = (table.createOptions || {})[column] || (table.columnOptions || {})[column];
+    if (choices && choices.length) return { type: 'choice', options: choices };
+    const sample = (table.rows || []).map((r) => r[column]).find((v) => v !== null && v !== undefined);
+    if (typeof sample === 'boolean') return { type: 'choice', options: ['true', 'false'] };
+    if (typeof sample === 'number') return { type: 'number' };
+    if (sample !== null && typeof sample === 'object') return { type: 'json' };
+    return { type: 'text' };
+  }
+  async function submitAddRow() {
+    const table = s.rows; const a = s.addRow;
+    if (!table || !a || a.isSaving) return;
+    a.errors = {};
+    for (const col of table.requiredColumns || []) {
+      if (!String(a.values[col] ?? '').trim()) a.errors[col] = `${titleize(col)} is required.`;
+    }
+    if (Object.keys(a.errors).length > 0) { a.formError = null; render(); return; }
+    const values = {};
+    for (const [col, v] of Object.entries(a.values)) if (String(v ?? '').trim() !== '') values[col] = v;
+    a.isSaving = true; a.formError = null; render();
+    try {
+      await api(`/admin/tables/${table.table}/rows`, { method: 'POST', body: { values } });
+      s.addRow = null; s.actionError = null;
+      toast('Row added.');
+      await refreshRows();
+    } catch (err) {
+      reportHandledException(err, 'addRow');
+      a.formError = friendlyError(err, 'We could not add that row.');
+      a.isSaving = false;
+      render();
+    }
+  }
+  function addRowModalHtml() {
+    const table = s.rows; const a = s.addRow;
+    const required = new Set(table.requiredColumns || []);
+    const fields = (table.createColumns || []).map((col) => {
+      const kind = addFieldKind(table, col);
+      const label = `${titleize(col)}${required.has(col) ? '' : ' (optional)'}`;
+      const value = a.values[col] ?? '';
+      const err = a.errors[col] ? `<div class="error-text">${esc(a.errors[col])}</div>` : '';
+      const invalid = a.errors[col] ? 'invalid' : '';
+      if (kind.type === 'choice') {
+        return `<div class="add-row-choice"><span class="reveal-label">${esc(label)}</span>
+          <select data-themed data-add-field="${esc(col)}" class="team-select" style="width:auto;" ${a.isSaving ? 'disabled' : ''}>
+            <option value="" ${value === '' ? 'selected' : ''}>Choose…</option>
+            ${kind.options.map((o) => `<option value="${esc(o)}" ${String(value) === o ? 'selected' : ''}>${esc(o)}</option>`).join('')}
+          </select>${err}</div>`;
+      }
+      if (kind.type === 'json') {
+        return `<div class="field-float"><label>${esc(label)}</label><textarea data-add-field="${esc(col)}" rows="3" placeholder=" " class="${invalid}" ${a.isSaving ? 'disabled' : ''}>${esc(value)}</textarea></div>${err}`;
+      }
+      return `<div class="field-float"><label>${esc(label)}</label><input data-add-field="${esc(col)}" ${kind.type === 'number' ? 'inputmode="numeric"' : ''} placeholder=" " value="${esc(value)}" autocomplete="off" class="${invalid}" ${a.isSaving ? 'disabled' : ''} /></div>${err}`;
+    }).join('');
+    const generated = Object.entries(table.generatedColumns || {});
+    return `
+      <div class="modal-backdrop" id="add-row-backdrop">
+        <div class="modal" role="dialog" aria-modal="true" aria-labelledby="add-row-title">
+          <h2 id="add-row-title">Add a row to ${esc(titleize(table.rawName || table.table))}</h2>
+          <form id="add-row-form" novalidate>
+            ${fields}
+            ${generated.length ? `<span class="reveal-label">Filled in automatically</span>${generated.map(([c, note]) => `<div class="biz-sub">${esc(titleize(c))} · ${esc(note)}</div>`).join('')}` : ''}
+            ${a.formError ? statusMsg('error', a.formError, true) : ''}
+            <div class="modal-actions">
+              <button type="button" class="btn" id="cancel-add-row-btn" ${a.isSaving ? 'disabled' : ''}>Cancel</button>
+              <button type="submit" class="btn btn-primary" ${a.isSaving ? 'disabled' : ''}>${a.isSaving ? spinnerBtn(true, '') : 'Add row'}</button>
+            </div>
+          </form>
+        </div>
+      </div>`;
+  }
+
   async function loadAccess() {
     s.isAccessLoading = true; s.accessError = null; render();
     try { s.access = await api('/admin/access'); } catch (err) {
@@ -315,6 +397,7 @@ registerRoute('/developer/admin', async (app) => {
     e.preventDefault();
     if (s.isAdding) return;
     if (!s.addEmail.trim()) { s.addError = 'Enter the email address of a Desk account.'; render(); return; }
+    if (!s.addEmail.includes('@')) { s.addError = 'Enter a valid email.'; render(); return; }
     s.isAdding = true; s.addError = null; render();
     try {
       await api('/admin/access', { method: 'POST', body: { email: s.addEmail.trim() } });
@@ -375,11 +458,10 @@ registerRoute('/developer/admin', async (app) => {
           </div>` : '')).join('') : '<p class="modal-text">No administrators yet.</p>'}</div>
         ${isOwner ? `
           <form id="add-admin-form" class="access-invite" novalidate>
-            <div class="field-float has-icon"><span class="field-icon">${icon('person_add')}</span><label>Invite by email</label><input name="email" type="email" placeholder=" " value="${esc(s.addEmail)}" autocomplete="off" /></div>
-            <button type="submit" class="btn btn-primary" ${s.isAdding ? 'disabled' : ''}>${s.isAdding ? spinnerBtn(true, '') : 'Invite'}</button>
+            <div class="field-float"><label>Invite by email</label><input name="email" type="email" placeholder=" " value="${esc(s.addEmail)}" autocomplete="off" class="${s.addError ? 'invalid' : ''}" /></div>
+            <button type="submit" class="btn btn-primary" ${s.isAdding ? 'disabled' : ''}>${s.isAdding ? spinnerBtn(true, '') : '+ Invite'}</button>
           </form>
-          ${s.addError ? statusMsg('error', s.addError, true) : ''}
-          <p class="modal-text access-invite-hint">They need a Desk account with a confirmed email address.</p>` : ''}`;
+          ${s.addError ? `<div class="error-text">${esc(s.addError)}</div>` : ''}` : ''}`;
     }
     return `
       <div class="modal-backdrop" id="access-backdrop">
@@ -446,6 +528,7 @@ registerRoute('/developer/admin', async (app) => {
           </div>
         </div>
       ` : ''}
+      ${s.addRow && s.rows && s.rows.createColumns ? addRowModalHtml() : ''}
     `;
     try { wire(); } finally { rendering = false; }
   }
@@ -524,6 +607,7 @@ registerRoute('/developer/admin', async (app) => {
                 ? Object.entries(s.filters).map(([k, v]) => `<button type="button" class="chip selected" data-remove-filter="${esc(k)}" aria-label="Remove ${esc(titleize(k))} filter">${esc(titleize(k))}: ${esc(v)} <span class="x" aria-hidden="true">✕</span></button>`).join('') + `<button type="button" class="btn-link" id="clear-filters-btn">Clear filters</button>`
                 : `<span class="hint">${esc(titleize(table.rawName))} · ${esc(totalText(table))}</span>`}
             </div>
+            ${table.createColumns ? `<button type="button" class="admin-icon-btn" id="add-row-btn" title="Add a row">+ Add row</button>` : ''}
             <div class="column-menu">
               <button type="button" class="admin-icon-btn" id="column-menu-btn" title="Show or hide columns">${icon('view_column_outlined')} Columns</button>
               ${s.columnMenuOpen ? `
@@ -675,6 +759,21 @@ registerRoute('/developer/admin', async (app) => {
     scrollers.forEach((el) => { el.scrollLeft = s.gridScrollLeft; el.addEventListener('scroll', () => follow(el)); });
     if (hScroll && gridScroll) hScroll.hidden = gridScroll.scrollWidth <= gridScroll.clientWidth + 1;
     setTopbarHeight();
+    const addRowBtn = document.getElementById('add-row-btn'); if (addRowBtn) addRowBtn.addEventListener('click', openAddRow);
+    const addRowForm = document.getElementById('add-row-form');
+    if (addRowForm && s.addRow) {
+      addRowForm.addEventListener('submit', (e) => { e.preventDefault(); submitAddRow(); });
+      addRowForm.querySelectorAll('[data-add-field]').forEach((el) => {
+        const save = () => { s.addRow.values[el.dataset.addField] = el.value; };
+        el.addEventListener('input', save);
+        el.addEventListener('change', save);
+      });
+      const cancelAdd = document.getElementById('cancel-add-row-btn'); if (cancelAdd) cancelAdd.addEventListener('click', closeAddRow);
+      const addBackdrop = document.getElementById('add-row-backdrop');
+      if (addBackdrop) addBackdrop.addEventListener('click', (e) => { if (e.target === addBackdrop) closeAddRow(); });
+      const first = addRowForm.querySelector('input, textarea, .themed-select-btn');
+      if (first && !s.addRow.focused) { s.addRow.focused = true; first.focus({ preventScroll: true }); }
+    }
     const cancelDeleteRow = document.getElementById('cancel-delete-row-btn'); if (cancelDeleteRow) cancelDeleteRow.addEventListener('click', () => { s.confirmDeleteRow = null; render(); });
     const confirmDeleteRowBtn = document.getElementById('confirm-delete-row-btn'); if (confirmDeleteRowBtn) confirmDeleteRowBtn.addEventListener('click', confirmDeleteRow);
     const deleteRowBackdrop = document.getElementById('delete-row-modal-backdrop');

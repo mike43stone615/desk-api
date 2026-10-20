@@ -454,9 +454,102 @@ export function associateLabels(root) {
     label.htmlFor = input.id;
   }
 }
+// A native <select>'s open list is drawn by the operating system (square corners, system-blue highlight), which cannot
+// be themed. A <select data-themed> is kept as the real, hidden control (its value and "change" event still drive the
+// page) and gets a button plus a list drawn in the same style as the profile menu.
+let themedSelectSeq = 0;
+export function themeSelects(root) {
+  if (!root) return;
+  for (const sel of root.querySelectorAll('select[data-themed]:not([data-enhanced])')) {
+    sel.dataset.enhanced = '1';
+    sel.hidden = true;
+    const listId = `themed-select-list-${++themedSelectSeq}`;
+    const wrap = document.createElement('div');
+    wrap.className = 'themed-select';
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'themed-select-btn';
+    btn.setAttribute('aria-haspopup', 'listbox');
+    btn.setAttribute('aria-expanded', 'false');
+    btn.setAttribute('aria-controls', listId);
+    const label = sel.id ? document.querySelector(`label[for="${sel.id}"]`) : null;
+    if (label) {
+      if (!label.id) label.id = `${listId}-label`;
+      btn.setAttribute('aria-labelledby', label.id);
+      label.htmlFor = '';
+      label.addEventListener('click', () => btn.focus());
+    }
+    const btnText = document.createElement('span');
+    const chevron = document.createElement('span');
+    chevron.className = 'themed-select-chevron';
+    chevron.innerHTML = icon('expand_more');
+    btn.append(btnText, chevron);
+    const list = document.createElement('ul');
+    list.className = 'themed-select-list';
+    list.id = listId;
+    list.setAttribute('role', 'listbox');
+    list.hidden = true;
+    const items = [...sel.options].map((opt) => {
+      const li = document.createElement('li');
+      li.setAttribute('role', 'option');
+      li.dataset.value = opt.value;
+      li.textContent = opt.textContent;
+      list.appendChild(li);
+      return li;
+    });
+    wrap.append(btn, list);
+    sel.after(wrap);
+
+    let active = 0;
+    const sync = () => {
+      btnText.textContent = sel.options[sel.selectedIndex]?.textContent ?? '';
+      items.forEach((li, i) => li.setAttribute('aria-selected', String(i === sel.selectedIndex)));
+    };
+    const setActive = (i) => {
+      active = Math.max(0, Math.min(items.length - 1, i));
+      items.forEach((li, j) => li.classList.toggle('active', j === active));
+      items[active].scrollIntoView({ block: 'nearest' });
+    };
+    const close = () => { list.hidden = true; btn.setAttribute('aria-expanded', 'false'); document.removeEventListener('mousedown', outside, true); };
+    const outside = (e) => { if (!wrap.contains(e.target)) close(); };
+    const open = () => {
+      list.hidden = false;
+      btn.setAttribute('aria-expanded', 'true');
+      list.classList.toggle('up', wrap.getBoundingClientRect().bottom + list.offsetHeight + 8 > window.innerHeight && wrap.getBoundingClientRect().top > list.offsetHeight + 8);
+      setActive(sel.selectedIndex);
+      document.addEventListener('mousedown', outside, true);
+    };
+    const choose = (i) => {
+      const changed = sel.selectedIndex !== i;
+      sel.selectedIndex = i;
+      sync();
+      close();
+      btn.focus();
+      if (changed) sel.dispatchEvent(new Event('change', { bubbles: true }));
+    };
+    btn.addEventListener('click', () => (list.hidden ? open() : close()));
+    list.addEventListener('click', (e) => { const li = e.target.closest('li'); if (li) choose(items.indexOf(li)); });
+    list.addEventListener('mousemove', (e) => { const li = e.target.closest('li'); if (li) setActive(items.indexOf(li)); });
+    wrap.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') { if (!list.hidden) { e.stopPropagation(); close(); btn.focus(); } return; }
+      if (e.key === 'Tab') { close(); return; }
+      const nav = { ArrowDown: 1, ArrowUp: -1 }[e.key];
+      if (nav || e.key === 'Home' || e.key === 'End') {
+        e.preventDefault();
+        if (list.hidden) open();
+        else setActive(e.key === 'Home' ? 0 : e.key === 'End' ? items.length - 1 : active + nav);
+      } else if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault();
+        if (list.hidden) open(); else choose(active);
+      }
+    });
+    sync();
+  }
+}
+
 const appRoot = document.getElementById('app');
 if (appRoot && typeof MutationObserver !== 'undefined') {
-  new MutationObserver(() => associateLabels(appRoot)).observe(appRoot, { childList: true, subtree: true });
+  new MutationObserver(() => { associateLabels(appRoot); themeSelects(appRoot); }).observe(appRoot, { childList: true, subtree: true });
 }
 
 function renderChrome(path) {

@@ -63,7 +63,7 @@ export const SCOPE_GROUPS = [
     { id: 'profile:email', name: 'Email address' },
   ] },
   { title: 'Desk Business', scopes: [
-    { id: 'businesses:basic', name: 'Business list', info: "Only businesses the person owns. An app never sees businesses they were only invited into, or anyone else's.", children: [
+    { id: 'businesses:basic', name: 'Business list', info: "Only businesses the user owns. An app never sees businesses they were only invited into, or another user's.", children: [
       { id: 'businesses:industry', name: 'Industry' },
       { id: 'businesses:location', name: 'Address' },
       { id: 'businesses:legal_entity', name: 'Legal entity' },

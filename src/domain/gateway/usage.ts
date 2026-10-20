@@ -57,23 +57,21 @@ const dollars = (cents: number) => `$${(cents / 100).toFixed(2)}`;
  * per fact (the page shows a line each in the hover note).
  */
 export function limitsFor(plan: Plan): Array<{ service: string; perMinute: number; note: string }> {
-  const together = `All three APIs together: ${num(plan.totalPerMinute)} a minute and ${num(plan.totalPerMonth)} a month.`;
   const pastMonthly = plan.overageCentsPerCall === null
     ? 'Past a monthly limit, calls are refused until next month.'
-    : `Past a monthly limit, calls keep working and cost ${dollars(plan.overageCentsPerCall)} each.`;
+    : `Past a monthly limit, ${dollars(plan.overageCentsPerCall)} will be charged per call.`;
   const lines = (api: string, extra: string[] = []) => [
-    `Your ${plan.name} plan allows ${num(plan.servicePerMinute)} calls a minute and ${num(plan.servicePerMonth)} a month to the ${api}, shared by all your keys.`,
-    together,
+    `Your plan allows ${num(plan.servicePerMinute)} calls a minute and ${num(plan.servicePerMonth)} calls a month to the ${api}, shared by all your keys.`,
     pastMonthly,
     ...extra,
   ].join('\n');
   const analyses = plan.overageCentsPerAnalysis === null
     ? `Your plan includes ${num(plan.includedAnalyses)} uncached market validation analyses a month; after that they are refused until next month.`
-    : `Your plan includes ${num(plan.includedAnalyses)} uncached market validation analyses a month; each extra one costs ${dollars(plan.overageCentsPerAnalysis)}.`;
+    : `Your plan includes ${num(plan.includedAnalyses)} uncached market validation analyses a month; after that you will be charged ${dollars(plan.overageCentsPerAnalysis)} per call.`;
   return [
     { service: 'desk_api', perMinute: plan.servicePerMinute, note: lines('Desk API') },
-    { service: 'registry_api', perMinute: plan.servicePerMinute, note: lines('Business Name Registry API', ['The answers carry X-RateLimit-* headers.']) },
-    { service: 'market_validation_api', perMinute: plan.servicePerMinute, note: lines('Market Validation API', [analyses, 'A key can run 2 uncached market validation analyses at once.']) },
+    { service: 'registry_api', perMinute: plan.servicePerMinute, note: lines('Business Name Registry API') },
+    { service: 'market_validation_api', perMinute: plan.servicePerMinute, note: lines('Market Validation API', [analyses]) },
   ];
 }
 

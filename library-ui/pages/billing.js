@@ -110,11 +110,9 @@ registerRoute('/developer/billing', async (app) => {
       <div class="invoice-main">
         <div>${esc(invoiceTitle(inv))}</div>
         <div class="biz-sub">${esc(invoiceNumber(inv))} · ${esc(formatMoney(inv.subtotalCents, inv.currency))}</div>
-        <ul class="invoice-lines">${inv.lines.map((l) => `<li><span>${esc(l.description)}${l.quantity > 1 ? ` (${esc(num(l.quantity))} × ${esc(formatMoney(l.unitCents, inv.currency))})` : ''}</span><span>${esc(formatMoney(l.totalCents, inv.currency))}</span></li>`).join('')}</ul>
       </div>
       <div class="invoice-actions">
         <button type="button" class="btn btn-sm" data-view-invoice="${esc(inv.id)}" aria-label="View the invoice for ${esc(periodText(inv.periodStart, inv.periodEnd))}">View</button>
-        <button type="button" class="btn btn-sm" data-print-invoice="${esc(inv.id)}" aria-label="Print the invoice for ${esc(periodText(inv.periodStart, inv.periodEnd))} to PDF">${icon('print')} Print to PDF</button>
       </div>
     </div>`;
 
@@ -123,7 +121,7 @@ registerRoute('/developer/billing', async (app) => {
     return `
       <div class="invoice-doc">
         <div class="invoice-doc-head">
-          <div><div class="invoice-doc-kicker">Desk API Library</div><h2 class="invoice-doc-title">Invoice</h2></div>
+          <div><div class="invoice-doc-kicker">Invoice</div><h2 class="invoice-doc-title">Desk API Library</h2></div>
         </div>
         <dl class="invoice-doc-meta">
           <div><dt>Billed to</dt><dd>${esc(s.accountName)}</dd></div>
@@ -142,7 +140,8 @@ registerRoute('/developer/billing', async (app) => {
   function printInvoice(inv) {
     const sheet = document.createElement('div');
     sheet.id = 'print-invoice';
-    sheet.innerHTML = invoiceDocHtml(inv);
+    // The printed copy carries the Desk brand at the top so it reads as a Desk invoice, not a generic one (the pop-up does not need it).
+    sheet.innerHTML = `<div class="print-brand"><img src="/desk_logo.png" alt="" width="32" height="32" /><span>Desk</span></div>${invoiceDocHtml(inv)}`;
     document.body.appendChild(sheet);
     const done = () => { sheet.remove(); window.removeEventListener('afterprint', done); };
     window.addEventListener('afterprint', done);
@@ -228,7 +227,6 @@ registerRoute('/developer/billing', async (app) => {
 
     const invoiceOf = (id) => s.invoices.find((x) => x.id === id);
     app.querySelectorAll('[data-view-invoice]').forEach((b) => b.addEventListener('click', () => { s.viewInvoice = b.dataset.viewInvoice; render(); }));
-    app.querySelectorAll('[data-print-invoice]').forEach((b) => b.addEventListener('click', () => { const inv = invoiceOf(b.dataset.printInvoice); if (inv) printInvoice(inv); }));
     const closeInvoice = () => { s.viewInvoice = null; render(); };
     const invClose = document.getElementById('invoice-close'); if (invClose) invClose.addEventListener('click', closeInvoice);
     const invPrint = document.getElementById('invoice-print'); if (invPrint) invPrint.addEventListener('click', () => { const inv = invoiceOf(s.viewInvoice); if (inv) printInvoice(inv); });

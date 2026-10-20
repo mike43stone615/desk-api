@@ -45,7 +45,7 @@ registerRoute('/developer/webhooks', async (app) => {
   const s = {
     isLoading: true, loadError: null,
     events: [], endpoints: [],
-    url: '', chosen: new Set(),
+    url: '', chosen: new Set(), fieldErrors: {},
     isCreating: false, formError: null,
     revealed: null, // { secret, rotated }
     deliveriesFor: null, deliveries: [], loadingDeliveries: false, deliveriesTimer: null,
@@ -78,8 +78,10 @@ registerRoute('/developer/webhooks', async (app) => {
 
   async function createEndpoint(e) {
     e.preventDefault();
-    if (!s.url.trim()) { s.formError = 'Enter the address to send events to.'; render(); return; }
-    if (s.chosen.size === 0) { s.formError = 'Choose at least one event.'; render(); return; }
+    s.fieldErrors = {};
+    if (!s.url.trim()) s.fieldErrors.url = 'Enter the address to send events to.';
+    if (s.chosen.size === 0) s.fieldErrors.events = 'Choose at least one event.';
+    if (Object.keys(s.fieldErrors).length > 0) { render(); return; }
     s.isCreating = true; s.formError = null; render();
     try {
       const body = { url: s.url.trim(), events: s.events.filter((x) => s.chosen.has(x)) };
@@ -322,14 +324,17 @@ registerRoute('/developer/webhooks', async (app) => {
     else if (s.loadError) body = `<div class="empty-state">${icon('error_outline')}<div style="margin-top:var(--sp-md);">Webhooks could not load</div><div class="hint">${esc(s.loadError)}</div><button type="button" class="btn" id="retry-btn" style="margin-top:var(--sp-lg);">${icon('refresh')} Try again</button></div>`;
     else {
       const animate = s.formError !== s._lastFormError; s._lastFormError = s.formError;
+      const errText = (name) => (s.fieldErrors[name] ? `<div class="error-text">${esc(s.fieldErrors[name])}</div>` : '');
       body = `
         <div class="developer-split">
           <div class="card">
             <div class="biz-title-row section-title-row"><h2 class="biz-section-title">Add an endpoint</h2>${infoIcon(['Desk sends a signed message to this address when the events you choose happen. It must start with https:// and be reachable from the internet (developers using http:// addresses are also supported).', 'Each delivery is tried up to 6 times over about 9 hours. An endpoint is switched off after 10 deliveries in a row fail all their tries.'], true)}</div>
             <form id="wh-form" novalidate>
-              <div class="field-float has-icon"><span class="field-icon">${icon('link')}</span><label>Address (https://…)</label><input name="url" type="url" placeholder=" " maxlength="500" value="${esc(s.url)}" autocomplete="off" /></div>
+              <div class="field-float has-icon"><span class="field-icon">${icon('link')}</span><label>Address (https://…)</label><input name="url" type="url" placeholder=" " maxlength="500" value="${esc(s.url)}" autocomplete="off" class="${s.fieldErrors.url ? 'invalid' : ''}" /></div>
+              ${errText('url')}
               <div class="field-header"><label>Events</label></div>
               <div class="library-list">${s.events.map((x) => `<label class="library-row"><input type="checkbox" name="event" value="${esc(x)}" ${s.chosen.has(x) ? 'checked' : ''} /><span class="library-body"><span class="name">${esc(EVENT_LABELS[x] || x)}</span></span></label>`).join('')}</div>
+              ${errText('events')}
               ${s.formError ? statusMsg('error', s.formError, animate) : ''}
               <div class="wizard-actions">
                 <div></div>

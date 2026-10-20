@@ -12,7 +12,7 @@ const MAX_REDIRECTS = 50; // the server's limit (MAX_REDIRECT_URIS in src/domain
 const SCOPE_ORDER = APP_SCOPE_LIST.map((x) => x.id);
 const PARENT_OF = Object.fromEntries(APP_SCOPE_LIST.map((x) => [x.id, x.parent]));
 const CHILDREN_OF = (id) => APP_SCOPE_LIST.filter((x) => x.parent === id).map((x) => x.id);
-const REDIRECT_HELP = 'The app can only send people back to these exact addresses. Addresses must start with https:// (developers using http://localhost addresses are also supported). Enter one address per field.';
+const REDIRECT_HELP = 'The app can only send users back to these exact addresses. Addresses must start with https:// (developers using http://localhost addresses are also supported). Enter one address per field.';
 const SECRET_TEXT = 'This is the only time the client secret is shown. Store it somewhere safe — if you lose it, rotate it or remove it and create a new one.';
 const when = (iso) => {
   const d = new Date(iso);
@@ -289,9 +289,7 @@ registerRoute('/developer/apps', async (app) => {
           <h2 id="add-scope-title">Add to what "${esc(c.name)}" may read</h2>
           <div class="library-list">
             ${canAdd.map((x) => `
-              <button type="button" class="library-row${PARENT_OF[x] ? ' scope-child' : ''}" data-add-scope="${esc(x)}" ${s.scopeBusy ? 'disabled' : ''}>
-                <span class="library-body"><span class="name">${esc(SCOPE_LABELS[x])}${PARENT_OF[x] && !c.scopes.includes(PARENT_OF[x]) ? ` <span class="biz-sub">(adds ${esc(SCOPE_LABELS[PARENT_OF[x]])})</span>` : ''}</span></span>
-              </button>`).join('')}
+              <label class="library-row${PARENT_OF[x] ? ' scope-child' : ''}"><input type="checkbox" data-add-scope="${esc(x)}" ${s.scopeBusy ? 'disabled' : ''} /><span class="library-body"><span class="name">${esc(SCOPE_LABELS[x])}</span></span></label>`).join('')}
           </div>
           <div class="modal-actions">
             <button type="button" class="btn" id="close-add-scope-btn">Cancel</button>
@@ -430,7 +428,7 @@ registerRoute('/developer/apps', async (app) => {
     const detail = s.detailFor ? findClient(s.detailFor) : null;
     app.querySelectorAll('[data-remove-scope]').forEach((b) => b.addEventListener('click', () => { if (detail) changeScopes(detail, b.dataset.removeScope, false); }));
     const openAdd = $('open-add-scope'); if (openAdd) openAdd.addEventListener('click', () => { s.addScopeOpen = true; render(); });
-    app.querySelectorAll('[data-add-scope]').forEach((b) => b.addEventListener('click', () => { if (detail) changeScopes(detail, b.dataset.addScope, true); }));
+    app.querySelectorAll('[data-add-scope]').forEach((b) => b.addEventListener('change', () => { if (detail) changeScopes(detail, b.dataset.addScope, true); }));
     const closeAdd = () => { s.addScopeOpen = false; render(); };
     const closeAddBtn = $('close-add-scope-btn'); if (closeAddBtn) { closeAddBtn.addEventListener('click', closeAdd); if (justOpened('add-scope-backdrop')) closeAddBtn.focus({ preventScroll: true }); }
     onBackdrop('add-scope-backdrop', closeAdd);

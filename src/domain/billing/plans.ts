@@ -299,7 +299,7 @@ export function invoiceLines(plan: Plan, analyses: number, calls?: CallTally): I
   if (plan.monthlyPriceCents > 0) lines.push({ description: `${plan.name} plan, one month`, quantity: 1, unitCents: plan.monthlyPriceCents, totalCents: plan.monthlyPriceCents });
   const extra = Math.max(0, analyses - plan.includedAnalyses);
   if (extra > 0 && plan.overageCentsPerAnalysis) {
-    lines.push({ description: `Uncached market validation analyses beyond the ${plan.includedAnalyses.toLocaleString('en-US')} included`, quantity: extra, unitCents: plan.overageCentsPerAnalysis, totalCents: extra * plan.overageCentsPerAnalysis });
+    lines.push({ description: `Uncached market validation analyses beyond the plan's monthly limits`, quantity: extra, unitCents: plan.overageCentsPerAnalysis, totalCents: extra * plan.overageCentsPerAnalysis });
   }
   // One line per API over its own monthly limit, then (only if the all-APIs limit was passed by more than those add up to)
   // one line for the rest: together exactly extraCalls(). Each says how many calls were included, so the total can be checked.
@@ -309,11 +309,11 @@ export function invoiceLines(plan: Plan, analyses: number, calls?: CallTally): I
       const over = Math.max(0, calls[service] - plan.servicePerMonth);
       if (over <= 0) continue;
       counted += over;
-      lines.push({ description: `${SERVICE_NAMES[service]} calls beyond the ${plan.servicePerMonth.toLocaleString('en-US')} included`, quantity: over, unitCents: plan.overageCentsPerCall, totalCents: over * plan.overageCentsPerCall });
+      lines.push({ description: `${SERVICE_NAMES[service]} calls beyond the plan's monthly limits`, quantity: over, unitCents: plan.overageCentsPerCall, totalCents: over * plan.overageCentsPerCall });
     }
     const rest = extraCalls(plan, calls) - counted;
     if (rest > 0) {
-      lines.push({ description: `API calls beyond the ${plan.totalPerMonth.toLocaleString('en-US')} included across all APIs`, quantity: rest, unitCents: plan.overageCentsPerCall, totalCents: rest * plan.overageCentsPerCall });
+      lines.push({ description: `API calls beyond the plan's monthly limits`, quantity: rest, unitCents: plan.overageCentsPerCall, totalCents: rest * plan.overageCentsPerCall });
     }
   }
   return lines;

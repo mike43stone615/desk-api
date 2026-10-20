@@ -46,7 +46,7 @@ describe('plan call limits', () => {
   it('bills extra calls on an invoice, and never on Free', () => {
     expect(invoiceLines(PRO, 0, tally({ registry_api: 3010, total: 3010 }))).toEqual([
       { description: 'Pro plan, one month', quantity: 1, unitCents: 1500, totalCents: 1500 },
-      { description: 'Business Name Registry API calls beyond the 3,000 included', quantity: 10, unitCents: 5, totalCents: 50 },
+      { description: "Business Name Registry API calls beyond the plan's monthly limits", quantity: 10, unitCents: 5, totalCents: 50 },
     ]);
     expect(invoiceLines(FREE, 0, tally({ registry_api: 9000, total: 9000 }))).toEqual([]);
   });
@@ -84,15 +84,15 @@ describe('the plans make money even at the worst case', () => {
 describe('the limit notes shown when picking an API for a key', () => {
   const note = (plan: Plan, service: string) => limitsFor(plan).find((l) => l.service === service)!.note;
   it("state the person's own plan's numbers, not one fixed number", () => {
-    expect(note(FREE, 'desk_api')).toContain('Your Free plan allows 60 calls a minute and 300 a month to the Desk API');
-    expect(note(PRO, 'desk_api')).toContain('Your Pro plan allows 600 calls a minute and 3,000 a month to the Desk API');
+    expect(note(FREE, 'desk_api')).toContain('Your plan allows 60 calls a minute and 300 calls a month to the Desk API, shared by all your keys.');
+    expect(note(PRO, 'desk_api')).toContain('Your plan allows 600 calls a minute and 3,000 calls a month to the Desk API, shared by all your keys.');
     expect(note(PRO, 'registry_api')).toContain('to the Business Name Registry API');
-    expect(note(PRO, 'desk_api')).toContain('All three APIs together: 1,000 a minute and 5,000 a month.');
+    expect(note(PRO, 'desk_api')).not.toContain('All three APIs together');
   });
   it('say what happens past a monthly limit on that plan', () => {
     expect(note(FREE, 'desk_api')).toContain('calls are refused until next month');
-    expect(note(PRO, 'desk_api')).toContain('cost $0.05 each');
-    expect(note(PRO, 'market_validation_api')).toContain('75 uncached market validation analyses a month; each extra one costs $0.15');
+    expect(note(PRO, 'desk_api')).toContain('$0.05 will be charged per call.');
+    expect(note(PRO, 'market_validation_api')).toContain('75 uncached market validation analyses a month; after that you will be charged $0.15 per call.');
     expect(note(FREE, 'market_validation_api')).toContain('5 uncached market validation analyses a month; after that they are refused');
   });
 });
@@ -125,8 +125,8 @@ describe('the extra-calls lines of an invoice', () => {
     const t = tally({ desk_api: 3500, registry_api: 2000, market_validation_api: 1000, total: 6500 });
     const lines = invoiceLines(PRO, 0, t).slice(1);
     expect(lines.map((l) => [l.description, l.quantity])).toEqual([
-      ['Desk API calls beyond the 3,000 included', 500],
-      ['API calls beyond the 5,000 included across all APIs', 1000],
+      ["Desk API calls beyond the plan's monthly limits", 500],
+      ["API calls beyond the plan's monthly limits", 1000],
     ]);
     expect(lines.reduce((n, l) => n + l.quantity, 0)).toBe(extraCalls(PRO, t));
   });

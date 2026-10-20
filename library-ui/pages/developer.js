@@ -273,7 +273,11 @@ registerRoute('/developer', async (app) => {
     e.preventDefault();
     const keyId = e.currentTarget.dataset.shareKey;
     const email = s.shareEmail.trim();
-    if (!email) return;
+    if (!email || !email.includes('@')) {
+      s.shareError = !email ? 'Enter the email address of a Desk account.' : 'Enter a valid email.';
+      render();
+      return;
+    }
     s.shareBusy = true;
     s.shareError = null;
     render();
@@ -531,11 +535,11 @@ registerRoute('/developer', async (app) => {
       <form id="share-form" data-share-key="${esc(k.id)}" style="display:flex;gap:var(--sp-sm);align-items:stretch;margin-top:var(--sp-sm);">
         <div class="field-float" style="flex:1;margin:0;">
           <label>Invite by email</label>
-          <input name="shareEmail" placeholder=" " value="${esc(s.shareEmail)}" autocomplete="off" />
+          <input name="shareEmail" placeholder=" " value="${esc(s.shareEmail)}" autocomplete="off" class="${s.shareError ? 'invalid' : ''}" />
         </div>
         <button type="submit" class="btn btn-primary" style="flex-shrink:0;" ${s.shareBusy ? 'disabled' : ''}>${s.shareBusy ? spinnerBtn(true, '') : '+ Invite'}</button>
       </form>
-      ${s.shareError ? `<div class="error-text">${esc(s.shareError)}</div>` : ''}
+      ${s.shareError ? `<div class="error-text" style="margin-top:var(--sp-2xs);">${esc(s.shareError)}</div>` : ''}
     `;
   }
 
@@ -570,7 +574,7 @@ registerRoute('/developer', async (app) => {
           <div class="biz-title-row"><div class="biz-title">${esc(k.label)}</div>${infoIcon([`Created ${formatDate(k.createdAt)}`, expiryText(k)])}</div>
           <div class="biz-sub">${subParts.map((p) => esc(p)).join(' · ')}</div>
           <div class="biz-chips">
-            ${k.sandbox ? '<span class="meta-chip" title="Fixed sample answers; nothing real is called, counted or billed">Sandbox</span>' : ''}
+            ${k.sandbox ? '<span class="meta-chip" title="Fixed sample answers; nothing real is called, counted or billed">Sandbox key</span>' : ''}
             ${(k.services || []).map((id) => `<span class="meta-chip">${esc(serviceName(id))}</span>`).join('')}
             ${scopes}
           </div>
@@ -598,7 +602,7 @@ registerRoute('/developer', async (app) => {
           <div class="biz-title-row"><div class="biz-title">${esc(k.label)}</div>${infoIcon(info)}</div>
           <div class="biz-sub">${subParts.map((p) => esc(p)).join(' · ')}${pending ? ' · Invitation pending' : ''}</div>
           <div class="biz-chips">
-            ${k.sandbox ? '<span class="meta-chip" title="Fixed sample answers; nothing real is called, counted or billed">Sandbox</span>' : ''}
+            ${k.sandbox ? '<span class="meta-chip" title="Fixed sample answers; nothing real is called, counted or billed">Sandbox key</span>' : ''}
             ${(k.services || []).map((id) => `<span class="meta-chip">${esc(serviceName(id))}</span>`).join('')}
           </div>
         </div>
@@ -635,13 +639,13 @@ registerRoute('/developer', async (app) => {
                 <input name="label" placeholder=" " maxlength="${MAX_LABEL_LENGTH}" value="${esc(s.label)}" autocomplete="off" class="${s.fieldErrors.label ? 'invalid' : ''}" />
               </div>
               ${errText('label')}
-              <label class="library-row" id="sandbox-row"><input type="checkbox" name="sandbox" ${s.sandbox ? 'checked' : ''} /><span class="library-body"><span class="name">Sandbox Key</span><span class="biz-sub">Fixed sample answers for available API services — nothing real is called or counted. Some API services will be disabled with a sandbox key on.</span></span></label>
+              <label class="library-row" id="sandbox-row"><input type="checkbox" name="sandbox" ${s.sandbox ? 'checked' : ''} /><span class="library-body"><span class="name">Sandbox key</span><span class="biz-sub">Fixed sample answers for available API services — nothing real is called or counted. Some API services will be disabled with a sandbox key on.</span></span></label>
               <div class="field-header"><label>APIs this key can call</label></div>
               <div class="library-list" id="service-list">${s.services.map(serviceRowHtml).join('')}</div>
               ${errText('services')}
               <div style="display:flex;align-items:center;gap:var(--sp-sm);margin:var(--sp-lg) 0 var(--sp-md);">
-                <label for="key-expiry" style="font-weight:700;">Expires</label>
-                <select id="key-expiry" class="team-select" style="width:auto;">${EXPIRY_CHOICES.map(([d, label]) => `<option value="${d}" ${s.expiresInDays === d ? 'selected' : ''}>${esc(label)}</option>`).join('')}</select>
+                <label for="key-expiry" style="font-weight:700;flex-shrink:0;white-space:nowrap;">Expires</label>
+                <select id="key-expiry" class="team-select" data-themed style="width:auto;">${EXPIRY_CHOICES.map(([d, label]) => `<option value="${d}" ${s.expiresInDays === d ? 'selected' : ''}>${esc(label)}</option>`).join('')}</select>
               </div>
               ${s.formError ? statusMsg('error', s.formError, animateError) : ''}
               <div class="wizard-actions">
