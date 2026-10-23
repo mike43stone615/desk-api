@@ -29,6 +29,11 @@ function displayValue(value) {
   return String(value);
 }
 // Columns a table starts without (the Columns menu brings them back): the plans' ids are only there for the other tables to point at.
+const SHOWN_BY_DEFAULT = {
+  // A business has ~50 facts from the setup wizard: these show, the rest are in the Columns menu.
+  businesses: ['id', 'name', 'industry', 'created_at', 'updated_at', 'business_name', 'formation_state', 'legal_entity', 'tax_election', 'has_partners', 'number_of_partners'],
+  business_setup_drafts: ['id', 'user_id', 'person_name', 'version', 'created_at', 'updated_at', 'business_name', 'formation_state', 'legal_entity', 'tax_election', 'has_partners', 'number_of_partners'],
+};
 const HIDDEN_BY_DEFAULT = { plans: ['id'] };
 function isDefaultHiddenColumn(column) {
   const n = column.toLowerCase();
@@ -76,7 +81,7 @@ registerRoute('/developer/admin', async (app) => {
     undoStack: [], redoStack: [], savingCellKeys: new Set(),
     filters: {}, sort: null, hiddenColumnsByTable: {},
     hasMoreRows: false, isLoadingMoreRows: false, isRefreshingRows: false,
-    selectedRowId: null, columnMenuOpen: false, editingCell: null, confirmDeleteRow: null, addRow: null,
+    selectedRowId: null, columnMenuOpen: false, editingCell: null, confirmDeleteRow: null, deleteImpact: null, addRow: null,
     activeFilter: null, // the column filter being typed in: it keeps the keyboard while the rows update under it
   };
   let filterDebounce = null;
@@ -116,9 +121,10 @@ registerRoute('/developer/admin', async (app) => {
       primaryKey: data.primaryKey || 'id', columns: data.columns || [], editableColumns: data.editableColumns || [],
       secretColumns: data.secretColumns || [], columnOptions: data.columnOptions || {},
       rows: data.rows || [], totalRows: Number(data.totalRows) || 0, deletable: data.deletable === true,
-      // What "Add row" needs (the server sends these only to an owner, and only for tables that allow adding by hand).
+      // What "Add row" needs (the server sends these only to a signed-in owner or administrator, and only for tables that allow adding by hand).
       createColumns: Array.isArray(data.createColumns) ? data.createColumns : null, requiredColumns: data.requiredColumns || [],
       generatedColumns: data.generatedColumns || {}, createOptions: data.createOptions || {},
+      createDefaults: data.createDefaults || {}, createLookups: data.createLookups || {}, hasDeleteNote: data.hasDeleteNote === true,
       // A read-only view of rules held in code ("rules") or of live state ("live"), with a plain description.
       kind: data.kind || null, description: data.description || '',
       // Very large tables (millions of rows) give an estimated total, and say themselves whether more rows follow.
@@ -139,7 +145,8 @@ registerRoute('/developer/admin', async (app) => {
     if (!rows) return;
     if (!(rows.table in s.hiddenColumnsByTable)) {
       const named = HIDDEN_BY_DEFAULT[rows.rawName] || [];
-      s.hiddenColumnsByTable[rows.table] = new Set(rows.columns.filter((c) => isDefaultHiddenColumn(c) || named.includes(c)));
+      const shown = SHOWN_BY_DEFAULT[rows.rawName];
+      s.hiddenColumnsByTable[rows.table] = new Set(rows.columns.filter((c) => isDefaultHiddenColumn(c) || named.includes(c) || (shown && !shown.includes(c))));
     }
   }
 
@@ -286,14 +293,24 @@ registerRoute('/developer/admin', async (app) => {
   function deleteRow(row) {
     if (!s.rows || !s.rows.deletable) return;
     s.confirmDeleteRow = row;
+    s.deleteImpact = null;
     render();
+    // Deleting a person's account or a business also removes (or leaves) other records: say which, counted for it, before confirming.
+    const impactPath = { 'desk.users': 'users', 'desk.businesses': 'businesses', 'desk.business_memberships': 'business_memberships', 'desk.plans': 'plans', 'desk.subscriptions': 'subscriptions' }[s.rows.table];
+    if (impactPath || s.rows.hasDeleteNote) {
+      const id = String(row[s.rows.primaryKey]);
+      const path = impactPath ? `/admin/${impactPath}/${encodeURIComponent(id)}/delete-impact` : `/admin/delete-impact/${encodeURIComponent(s.rows.table)}/${encodeURIComponent(id)}`;
+      api(path)
+        .then((r) => { if (s.confirmDeleteRow === row) { s.deleteImpact = { goes: r.goes || [], stays: r.stays || [], warning: r.warning, note: r.note }; render(); } })
+        .catch(() => { if (s.confirmDeleteRow === row) { s.deleteImpact = { failed: true }; render(); } });
+    }
   }
   async function confirmDeleteRow() {
     const row = s.confirmDeleteRow;
     if (!s.rows || !row) return;
     const id = String(row[s.rows.primaryKey]);
     const table = s.rows.table;
-    s.confirmDeleteRow = null; s.actionError = null; render();
+    s.confirmDeleteRow = null; s.deleteImpact = null; s.actionError = null; render();
     try {
       await api(`/admin/tables/${table}/rows/${encodeURIComponent(id)}`, { method: 'DELETE' });
       // Only this row's edits leave the history: they cannot be undone on a row that no longer exists.
@@ -309,10 +326,23 @@ registerRoute('/developer/admin', async (app) => {
     }
   }
 
-  // ── adding a row by hand (owners only; the server says which tables allow it and which columns it asks for) ──
+  // ── adding a row by hand (owners and administrators; the server says which tables allow it and which columns it asks for) ──
   function openAddRow() {
     if (!s.rows || !s.rows.createColumns) return;
-    s.addRow = { values: {}, errors: {}, formError: null, isSaving: false };
+    // The lowest, safest value for a field is already filled in (the server uses it too if a field is left empty).
+    const values = {};
+    for (const [col, v] of Object.entries(s.rows.createDefaults || {})) {
+      if (v === '@now') values[col] = new Date().toISOString().replace(/\.\d{3}Z$/, 'Z');
+      else if (v === '@month') values[col] = new Date().toISOString().slice(0, 7);
+      else if (v === '@monthkey') values[col] = `M${new Date().toISOString().slice(0, 7)}`;
+      else if (v === '@now+1month') { const later = new Date(); later.setUTCMonth(later.getUTCMonth() + 1); values[col] = later.toISOString().replace(/\.\d{3}Z$/, 'Z'); }
+      else values[col] = String(v);
+    }
+    // The new row sits in the grid, so every column it fills in must be showing.
+    const hiddenNow = s.hiddenColumnsByTable[s.rows.table];
+    if (hiddenNow) for (const col of s.rows.createColumns) hiddenNow.delete(col);
+    s.addRow = { values, errors: {}, formError: null, isSaving: false, picked: {}, results: {}, nowStamp: new Date().toISOString().replace(/\.\d{3}Z$/, 'Z') };
+    s.gridScrollLeft = 0;
     render();
   }
   function closeAddRow() { if (s.addRow && s.addRow.isSaving) return; s.addRow = null; render(); }
@@ -330,62 +360,95 @@ registerRoute('/developer/admin', async (app) => {
     const table = s.rows; const a = s.addRow;
     if (!table || !a || a.isSaving) return;
     a.errors = {};
+    // The sign-up page's own words for a new person's fields (auth.js), so the same mistakes get the same messages.
+    const words = table.table === 'desk.users' ? { email: 'Enter your email.', first_name: 'Enter your first name.', last_name: 'Enter your last name.' } : {};
     for (const col of table.requiredColumns || []) {
-      if (!String(a.values[col] ?? '').trim()) a.errors[col] = `${titleize(col)} is required.`;
+      if (!String(a.values[col] ?? '').trim()) a.errors[col] = words[col] || `${titleize(col)} is required.`;
     }
+    if (table.table === 'desk.users' && !a.errors.email && !String(a.values.email).trim().includes('@')) a.errors.email = 'Enter a valid email.';
     if (Object.keys(a.errors).length > 0) { a.formError = null; render(); return; }
     const values = {};
-    for (const [col, v] of Object.entries(a.values)) if (String(v ?? '').trim() !== '') values[col] = v;
+    const requiredNow = new Set(table.requiredColumns || []);
+    for (const [col, v] of Object.entries(a.values)) {
+      if (String(v ?? '').trim() !== '') values[col] = v;
+      else if (!requiredNow.has(col) && col in (table.createDefaults || {})) values[col] = ''; // cleared on purpose: stays empty
+    }
     a.isSaving = true; a.formError = null; render();
     try {
-      await api(`/admin/tables/${table.table}/rows`, { method: 'POST', body: { values } });
+      const added = await api(`/admin/tables/${table.table}/rows`, { method: 'POST', body: { values } });
       s.addRow = null; s.actionError = null;
-      toast('Row added.');
+      toast((added && added.notice) || 'Row added.');
       await refreshRows();
     } catch (err) {
       reportHandledException(err, 'addRow');
-      a.formError = friendlyError(err, 'We could not add that row.');
+      const said = friendlyError(err, 'We could not add that row.');
+      // A problem with the email (invalid, too long, already used) shows on the email field, as the sign-up page shows it.
+      if (table.table === 'desk.users' && /email/i.test(said)) { a.errors.email = said; a.formError = null; } else a.formError = said;
       a.isSaving = false;
       render();
     }
   }
-  function addRowModalHtml() {
-    const table = s.rows; const a = s.addRow;
+  /**
+   * The new row: it sits at the top of the grid like any other row. The columns a person fills in are empty boxes (a list where the
+   * column has fixed choices, a search where it holds another row's id), the columns the system fills in show what they will be,
+   * and every other column is blank. Save and Cancel are in the Actions cell.
+   */
+  function newRowHtml(table, visibleColumns) {
+    const a = s.addRow;
     const required = new Set(table.requiredColumns || []);
-    const fields = (table.createColumns || []).map((col) => {
-      const kind = addFieldKind(table, col);
-      const label = `${titleize(col)}${required.has(col) ? '' : ' (optional)'}`;
+    const create = new Set(table.createColumns || []);
+    const generated = table.generatedColumns || {};
+    const cell = (col) => {
+      const err = a.errors[col];
+      const invalid = err ? 'invalid' : '';
+      const title = err ? `title="${esc(err)}"` : '';
       const value = a.values[col] ?? '';
-      const err = a.errors[col] ? `<div class="error-text">${esc(a.errors[col])}</div>` : '';
-      const invalid = a.errors[col] ? 'invalid' : '';
-      if (kind.type === 'choice') {
-        return `<div class="add-row-choice"><span class="reveal-label">${esc(label)}</span>
-          <select data-themed data-add-field="${esc(col)}" class="team-select" style="width:auto;" ${a.isSaving ? 'disabled' : ''}>
-            <option value="" ${value === '' ? 'selected' : ''}>Choose…</option>
+      const hint = required.has(col) ? 'Required' : 'Optional';
+      if (create.has(col)) {
+        if ((table.createLookups || {})[col]) {
+          const picked = a.picked[col];
+          if (value && picked !== undefined) {
+            return `<div class="new-row-chosen" ${title}><span>${esc(picked.label)}</span><button type="button" class="admin-icon-btn" data-lookup-clear="${esc(col)}" title="Choose again" aria-label="Choose again" ${a.isSaving ? 'disabled' : ''}>${icon('close')}</button></div>`;
+          }
+          const results = (a.results[col] || []).map((r) => `<button type="button" class="lookup-result" data-lookup-pick="${esc(col)}" data-id="${esc(r.id)}" data-label="${esc(r.label)}" data-detail="${esc(r.detail)}"><span>${esc(r.label)}</span><span class="biz-sub">${esc(r.detail)}</span></button>`).join('');
+          return `<input class="admin-cell-input ${invalid}" ${title} data-lookup-search="${esc(col)}" placeholder="${hint} · search" value="${esc(a.searchText && a.searchText[col] || '')}" autocomplete="off" ${a.isSaving ? 'disabled' : ''} />
+            <div class="lookup-results" data-lookup-results="${esc(col)}">${results}</div>`;
+        }
+        const kind = addFieldKind(table, col);
+        if (kind.type === 'choice') {
+          return `<select class="admin-cell-input ${invalid}" ${title} data-add-field="${esc(col)}" ${a.isSaving ? 'disabled' : ''}>
+            <option value="" ${value === '' ? 'selected' : ''}>${hint}</option>
             ${kind.options.map((o) => `<option value="${esc(o)}" ${String(value) === o ? 'selected' : ''}>${esc(o)}</option>`).join('')}
-          </select>${err}</div>`;
+          </select>`;
+        }
+        if (kind.type === 'json') {
+          return `<textarea class="admin-cell-input ${invalid}" ${title} rows="1" data-add-field="${esc(col)}" placeholder="${hint}" ${a.isSaving ? 'disabled' : ''}>${esc(value)}</textarea>`;
+        }
+        return `<input class="admin-cell-input ${invalid}" ${title} data-add-field="${esc(col)}" ${kind.type === 'number' ? 'inputmode="numeric"' : ''} placeholder="${hint}" value="${esc(value)}" autocomplete="off" ${a.isSaving ? 'disabled' : ''} />`;
       }
-      if (kind.type === 'json') {
-        return `<div class="field-float"><label>${esc(label)}</label><textarea data-add-field="${esc(col)}" rows="3" placeholder=" " class="${invalid}" ${a.isSaving ? 'disabled' : ''}>${esc(value)}</textarea></div>${err}`;
+      if (col in generated) {
+        const note = generated[col];
+        // What the system will write: the time is shown as it will be stamped, the rest by what it is.
+        const shown = note === 'The current time' ? a.nowStamp : note === 'A new ID' ? 'New ID' : note.startsWith('You') ? 'You' : 'Automatic';
+        return `<span class="new-row-auto" title="${esc(note)}">${esc(shown)}</span>`;
       }
-      return `<div class="field-float"><label>${esc(label)}</label><input data-add-field="${esc(col)}" ${kind.type === 'number' ? 'inputmode="numeric"' : ''} placeholder=" " value="${esc(value)}" autocomplete="off" class="${invalid}" ${a.isSaving ? 'disabled' : ''} /></div>${err}`;
-    }).join('');
-    const generated = Object.entries(table.generatedColumns || {});
+      return `<span class="new-row-blank" aria-hidden="true"></span>`;
+    };
+    const problems = [
+      ...Object.entries(a.errors).filter(([c]) => !visibleColumns.includes(c)).map(([c, m]) => `${titleize(c)}: ${m}`),
+      ...(a.formError ? [a.formError] : []),
+    ];
+    const fieldProblems = Object.entries(a.errors).filter(([c]) => visibleColumns.includes(c)).map(([c, m]) => `${titleize(c)}: ${m}`);
+    const all = [...fieldProblems, ...problems.filter((m) => !fieldProblems.includes(m))];
     return `
-      <div class="modal-backdrop" id="add-row-backdrop">
-        <div class="modal" role="dialog" aria-modal="true" aria-labelledby="add-row-title">
-          <h2 id="add-row-title">Add a row to ${esc(titleize(table.rawName || table.table))}</h2>
-          <form id="add-row-form" novalidate>
-            ${fields}
-            ${generated.length ? `<span class="reveal-label">Filled in automatically</span>${generated.map(([c, note]) => `<div class="biz-sub">${esc(titleize(c))} · ${esc(note)}</div>`).join('')}` : ''}
-            ${a.formError ? statusMsg('error', a.formError, true) : ''}
-            <div class="modal-actions">
-              <button type="button" class="btn" id="cancel-add-row-btn" ${a.isSaving ? 'disabled' : ''}>Cancel</button>
-              <button type="submit" class="btn btn-primary" ${a.isSaving ? 'disabled' : ''}>${a.isSaving ? spinnerBtn(true, '') : 'Add row'}</button>
-            </div>
-          </form>
-        </div>
-      </div>`;
+      <tr class="admin-new-row" data-new-row>
+        <td class="admin-actions-cell">
+          <button type="button" class="admin-icon-btn" id="save-add-row-btn" title="Save this row" aria-label="Save this row" ${a.isSaving ? 'disabled' : ''}>${a.isSaving ? spinnerBtn(true, '', { dark: true }) : icon('check')}</button>
+          <button type="button" class="admin-icon-btn" id="cancel-add-row-btn" title="Cancel" aria-label="Cancel" ${a.isSaving ? 'disabled' : ''}>${icon('close')}</button>
+        </td>
+        ${visibleColumns.map((col) => `<td class="new-row-cell" style="min-width:${columnWidth(col)}px;">${cell(col)}</td>`).join('')}
+      </tr>
+      ${all.length ? `<tr class="admin-new-row-msg"><td colspan="${visibleColumns.length + 1}">${all.map((m) => `<div class="error-text" role="alert">${esc(m)}</div>`).join('')}</td></tr>` : ''}`;
   }
 
   async function loadAccess() {
@@ -492,6 +555,29 @@ registerRoute('/developer/admin', async (app) => {
       </div>`;
   }
 
+  /** For a person's account: what goes with it and what stays, counted for them. */
+  function deleteImpactHtml() {
+    const d = s.deleteImpact;
+    const what = s.rows.table === 'desk.businesses' ? 'this business' : 'this account';
+    // A membership takes only that one place: nothing is listed, and a warning shows only for a business's last joined member.
+    if (s.rows.hasDeleteNote) {
+      // A note on what the delete does, and the rows that go with it (counted for this one).
+      if (!d) return `<p class="modal-text">Checking what else goes…</p>`;
+      if (d.failed) return '';
+      const items = (d.goes || []).map((x) => `<li>${esc(Number(x.count).toLocaleString('en-US'))} ${esc(x.label)}</li>`).join('');
+      return `${d.note ? `<p class="modal-text">${esc(d.note)}</p>` : ''}${items ? `<span class="reveal-label">Also deleted</span><ul class="modal-text delete-impact">${items}</ul>` : ''}`;
+    }
+    if (s.rows.table === 'desk.subscriptions') return d && d.note ? `<p class="modal-text">${esc(d.note)}</p>` : '';
+    if (s.rows.table === 'desk.business_memberships' || s.rows.table === 'desk.plans') return d && d.warning ? `<p class="modal-text" role="alert"><strong>${esc(d.warning)}</strong></p>` : '';
+    if (!d) return `<p class="modal-text">Checking what else goes with ${what}…</p>`;
+    if (d.failed) return `<p class="modal-text">We could not count what else goes with ${what}.</p>`;
+    const line = (x) => `<li>${esc(Number(x.count).toLocaleString('en-US'))} ${esc(x.label)}</li>`;
+    return `
+      <span class="reveal-label">Also deleted with ${what}</span>
+      ${d.goes.length ? `<ul class="modal-text delete-impact">${d.goes.map(line).join('')}</ul>` : '<p class="modal-text">Nothing else.</p>'}
+      ${d.stays.length ? `<span class="reveal-label">Not deleted</span><ul class="modal-text delete-impact">${d.stays.map(line).join('')}</ul>` : ''}`;
+  }
+
   function render() {
     if (!isCurrent()) return; // a page the person has already left must not draw over the new one
     const sources = [...new Set(s.tables.map((t) => t.source))];
@@ -524,6 +610,7 @@ registerRoute('/developer/admin', async (app) => {
           <div class="modal" role="dialog" aria-modal="true" aria-labelledby="delete-row-title">
             <h2 id="delete-row-title">Delete row</h2>
             <p class="modal-text">Delete this row from ${esc(titleize(s.rows.rawName || s.rows.table))}? This cannot be undone.</p>
+            ${['desk.users', 'desk.businesses', 'desk.business_memberships', 'desk.plans', 'desk.subscriptions'].includes(s.rows.table) || s.rows.hasDeleteNote ? deleteImpactHtml() : ''}
             <div class="modal-actions">
               <button type="button" class="btn" id="cancel-delete-row-btn">Cancel</button>
               <button type="button" class="btn btn-danger" id="confirm-delete-row-btn">Delete</button>
@@ -531,7 +618,6 @@ registerRoute('/developer/admin', async (app) => {
           </div>
         </div>
       ` : ''}
-      ${s.addRow && s.rows && s.rows.createColumns ? addRowModalHtml() : ''}
     `;
     try { wire(); } finally { rendering = false; }
   }
@@ -570,14 +656,16 @@ registerRoute('/developer/admin', async (app) => {
       </div>`;
 
     let bodyHtml;
-    if (!table.rows.length) {
+    const adding = !!(s.addRow && table.createColumns);
+    if (!table.rows.length && !adding) {
       bodyHtml = `<div class="empty-state">${filterCount ? 'No matching rows' : `${esc(titleize(table.table))} is empty`}<div class="hint">${filterCount ? 'Clear the active filters to see this table again.' : 'This table does not have any rows yet.'}</div>${filterCount ? `<button type="button" class="btn btn-sm" id="clear-filters-empty-btn" style="margin-top:var(--sp-md);">Clear filters</button>` : ''}</div>`;
     } else {
       bodyHtml = `
-        <div class="admin-grid-scroll">
+        <div class="admin-grid-scroll${adding ? ' adding' : ''}">
           <table class="admin-table" ${tableStyle}>
             ${colgroup}
             <tbody>
+              ${adding ? newRowHtml(table, visibleColumns) : ''}
               ${table.rows.map((row) => {
                 const id = String(row[table.primaryKey]);
                 return `
@@ -610,14 +698,16 @@ registerRoute('/developer/admin', async (app) => {
                 ? Object.entries(s.filters).map(([k, v]) => `<button type="button" class="chip selected" data-remove-filter="${esc(k)}" aria-label="Remove ${esc(titleize(k))} filter">${esc(titleize(k))}: ${esc(v)} <span class="x" aria-hidden="true">✕</span></button>`).join('') + `<button type="button" class="btn-link" id="clear-filters-btn">Clear filters</button>`
                 : `<span class="hint">${esc(titleize(table.rawName))} · ${esc(totalText(table))}</span>`}
             </div>
-            ${table.createColumns ? `<button type="button" class="admin-icon-btn" id="add-row-btn" title="Add a row">+ Add row</button>` : ''}
-            <div class="column-menu">
-              <button type="button" class="admin-icon-btn" id="column-menu-btn" title="Show or hide columns">${icon('view_column_outlined')} Columns</button>
-              ${s.columnMenuOpen ? `
-                <div class="column-menu-list">
-                  ${table.columns.map((col) => `<label><input type="checkbox" data-col-toggle="${esc(col)}" ${hidden.has(col) ? '' : 'checked'} /> ${esc(titleize(col))}</label>`).join('')}
-                </div>
-              ` : ''}
+            <div class="admin-grid-actions">
+              ${table.createColumns ? `<button type="button" class="admin-tool-btn" id="add-row-btn" title="Add a row">${icon('add')} Add row</button>` : ''}
+              <div class="column-menu">
+                <button type="button" class="admin-tool-btn" id="column-menu-btn" title="Show or hide columns">${icon('view_column_outlined')} Columns</button>
+                ${s.columnMenuOpen ? `
+                  <div class="column-menu-list">
+                    ${table.columns.map((col) => `<label><input type="checkbox" data-col-toggle="${esc(col)}" ${hidden.has(col) ? '' : 'checked'} /> ${esc(titleize(col))}</label>`).join('')}
+                  </div>
+                ` : ''}
+              </div>
             </div>
           </div>
           ${headHtml}
@@ -763,24 +853,64 @@ registerRoute('/developer/admin', async (app) => {
     if (hScroll && gridScroll) hScroll.hidden = gridScroll.scrollWidth <= gridScroll.clientWidth + 1;
     setTopbarHeight();
     const addRowBtn = document.getElementById('add-row-btn'); if (addRowBtn) addRowBtn.addEventListener('click', openAddRow);
-    const addRowForm = document.getElementById('add-row-form');
+    const addRowForm = app.querySelector('[data-new-row]');
     if (addRowForm && s.addRow) {
-      addRowForm.addEventListener('submit', (e) => { e.preventDefault(); submitAddRow(); });
       addRowForm.querySelectorAll('[data-add-field]').forEach((el) => {
         const save = () => { s.addRow.values[el.dataset.addField] = el.value; };
         el.addEventListener('input', save);
         el.addEventListener('change', save);
       });
+      // Enter saves and Escape cancels, as in the cell editors.
+      addRowForm.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape') { e.preventDefault(); closeAddRow(); return; }
+        if (e.key === 'Enter' && !e.shiftKey && e.target.tagName !== 'BUTTON') { e.preventDefault(); submitAddRow(); }
+      });
+      // Fields that hold another row's id: search by name, pick one, and the id is filled in.
+      const lookupKinds = s.rows.createLookups || {};
+      const resultButton = (r, col) => `<button type="button" class="lookup-result" data-lookup-pick="${esc(col)}" data-id="${esc(r.id)}" data-label="${esc(r.label)}" data-detail="${esc(r.detail)}"><span>${esc(r.label)}</span><span class="biz-sub">${esc(r.detail)}</span></button>`;
+      const runSearch = async (col, text) => {
+        try {
+          const found = await api(`/admin/lookup/${encodeURIComponent(lookupKinds[col])}?q=${encodeURIComponent(text)}`);
+          if (!s.addRow) return;
+          s.addRow.results[col] = found.items || [];
+          const box = addRowForm.querySelector(`[data-lookup-results="${col}"]`);
+          if (box) {
+            box.innerHTML = s.addRow.results[col].map((r) => resultButton(r, col)).join('') || '<div class="biz-sub" style="padding:6px;">No match.</div>';
+            wirePicks();
+          }
+        } catch (err) { reportHandledException(err, 'adminLookup'); }
+      };
+      const wirePicks = () => addRowForm.querySelectorAll('[data-lookup-pick]').forEach((b) => b.addEventListener('mousedown', (e) => {
+        e.preventDefault(); // keeps the box from losing focus (and the list from closing) before the pick lands
+        const col = b.dataset.lookupPick;
+        s.addRow.values[col] = b.dataset.id; s.addRow.picked[col] = { label: b.dataset.label, detail: b.dataset.detail };
+        delete s.addRow.errors[col]; render();
+      }));
+      let searchTimer = null;
+      addRowForm.querySelectorAll('[data-lookup-search]').forEach((el) => {
+        const col = el.dataset.lookupSearch;
+        const box = () => addRowForm.querySelector(`[data-lookup-results="${col}"]`);
+        el.addEventListener('input', () => {
+          s.addRow.searchText = { ...(s.addRow.searchText || {}), [col]: el.value };
+          clearTimeout(searchTimer); searchTimer = setTimeout(() => runSearch(col, el.value.trim()), 200);
+        });
+        // The suggestions show while the box is being used, and are out of the way otherwise.
+        el.addEventListener('focus', () => { const b = box(); if (b) b.classList.add('open'); if (!(s.addRow.results[col] || []).length) runSearch(col, el.value.trim()); });
+        el.addEventListener('blur', () => { const b = box(); if (b) setTimeout(() => b.classList.remove('open'), 120); });
+      });
+      wirePicks();
+      addRowForm.querySelectorAll('[data-lookup-clear]').forEach((b) => b.addEventListener('click', () => {
+        const col = b.dataset.lookupClear; delete s.addRow.values[col]; delete s.addRow.picked[col]; render();
+      }));
+      const saveAdd = document.getElementById('save-add-row-btn'); if (saveAdd) saveAdd.addEventListener('click', submitAddRow);
       const cancelAdd = document.getElementById('cancel-add-row-btn'); if (cancelAdd) cancelAdd.addEventListener('click', closeAddRow);
-      const addBackdrop = document.getElementById('add-row-backdrop');
-      if (addBackdrop) addBackdrop.addEventListener('click', (e) => { if (e.target === addBackdrop) closeAddRow(); });
-      const first = addRowForm.querySelector('input, textarea, .themed-select-btn');
+      const first = addRowForm.querySelector('input, textarea, select');
       if (first && !s.addRow.focused) { s.addRow.focused = true; first.focus({ preventScroll: true }); }
     }
-    const cancelDeleteRow = document.getElementById('cancel-delete-row-btn'); if (cancelDeleteRow) cancelDeleteRow.addEventListener('click', () => { s.confirmDeleteRow = null; render(); });
+    const cancelDeleteRow = document.getElementById('cancel-delete-row-btn'); if (cancelDeleteRow) cancelDeleteRow.addEventListener('click', () => { s.confirmDeleteRow = null; s.deleteImpact = null; render(); });
     const confirmDeleteRowBtn = document.getElementById('confirm-delete-row-btn'); if (confirmDeleteRowBtn) confirmDeleteRowBtn.addEventListener('click', confirmDeleteRow);
     const deleteRowBackdrop = document.getElementById('delete-row-modal-backdrop');
-    if (deleteRowBackdrop) deleteRowBackdrop.addEventListener('click', (e) => { if (e.target === deleteRowBackdrop) { s.confirmDeleteRow = null; render(); } });
+    if (deleteRowBackdrop) deleteRowBackdrop.addEventListener('click', (e) => { if (e.target === deleteRowBackdrop) { s.confirmDeleteRow = null; s.deleteImpact = null; render(); } });
 
     app.querySelectorAll('[data-start-edit]').forEach((el) => el.addEventListener('click', () => { s.editingCell = el.dataset.startEdit; render(); }));
     app.querySelectorAll('[data-edit-input]').forEach((ta) => {

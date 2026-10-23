@@ -341,7 +341,7 @@ export function createFakeDb() {
     }
 
     // ── email_tokens (migration 0033): password reset links ────────────────────────────────────────────
-    if (s.startsWith("INSERT INTO email_tokens (id, purpose, user_id, token, expires_at) VALUES ($1, 'password_reset'")) {
+    if (s.startsWith("INSERT INTO email_tokens (id, purpose, user_id, token, expires_at, sent_to) VALUES ($1, 'password_reset'")) {
       const [id, user_id, token, expires_at] = p;
       const row: FakeRow = { id, user_id, token, expires_at, used_at: null, created_at: nowIso() };
       passwordResetTokens.set(token, row);
@@ -379,7 +379,7 @@ export function createFakeDb() {
     if (s.startsWith("DELETE FROM email_tokens WHERE purpose = 'email_confirmation' AND user_id")) {
       return { rows: [], rowCount: 0 };
     }
-    if (s.startsWith("INSERT INTO email_tokens (id, purpose, user_id, token, expires_at) VALUES ($1, 'email_confirmation'")) {
+    if (s.startsWith("INSERT INTO email_tokens (id, purpose, user_id, token, expires_at, sent_to) VALUES ($1, 'email_confirmation'")) {
       const [id, user_id, token, expires_at] = p;
       const row: FakeRow = { id, user_id, token, expires_at, used_at: null, created_at: nowIso() };
       emailConfirmationTokens.set(token, row);

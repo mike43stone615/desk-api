@@ -6583,7 +6583,36 @@ export interface operations {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    /**
+                     * @example {
+                     *       "responseId": "0b7f4a54-5c9e-4f0e-9d5b-6a3f2c1d8e77",
+                     *       "servedAt": "2026-10-20T15:46:25.071Z",
+                     *       "fresh": true,
+                     *       "maxAgeDays": 120,
+                     *       "oldestBreakpointAgeDays": 12,
+                     *       "newestBreakpointAgeDays": 12,
+                     *       "lastCompletedRunAgeDays": 12,
+                     *       "breakpoints": 120,
+                     *       "metrics": 24,
+                     *       "coarserThanCountyMetrics": [
+                     *         "unemployment_trend"
+                     *       ]
+                     *     }
+                     */
+                    "application/json": {
+                        responseId: string;
+                        servedAt: string;
+                        fresh: boolean;
+                        maxAgeDays: number;
+                        oldestBreakpointAgeDays: number;
+                        newestBreakpointAgeDays: number;
+                        lastCompletedRunAgeDays: number;
+                        breakpoints: number;
+                        metrics: number;
+                        coarserThanCountyMetrics: string[];
+                    };
+                };
             };
             /** @description The input was not valid (same error body as every other error) */
             400: {

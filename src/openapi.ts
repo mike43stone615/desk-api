@@ -701,6 +701,27 @@ const BASE_SPEC = {
       patch: { tags: ['Admin'], summary: 'Update editable fields on a row (audit-logged)', security: [{ SessionToken: [] }], responses: { '200': { description: 'OK' } } },
       delete: { tags: ['Admin'], summary: 'Delete a row where deletable (audit-logged)', security: [{ SessionToken: [] }], responses: { '200': { description: 'OK' }, '403': { description: 'Deletes disabled for this table' } } },
     },
+    '/admin/users/{id}/delete-impact': {
+      get: { tags: ['Admin'], summary: "What deleting this person's account takes with it (counted for them), and what stays", security: [{ SessionToken: [] }], parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }], responses: { '200': { description: 'OK: { goes, stays } lists of { label, count }' }, '403': { description: 'Deletes disabled' } } },
+    },
+    '/admin/business_memberships/{id}/delete-impact': {
+      get: { tags: ['Admin'], summary: "Whether deleting this membership leaves its business with no joined member (a 'warning' text when so)", security: [{ SessionToken: [] }], parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }], responses: { '200': { description: 'OK: { goes, stays, warning? }' }, '403': { description: 'Deletes disabled' } } },
+    },
+    '/admin/plans/{id}/delete-impact': {
+      get: { tags: ['Admin'], summary: "Whether this plan can be deleted (a 'warning' says why not: Free, or still used by subscriptions or invoices)", security: [{ SessionToken: [] }], parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }], responses: { '200': { description: 'OK: { goes, stays, warning? }' }, '403': { description: 'Deletes disabled' } } },
+    },
+    '/admin/subscriptions/{id}/delete-impact': {
+      get: { tags: ['Admin'], summary: 'What deleting this subscription does (the subscriber goes back to the Free plan), as a note', security: [{ SessionToken: [] }], parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }], responses: { '200': { description: 'OK: { goes, stays, note }' }, '403': { description: 'Deletes disabled' } } },
+    },
+    '/admin/delete-impact/{table}/{id}': {
+      get: { tags: ['Admin'], summary: 'What deleting a row does (a note, and counts of the rows that go with it) for tables where it matters', security: [{ SessionToken: [] }], parameters: [{ name: 'table', in: 'path', required: true, schema: { type: 'string' } }, { name: 'id', in: 'path', required: true, schema: { type: 'string' } }], responses: { '200': { description: 'OK: { goes, stays, note }' }, '404': { description: 'No note for this table' } } },
+    },
+    '/admin/lookup/{kind}': {
+      get: { tags: ['Admin'], summary: 'Search people, businesses, plans, incidents or API keys by name (for the Add row form)', security: [{ SessionToken: [] }], parameters: [{ name: 'kind', in: 'path', required: true, schema: { type: 'string', enum: ['users', 'businesses', 'plans', 'incidents', 'gateway_api_keys'] } }, { name: 'q', in: 'query', required: false, schema: { type: 'string' } }], responses: { '200': { description: 'OK: { items: [{ id, label, detail }] }, at most 20' }, '404': { description: 'Unknown kind' } } },
+    },
+    '/admin/businesses/{id}/delete-impact': {
+      get: { tags: ['Admin'], summary: 'What deleting this business takes with it (members, invitations, restricted API keys), counted for it', security: [{ SessionToken: [] }], parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }], responses: { '200': { description: 'OK: { goes, stays } lists of { label, count }' }, '403': { description: 'Deletes disabled' } } },
+    },
     '/functions/v1/analyze-business-setup': {
       post: { tags: ['Functions'], summary: 'OpenAI-backed business-idea classification (heuristic fallback without an API key)', responses: { '200': { description: 'OK' } } },
     },

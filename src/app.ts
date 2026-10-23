@@ -78,6 +78,13 @@ import {
   adminTablesHandler,
   adminTableRowsHandler,
   adminTableCreateRowHandler,
+  adminUserDeleteImpactHandler,
+  adminBusinessDeleteImpactHandler,
+  adminMembershipDeleteImpactHandler,
+  adminPlanDeleteImpactHandler,
+  adminSubscriptionDeleteImpactHandler,
+  adminDeleteNoteHandler,
+  adminLookupHandler,
   adminTableUpdateRowHandler,
   adminTableDeleteRowHandler,
 } from './routes/admin';
@@ -571,6 +578,13 @@ async function registerLegacyAndVersionedRoutes(instance: FastifyInstance) {
   instance.get('/admin/tables', adminTablesHandler);
   instance.get('/admin/tables/:table/rows', adminTableRowsHandler);
   instance.post('/admin/tables/:table/rows', adminTableCreateRowHandler);
+  instance.get('/admin/users/:id/delete-impact', adminUserDeleteImpactHandler);
+  instance.get('/admin/businesses/:id/delete-impact', adminBusinessDeleteImpactHandler);
+  instance.get('/admin/business_memberships/:id/delete-impact', adminMembershipDeleteImpactHandler);
+  instance.get('/admin/plans/:id/delete-impact', adminPlanDeleteImpactHandler);
+  instance.get('/admin/subscriptions/:id/delete-impact', adminSubscriptionDeleteImpactHandler);
+  instance.get('/admin/delete-impact/:table/:id', adminDeleteNoteHandler);
+  instance.get('/admin/lookup/:kind', adminLookupHandler);
   instance.patch('/admin/tables/:table/rows/:id', adminTableUpdateRowHandler);
   instance.delete('/admin/tables/:table/rows/:id', adminTableDeleteRowHandler);
 

@@ -915,3 +915,29 @@ table.admin-table th .col-filter { width: 100%; box-sizing: border-box; }
 .table-tabs .table-kind { margin-left: var(--sp-xs); font-size: .68rem; font-weight: 700; text-transform: uppercase; letter-spacing: .03em; opacity: .75; }
 .admin-view-note { margin: 0 0 var(--sp-md); padding: var(--sp-sm) var(--sp-md); border: 1px solid var(--line); border-radius: var(--r-md); background: var(--input-bg); color: var(--ink-soft); font-size: .85rem; }
 .admin-view-note strong { color: var(--ink); }
+.modal .delete-impact { margin: 0 0 var(--sp-sm); padding-left: var(--sp-xl); }
+/* Administration toolbar: "Add row" and "Columns" are the same button (same height, padding, icon, text) side by side, pushed to the right. */
+.admin-grid-actions { display: flex; align-items: center; justify-content: flex-end; gap: var(--sp-sm); margin-left: auto; }
+.admin-tool-btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: var(--sp-xs); box-sizing: border-box; height: 34px;
+  padding: 0 var(--sp-md); background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-md); color: var(--ink);
+  font-family: inherit; font-size: .85rem; font-weight: 600; line-height: 1; white-space: nowrap; cursor: pointer;
+}
+.admin-tool-btn:hover:not(:disabled) { border-color: var(--line-strong); }
+.admin-tool-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.admin-tool-btn:disabled { opacity: .35; cursor: not-allowed; }
+.admin-tool-btn svg { flex-shrink: 0; }
+
+/* Add row: a row at the top of the grid. Boxes to fill in, the system's own values shown muted, everything else blank. */
+tr.admin-new-row td { background: color-mix(in srgb, var(--accent) 9%, transparent); border-bottom: 1px solid var(--accent); vertical-align: middle; position: relative; }
+tr.admin-new-row-msg td { background: color-mix(in srgb, var(--accent) 5%, transparent); padding: var(--sp-xs) var(--sp-sm); }
+tr.admin-new-row-msg .error-text { margin: 0; }
+.admin-cell-input.invalid { border-color: var(--danger, #ef4444); }
+.new-row-auto { display: block; padding: 4px 6px; color: var(--ink-faint); font-style: italic; font-size: .82rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.new-row-blank { display: block; min-height: 1.2em; }
+.new-row-chosen { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-xs); padding: 0 0 0 6px; font-size: .82rem; }
+.lookup-results { display: none; position: absolute; left: 0; right: 0; top: 100%; z-index: 20; flex-direction: column; max-height: 180px; min-width: 220px; overflow-y: auto; background: var(--surface-2); border: 1px solid var(--line-strong); border-radius: var(--r-sm); box-shadow: 0 6px 18px rgba(0, 0, 0, .35); }
+.lookup-results.open { display: flex; }
+.lookup-result { display: flex; justify-content: space-between; gap: var(--sp-md); text-align: left; padding: var(--sp-xs) var(--sp-sm); border: 0; background: transparent; color: inherit; cursor: pointer; font: inherit; font-size: .82rem; }
+.lookup-result:hover { background: var(--input-bg); }
+.admin-grid-scroll.adding { min-height: 260px; }

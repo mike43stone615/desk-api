@@ -145,7 +145,7 @@ export class PgDatabaseAdapter implements DatabaseRepository {
     expiresAt: string,
   ): Promise<void> {
     await this.pool.query(
-      `INSERT INTO email_tokens (id, purpose, user_id, token, expires_at) VALUES ($1, 'password_reset', $2, $3, $4)`,
+      `INSERT INTO email_tokens (id, purpose, user_id, token, expires_at, sent_to) VALUES ($1, 'password_reset', $2, $3, $4, (SELECT email FROM users WHERE id = $2))`,
       [id, userId, hashToken(token), expiresAt],
     );
   }
@@ -196,7 +196,7 @@ export class PgDatabaseAdapter implements DatabaseRepository {
       [userId],
     );
     await this.pool.query(
-      `INSERT INTO email_tokens (id, purpose, user_id, token, expires_at) VALUES ($1, 'email_confirmation', $2, $3, $4)`,
+      `INSERT INTO email_tokens (id, purpose, user_id, token, expires_at, sent_to) VALUES ($1, 'email_confirmation', $2, $3, $4, (SELECT email FROM users WHERE id = $2))`,
       [id, userId, hashToken(token), expiresAt],
     );
   }
