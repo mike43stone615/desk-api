@@ -167,8 +167,8 @@ const keyLabelOf = (column: string): string => `(SELECT k.label FROM gateway_api
 const endpointUrlOf = (column: string): string => `(SELECT e.url FROM webhook_endpoints e WHERE e.id = ${column})`;
 const clientNameOf = (column: string): string => `(SELECT c.name FROM oauth_clients c WHERE c.id = ${column})`;
 const incidentTitleOf = (column: string): string => `(SELECT i.title FROM incidents i WHERE i.id = ${column})`;
-/** The name of whoever a billing row is for: a person, or a team. */
-const subscriberNameOf = `CASE subject_type WHEN 'user' THEN ${personNameOf('subject_id')} WHEN 'team' THEN (SELECT t.name FROM teams t WHERE t.id = subject_id) END`;
+/** The name of whoever a billing row is for: a person (teams were removed in migration 0037, so there is no other kind). */
+const subscriberNameOf = `CASE subject_type WHEN 'user' THEN ${personNameOf('subject_id')} END`;
 
 const TABLES = {
   users: {
@@ -464,7 +464,7 @@ const TABLES = {
   plans: {
     primaryKey: 'id',
     columns: ['id', 'name', 'monthly_price_cents', 'included_analyses', 'overage_cents_per_analysis', 'max_keys', 'max_webhooks', 'max_apps', 'service_per_minute', 'service_per_month', 'total_per_minute', 'total_per_month', 'overage_cents_per_call', 'active', 'sort_order', 'subscribers'],
-    // subscribers is worked out (people and teams on the plan whose subscription is not canceled), for reading only.
+    // subscribers is worked out (people on the plan whose subscription is not canceled), for reading only.
     computed: { subscribers: `(SELECT COUNT(*)::int FROM subscriptions s WHERE s.plan_id = plans.id AND s.status <> 'canceled')` },
     locked: ['subscribers'],
     editable: ['name', 'monthly_price_cents', 'included_analyses', 'overage_cents_per_analysis', 'max_keys', 'max_webhooks', 'max_apps', 'service_per_minute', 'service_per_month', 'total_per_minute', 'total_per_month', 'overage_cents_per_call', 'active', 'sort_order'],

@@ -1495,3 +1495,25 @@ describe('Delete notes for Registry and Market tables come from those services',
     }
   });
 });
+
+describe('Billing tables do not look up the dropped teams table', () => {
+  it('listing Subscriptions, Invoices, Usage meter and Plans never mentions teams (migration 0037 dropped the table)', async () => {
+    const q = fakeDb.query as unknown as { getMockImplementation: () => (sql: string, params?: unknown[]) => Promise<unknown>; mockImplementation: (fn: unknown) => void };
+    const original = q.getMockImplementation();
+    const seen: string[] = [];
+    q.mockImplementation(async (sql: string, params?: unknown[]) => {
+      seen.push(String(sql));
+      return original(sql, params);
+    });
+    try {
+      for (const table of ['subscriptions', 'invoices', 'usage_meter', 'plans']) {
+        await app.inject({ method: 'GET', url: `/admin/tables/desk.${table}/rows`, headers: adminHeaders }); // the fake database may not answer every query; what matters is the SQL that was sent
+      }
+    } finally {
+      q.mockImplementation(original);
+    }
+    const selects = seen.filter((s) => /FROM "(subscriptions|invoices|usage_meter|plans)"/.test(s) && s.includes('SELECT'));
+    expect(selects.length).toBeGreaterThanOrEqual(4);
+    for (const s of selects) expect(s, s).not.toMatch(/\bteams\b/);
+  });
+});
