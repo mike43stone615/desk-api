@@ -1852,7 +1852,7 @@ const USER_DELETE_IMPACT: Array<{ label: string; sql: string; goes: boolean }> =
   { label: 'a suspension record', sql: 'SELECT COUNT(*) AS n FROM account_suspensions WHERE user_id = $1', goes: true },
   { label: 'subscription records (their plan history)', sql: "SELECT COUNT(*) AS n FROM subscriptions WHERE subject_type = 'user' AND subject_id = $1", goes: false },
   { label: 'invoices', sql: "SELECT COUNT(*) AS n FROM invoices WHERE subject_type = 'user' AND subject_id = $1", goes: false },
-  { label: 'security events (kept, no longer linked to a person)', sql: 'SELECT COUNT(*) AS n FROM security_events WHERE user_id = $1', goes: false },
+  { label: 'security events (their network addresses and browsers)', sql: 'SELECT COUNT(*) AS n FROM security_events WHERE user_id = $1', goes: true },
 ];
 
 /** The same for a business: its people and invitations go with it, and so do API keys limited to it (migration 0027). */
@@ -1959,7 +1959,11 @@ export async function adminTableDeleteRowHandler(request: FastifyRequest, reply:
   const before = beforeResult.rows[0] ?? null;
 
   // Deleting a person deletes their API keys with them; end those keys (and their backend keys) first. The same for one key.
-  if (tableName === 'users' && before) await gatewayApiKeys.revokeAllForOwner(id);
+  if (tableName === 'users' && before) {
+    await gatewayApiKeys.revokeAllForOwner(id);
+    // Their stored security events hold network addresses and browser details: they go with the account, as in self-service deletion.
+    await pool.query('DELETE FROM security_events WHERE user_id = $1', [id]);
+  }
   if (tableName === 'gateway_api_keys' && before) await gatewayApiKeys.revoke(String(before.owner_user_id), id).catch(() => undefined);
 
   try {
