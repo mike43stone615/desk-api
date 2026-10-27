@@ -219,9 +219,52 @@ function Invoke-CounterCheck($check, $st) {
 }
 
 function Invoke-ProcessCheck($proc) {
+  # This watch runs without administrator rights, and Windows hides the command line of a process started by an
+  # administrator (for example the tunnel started by the elevated "Desk Watchdog Boot" task, or by hand from an admin
+  # window): CommandLine comes back empty. Such a process is counted as a match -- the name alone is the best this
+  # account can see. Without this, a running tunnel was reported "not running" (found 2026-10-26).
   $found = Get-CimInstance Win32_Process -Filter ("name = '{0}'" -f $proc.processName) -ErrorAction SilentlyContinue |
-    Where-Object { -not $proc.commandLineLike -or $_.CommandLine -like ('*' + $proc.commandLineLike + '*') }
+    Where-Object { -not $proc.commandLineLike -or -not $_.CommandLine -or $_.CommandLine -like ('*' + $proc.commandLineLike + '*') }
   if (-not $found) { return "$($proc.processName) is not running" }
+  return $null
+}
+
+# Local restart for a process check that names a "restartCommand": runs it (hidden) once the process has been missing
+# for "restartAfterFailures" checks in a row, at most once per "restartCooldownMinutes". Used for the Cloudflare tunnel:
+# the elevated watchdog loop is the first line, but on 2026-10-26 the tunnel stayed down for hours without it restarting
+# anything, so this every-2-minutes task is a second, independent one.
+function Start-LocalRestart($proc, $st) {
+  $cooldown = if ($proc.restartCooldownMinutes) { [double]$proc.restartCooldownMinutes } else { 5 }
+  if ($st.lastAt -and (((Get-Date) - [datetime]$st.lastAt).TotalMinutes -lt $cooldown)) { return }
+  try {
+    Start-Process -FilePath 'cmd.exe' -ArgumentList @('/c', "`"$($proc.restartCommand)`"") -WindowStyle Hidden
+    $st.lastAt = (Get-Date).ToString('o')
+    Send-Alert "RESTARTED: $($proc.name)" "$($proc.what) was not running for $($st.failures) checks in a row, so it was started again."
+  } catch { Write-Log "restart of $($proc.name) failed: $($_.Exception.Message)" }
+}
+
+# Known security advisories in each service's dependencies, at the same level the deploy workflows refuse
+# ("npm audit --audit-level=high"). An advisory published after a service was deployed does not affect the running
+# service, but it blocks that service's next deploy -- including the automatic recovery deploy after a restart, which
+# is what kept all three backends down for hours on 2026-10-26. Checking here (every few hours, see "everyMinutes")
+# raises it while everything is still up, so it can be fixed before a restart needs a deploy.
+function Invoke-AuditCheck($check) {
+  $levels = @{ low = 1; moderate = 2; high = 3; critical = 4 }
+  $min = $levels[$(if ($check.level) { $check.level } else { 'high' })]
+  $problems = @()
+  foreach ($repo in $check.repos) {
+    $name = Split-Path $repo -Leaf
+    if (-not (Test-Path (Join-Path $repo 'package-lock.json'))) { $problems += "${name}: no package-lock.json"; continue }
+    Push-Location $repo
+    # Through cmd.exe so npm's stderr is discarded there: in Windows PowerShell, a native command's stderr redirected
+    # here would become an error record, which this script's ErrorActionPreference=Stop turns into a crash.
+    try { $json = (& cmd.exe /c 'npm audit --json 2>nul' | Out-String) } finally { Pop-Location }
+    try { $report = $json | ConvertFrom-Json } catch { $problems += "${name}: npm audit did not run"; continue }
+    if (-not $report.vulnerabilities) { if ($report.error) { $problems += "${name}: npm audit did not run" }; continue }
+    $bad = @($report.vulnerabilities.PSObject.Properties | Where-Object { $levels[$_.Value.severity] -ge $min } | ForEach-Object { $_.Name })
+    if ($bad.Count -gt 0) { $problems += ('{0}: {1} ({2})' -f $name, $bad.Count, (($bad | Select-Object -First 4) -join ', ')) }
+  }
+  if ($problems.Count -gt 0) { return ('advisories that block deploys -- run "npm audit fix" there: ' + ($problems -join '; ')) }
   return $null
 }
 
@@ -281,11 +324,12 @@ foreach ($c in $targets.checks) {
   $runner = switch ($kind) {
     'freshness' { { param($st) Invoke-FreshnessCheck $c }.GetNewClosure() }
     'counter'   { { param($st) Invoke-CounterCheck $c $st }.GetNewClosure() }
+    'audit'     { { param($st) Invoke-AuditCheck $c }.GetNewClosure() }
     default     { { param($st) Invoke-UrlCheck $c }.GetNewClosure() }
   }
   $all += [pscustomobject]@{ name = $c.name; what = $c.what; run = $runner; every = $c.everyMinutes; need = $c.failuresBeforeAlert }
 }
-foreach ($pr in $targets.processes) { $all += [pscustomobject]@{ name = $pr.name; what = $pr.what; run = { param($st) Invoke-ProcessCheck $pr }.GetNewClosure() } }
+foreach ($pr in $targets.processes) { $all += [pscustomobject]@{ name = $pr.name; what = $pr.what; run = { param($st) Invoke-ProcessCheck $pr }.GetNewClosure(); restart = $(if ($pr.restartCommand) { $pr } else { $null }) } }
 if ($targets.disk) { $all += [pscustomobject]@{ name = 'disk-space'; what = $targets.disk.what; run = { param($st) Invoke-DiskCheck $targets.disk }.GetNewClosure() } }
 if ($targets.memory) { $all += [pscustomobject]@{ name = 'memory'; what = $targets.memory.what; run = { param($st) Invoke-MemoryCheck $targets.memory }.GetNewClosure(); need = $targets.memory.failuresBeforeAlert } }
 if ($targets.offhostBackups) { $all += [pscustomobject]@{ name = 'offhost-backups-encrypted'; what = $targets.offhostBackups.what; run = { param($st) Invoke-OffhostBackupCheck $targets.offhostBackups }.GetNewClosure() } }
@@ -313,6 +357,9 @@ foreach ($check in $all) {
     }
     if ($targets.recovery -and (@($targets.recovery.checks) -contains $check.name) -and $st.failures -ge [int]$targets.recovery.afterFailures) {
       Start-Recovery $targets.recovery $check.name $state
+    }
+    if ($check.restart -and $st.failures -ge $(if ($check.restart.restartAfterFailures) { [int]$check.restart.restartAfterFailures } else { 2 })) {
+      Start-LocalRestart $check.restart $st
     }
   } else {
     if ($st.alerted) { Send-Alert "RECOVERED: $($check.name)" "$($check.what) is answering again." }

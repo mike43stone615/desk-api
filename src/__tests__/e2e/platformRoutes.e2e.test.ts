@@ -283,9 +283,11 @@ describe.skipIf(!hasDb)('E2E: status, changelog, billing, GraphQL and webhook re
       await pool.query(`UPDATE plans SET monthly_price_cents = $1, max_keys = $2, overage_cents_per_call = $3 WHERE id = 'developer'`, [before.monthly_price_cents, before.max_keys, before.overage_cents_per_call]);
     }
     expect((await pool.query(`SELECT COUNT(*)::int n FROM mutation_audit_log WHERE user_email = $1 AND action = 'admin_table.update' AND entity_id = 'developer'`, [helper.email])).rows[0].n).toBeGreaterThanOrEqual(1);
-    // some tables cannot be deleted from here
+    // administrators may delete plans now (docs/admin-column-review.md, plans), but never the Free plan: refused with why
     const del = await app.inject({ method: 'DELETE', url: '/v1/admin/tables/desk.plans/rows/free', headers: { ...helper.headers, 'cf-connecting-ip': '203.0.113.9' } });
-    expect(del.statusCode).toBe(403);
+    expect(del.statusCode, del.body).toBe(409);
+    expect(del.json().error).toContain('Free plan cannot be deleted');
+    expect((await pool.query(`SELECT 1 FROM plans WHERE id = 'free'`)).rowCount).toBe(1);
 
     // removal is immediate
     expect((await call('DELETE', `/v1/admin/access/${helper.id}`, owner)).statusCode).toBe(204);
@@ -324,7 +326,7 @@ describe.skipIf(!hasDb)('E2E: status, changelog, billing, GraphQL and webhook re
       await pool.query('DELETE FROM platform_admins WHERE user_id = ANY($1)', [[deputy.id, junior.id]]);
     }
   });
-  it('owners edit every column (usage counts back to 0 included); listed administrators keep the short lists', async () => {
+  it('owners and administrators reset usage counts (back to 0 included); key and system columns stay locked', async () => {
     const owner = await mkOwner();
     const helper = await mkUser('own-helper');
     const subject = await mkUser('own-subject');
@@ -343,11 +345,12 @@ describe.skipIf(!hasDb)('E2E: status, changelog, billing, GraphQL and webhook re
       expect(meter.primaryKey).toBe('_rowKey');
       expect(meter.editableColumns).toContain('quantity');
       expect(meter.rows).toHaveLength(2);
-      expect((await rowsOf(helper, 'desk.usage_meter', 'subject_id', subject.id)).editableColumns).toEqual([]);
+      // since the October 2026 column review, administrators edit the count too, but only the count (the key columns are locked)
+      expect((await rowsOf(helper, 'desk.usage_meter', 'subject_id', subject.id)).editableColumns).toEqual(['quantity']);
       const thisMonth = meter.rows.find((r: { month: string }) => r.month === month);
+      expect((await patch(helper, 'desk.usage_meter', thisMonth._rowKey, { month: '2019-11' })).statusCode).toBe(400);
 
-      // an administrator cannot reset usage; an owner can, and only the one row changes
-      expect((await patch(helper, 'desk.usage_meter', thisMonth._rowKey, { quantity: 0 })).statusCode).toBe(400);
+      // resetting usage changes only the one row
       const reset = await patch(owner, 'desk.usage_meter', thisMonth._rowKey, { quantity: '0' });
       expect(reset.statusCode, reset.body).toBe(200);
       expect(reset.json().row).toMatchObject({ quantity: 0, month, _rowKey: thisMonth._rowKey });
@@ -365,17 +368,16 @@ describe.skipIf(!hasDb)('E2E: status, changelog, billing, GraphQL and webhook re
       expect(callsReset.statusCode, callsReset.body).toBe(200);
       expect((await pool.query(`SELECT calls FROM api_usage WHERE user_id = $1`, [subject.id])).rows[0].calls).toBe(0);
 
-      // a key column can change; the answer carries the row's new key
-      const moved = await patch(owner, 'desk.usage_meter', thisMonth._rowKey, { month: '2019-12' });
-      expect(moved.statusCode, moved.body).toBe(200);
-      expect(moved.json().row._rowKey).not.toBe(thisMonth._rowKey);
-      expect((await patch(owner, 'desk.usage_meter', thisMonth._rowKey, { quantity: 1 })).statusCode).toBe(404); // the old key finds nothing
+      // the key columns are locked for owners too since the October 2026 column review (only the count is editable):
+      // a different month is a different row, added with Add row, never this row moved
+      expect((await patch(owner, 'desk.usage_meter', thisMonth._rowKey, { month: '2019-12' })).statusCode).toBe(400);
+      expect((await patch(owner, 'desk.usage_meter', thisMonth._rowKey, { subject_type: 'robot' })).statusCode).toBe(400);
+      expect((await pool.query(`SELECT month FROM usage_meter WHERE subject_id = $1 ORDER BY month`, [subject.id])).rows.map((r) => r.month)).toEqual(['2020-01', month]);
 
-      // values are checked against the column's type and the table's rules, in plain words
-      const bad = await patch(owner, 'desk.usage_meter', moved.json().row._rowKey, { quantity: 'lots' });
+      // values are checked against the column's type, in plain words
+      const bad = await patch(owner, 'desk.usage_meter', thisMonth._rowKey, { quantity: 'lots' });
       expect(bad.statusCode).toBe(400);
-      expect(bad.json().detail).toBe('quantity needs a whole number.');
-      expect((await patch(owner, 'desk.usage_meter', moved.json().row._rowKey, { subject_type: 'robot' })).statusCode).toBe(400); // CHECK rule
+      expect(bad.json().detail).toMatch(/^quantity must be a whole number from 0/);
       expect((await patch(owner, 'desk.usage_meter', 'not-a-key', { quantity: 0 })).statusCode).toBe(404);
 
       // owners never edit a locked column (filled in by the system) or a single id column

@@ -1,6 +1,20 @@
 {
   "checks": [
     {
+      "name": "dependency-advisories",
+      "kind": "audit",
+      "what": "a high or critical security advisory in a service's dependencies (it will block that service's next deploy, including the automatic recovery deploy after a restart)",
+      "repos": [
+        "C:\\Users\\User\\desk-api",
+        "C:\\Users\\User\\registry-api",
+        "C:\\Users\\User\\market-validation-api",
+        "C:\\Users\\User\\desk-oracle"
+      ],
+      "level": "high",
+      "everyMinutes": 360,
+      "failuresBeforeAlert": 1
+    },
+    {
       "name": "api-public-ready",
       "what": "the public API, through Cloudflare and the tunnel",
       "url": "https://api.deskbusiness.co/health/ready",
@@ -283,7 +297,10 @@
       "name": "cloudflare-tunnel",
       "what": "the Cloudflare tunnel that carries all public traffic to this machine (a watchdog restarts it every 5 minutes if it dies)",
       "processName": "cloudflared.exe",
-      "commandLineLike": "tunnel"
+      "commandLineLike": "tunnel",
+      "restartCommand": "C:\\Users\\User\\.cloudflared\\run-tunnel.cmd",
+      "restartAfterFailures": 2,
+      "restartCooldownMinutes": 5
     }
   ],
   "disk": {
@@ -311,9 +328,13 @@
   "recovery": {
     "checks": [
       "desk-api",
+      "registry-api",
+      "market-validation-api",
       "desk-oracle"
     ],
     "repos": {
+      "registry-api": "mike43stone615/registry-api",
+      "market-validation-api": "mike43stone615/market-validation-api",
       "desk-oracle": "mike43stone615/desk-oracle"
     },
     "afterFailures": 3,
