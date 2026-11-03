@@ -682,7 +682,6 @@ registerRoute('/developer', async (app) => {
         <div class="page-head-row">
           <div class="head-text">
             <h1>API Library</h1>
-            <p>Create keys and choose which APIs each one can call.</p>
           </div>
         </div>
         ${tabsHtml('/developer')}

@@ -351,7 +351,7 @@ registerRoute('/developer/webhooks', async (app) => {
     const eventsEp = s.eventsFor ? findEndpoint(s.eventsFor) : null;
     app.innerHTML = `
       <div class="page">
-        <div class="page-head-row"><div class="head-text"><h1>API Library</h1><p>Get a signed message on your server when something happens.</p></div></div>
+        <div class="page-head-row"><div class="head-text"><h1>API Library</h1></div></div>
         ${tabsHtml('/developer/webhooks')}
         ${body}
       </div>

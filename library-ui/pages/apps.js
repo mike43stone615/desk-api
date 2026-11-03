@@ -368,7 +368,7 @@ registerRoute('/developer/apps', async (app) => {
     const detail = s.detailFor ? findClient(s.detailFor) : null;
     app.innerHTML = `
       <div class="page">
-        <div class="page-head-row"><div class="head-text"><h1>API Library</h1><p>Sign in with Desk for your own apps, and control which apps can see your account.</p></div></div>
+        <div class="page-head-row"><div class="head-text"><h1>API Library</h1></div></div>
         ${tabsHtml('/developer/apps')}
         ${body}
       </div>

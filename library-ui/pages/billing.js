@@ -205,7 +205,7 @@ registerRoute('/developer/billing', async (app) => {
     }
     app.innerHTML = `
       <div class="page">
-        <div class="page-head-row"><div class="head-text"><h1>API Library</h1><p>Plans, usage and invoices.</p></div></div>
+        <div class="page-head-row"><div class="head-text"><h1>API Library</h1></div></div>
         ${tabsHtml('/developer/billing')}
         ${body}
       </div>
